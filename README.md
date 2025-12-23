@@ -44,36 +44,39 @@ curl -X POST http://localhost:8080/file -H "Content-Type: application/json" -d '
 
 Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/) to flash Raspberry Pi OS 64-bit. Enable SSH and set username to `pi`.
 
-### 2. Run setup script on Pi
+### 2. Run setup script
+
+SSH into the Pi and run the setup script directly:
 
 ```bash
-scp setup-kiosk.sh pi@<IP>:/home/pi/
-ssh pi@<IP> "chmod +x setup-kiosk.sh && ./setup-kiosk.sh"
+ssh pi@<IP>
+curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh | bash
 ```
 
-This installs Node.js, Chromium, cage (Wayland compositor), and configures auto-start.
-
-### 3. Copy files to Pi
+Or download and run manually:
 
 ```bash
-scp server.js run_kiosk.sh kiosk-server.sh pi@<IP>:/home/pi/
-scp -r public media pi@<IP>:/home/pi/
-ssh pi@<IP> "chmod +x run_kiosk.sh kiosk-server.sh"
+ssh pi@<IP>
+wget https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh
+chmod +x setup-kiosk.sh && ./setup-kiosk.sh
 ```
 
-### 4. Add your videos
+The setup script will:
+- Clone the repository from GitHub
+- Install Node.js, Chromium, and cage (Wayland compositor)
+- Set environment variables (`NODE_ENV=production`, etc.)
+- Create and enable the systemd service
+- Configure auto-start on boot
+- Disable screen blanking
+- Prompt to reboot
+
+### 3. Add your videos
 
 ```bash
-scp your-video.mp4 pi@<IP>:/home/pi/media/
+scp your-video.mp4 pi@<IP>:/home/pi/chiba/media/
 ```
 
-### 5. Reboot
-
-```bash
-ssh pi@<IP> "sudo reboot"
-```
-
-The kiosk will auto-start on boot.
+The kiosk will auto-start on boot after setup completes.
 
 ## Running Modes
 

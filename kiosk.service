@@ -1,12 +1,15 @@
 [Unit]
-Description=Kiosk Signage Server
+Description=Kiosk Digital Signage
 After=network.target
+Wants=network-online.target
 
 [Service]
 User=pi
 Group=pi
 PAMName=login
 Type=simple
+
+# TTY settings for cage/Wayland
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
@@ -14,11 +17,18 @@ TTYVTDisallocate=yes
 StandardInput=tty-fail
 StandardOutput=journal
 StandardError=journal
+
+# Environment
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=WLR_LIBINPUT_NO_DEVICES=1
+Environment=WLR_NO_HARDWARE_CURSORS=1
 Environment=NODE_ENV=production
-WorkingDirectory=/home/pi
-ExecStart=/home/pi/run_kiosk.sh
+
+# Working directory and startup
+WorkingDirectory=/home/pi/chiba
+ExecStart=/home/pi/chiba/run_kiosk.sh
+
+# Restart policy
 Restart=on-failure
 RestartSec=5
 
