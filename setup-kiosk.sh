@@ -136,57 +136,34 @@ sudo systemctl set-default multi-user.target
 sudo systemctl disable lightdm 2>/dev/null || true
 sudo systemctl disable gdm3 2>/dev/null || true
 
-echo "=== Creating kiosk systemd service ==="
-sudo tee /etc/systemd/system/kiosk.service > /dev/null << EOF
-[Unit]
-Description=Kiosk Digital Signage
-After=network.target
-Wants=network-online.target
-
-[Service]
-User=pi
-Group=pi
-PAMName=login
-Type=simple
-
-# TTY settings for cage/Wayland
-TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
-StandardInput=tty-fail
-StandardOutput=journal
-StandardError=journal
-
-# Environment
-Environment=XDG_RUNTIME_DIR=/run/user/1000
-Environment=WLR_LIBINPUT_NO_DEVICES=1
-Environment=WLR_NO_HARDWARE_CURSORS=1
-Environment=NODE_ENV=production
-
-# Working directory and startup
-WorkingDirectory=$INSTALL_DIR/chiba
-ExecStart=$INSTALL_DIR/chiba/run_kiosk.sh
-
-# Restart policy
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-echo "=== Stopping old services if running ==="
+echo "=== Removing old systemd kiosk service ==="
 sudo systemctl stop kiosk 2>/dev/null || true
 sudo systemctl disable kiosk 2>/dev/null || true
+sudo rm -f /etc/systemd/system/kiosk.service
 
-echo "=== Enabling services ==="
+echo "=== Enabling screen blanking service ==="
 sudo systemctl daemon-reload
 sudo systemctl enable disable-blanking
-sudo systemctl enable kiosk
 
-echo "=== Starting kiosk service ==="
-sudo systemctl start kiosk
+echo "=== Setting up auto-start on login ==="
+# The kiosk starts via .bash_profile when pi user logs in on TTY1
+# This works with the console autologin we configured earlier
+
+# Remove old entries if they exist
+sed -i '/# Kiosk auto-start/d' ~/.bash_profile 2>/dev/null || true
+sed -i '/run_kiosk.sh/d' ~/.bash_profile 2>/dev/null || true
+
+# Add kiosk auto-start to .bash_profile
+cat >> ~/.bash_profile << 'EOF'
+
+# Kiosk auto-start (only on TTY1 with display)
+if [ "$(tty)" = "/dev/tty1" ]; then
+    cd ~/chiba && ./run_kiosk.sh
+fi
+EOF
+
+echo "  Added kiosk auto-start to ~/.bash_profile"
+echo "  Kiosk will start automatically when pi user logs in on TTY1"
 
 echo "=== Verifying installation ==="
 echo ""
@@ -197,29 +174,13 @@ echo "Checking installed files..."
 [ -d "$INSTALL_DIR/chiba/node_modules/ws" ] && echo "  ✓ node_modules/ws" || echo "  ✗ node_modules/ws MISSING"
 
 echo ""
-echo "Checking services..."
-systemctl is-enabled kiosk &>/dev/null && echo "  ✓ kiosk service enabled" || echo "  ✗ kiosk service NOT enabled"
-systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ disable-blanking service enabled" || echo "  ✗ disable-blanking service NOT enabled"
+echo "Checking configuration..."
+systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ screen blanking disabled" || echo "  ✗ screen blanking service NOT enabled"
+grep -q "run_kiosk.sh" ~/.bash_profile && echo "  ✓ kiosk auto-start configured" || echo "  ✗ kiosk auto-start NOT configured"
 
 echo ""
-echo "Checking service status..."
-sleep 3  # Give service time to start
-if systemctl is-active kiosk &>/dev/null; then
-    echo "  ✓ kiosk service is running"
-
-    # Check if server is responding
-    sleep 2
-    if curl -s http://localhost:8080/status &>/dev/null; then
-        echo "  ✓ server responding on port 8080"
-    else
-        echo "  ⚠ server not responding yet (may need a moment)"
-    fi
-else
-    echo "  ⚠ kiosk service not running (normal if no display connected via SSH)"
-    echo ""
-    echo "  The service will start automatically on reboot with a display."
-    echo "  To test the server manually: cd ~/chiba && node server.js"
-fi
+echo "Note: The kiosk starts on boot via autologin to TTY1."
+echo "      To test now: cd ~/chiba && node server.js"
 
 PI_IP=$(hostname -I | awk '{print $1}')
 
@@ -228,19 +189,12 @@ echo "==========================================="
 echo "  Setup Complete!"
 echo "==========================================="
 echo ""
-echo "The kiosk will auto-start on boot with a display connected."
+echo "The kiosk will auto-start on boot when a display is connected."
 echo ""
 echo "Add videos:"
 echo "  scp your-video.mp4 pi@$PI_IP:/home/pi/chiba/media/"
 echo ""
-echo "Service management:"
-echo "  sudo systemctl start kiosk"
-echo "  sudo systemctl stop kiosk"
-echo "  sudo systemctl restart kiosk"
-echo "  sudo systemctl status kiosk"
-echo "  journalctl -u kiosk -f"
-echo ""
-echo "API:"
+echo "API (after reboot):"
 echo "  curl http://$PI_IP:8080/status"
 echo "  curl http://$PI_IP:8080/files"
 echo "  curl -X POST http://$PI_IP:8080/file -H 'Content-Type: application/json' -d '{\"file\":\"example.mp4\"}'"
@@ -248,11 +202,14 @@ echo "  curl -X POST http://$PI_IP:8080/off"
 echo ""
 echo "Player: http://$PI_IP:8080/player"
 echo ""
+echo "To stop kiosk: Switch to TTY2 with Ctrl+Alt+F2, login, then: pkill -f run_kiosk"
+echo "To restart:    sudo reboot"
+echo ""
 
-read -p "Reboot now? (Y/n) " -n 1 -r
+read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Nn]$ ]]; then
-    echo "Remember to reboot for all changes to take effect."
+    echo "Reboot when ready: sudo reboot"
 else
     sudo reboot
 fi

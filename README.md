@@ -65,8 +65,7 @@ The setup script will:
 - Clone the repository from GitHub
 - Install Node.js, Chromium, and cage (Wayland compositor)
 - Set environment variables (`NODE_ENV=production`, etc.)
-- Create and enable the systemd service
-- Configure auto-start on boot
+- Configure auto-start on boot (via autologin to TTY1)
 - Disable screen blanking
 - Prompt to reboot
 
@@ -173,7 +172,6 @@ project/
 ├── server.js           # Node.js server (HTTP + WebSocket)
 ├── run_kiosk.sh        # Full kiosk mode (server + Chromium)
 ├── kiosk-server.sh     # Server-only mode
-├── kiosk.service       # Systemd service file
 ├── setup-kiosk.sh      # Pi setup script
 ├── kiosk-client.sh     # API test script
 ├── package.json
@@ -212,22 +210,22 @@ const mimeTypes = {
 };
 ```
 
-## Service Management (Pi)
+## Kiosk Management (Pi)
+
+The kiosk auto-starts on boot via autologin to TTY1.
 
 ```bash
-# Start/stop/restart
-sudo systemctl start kiosk
-sudo systemctl stop kiosk
-sudo systemctl restart kiosk
+# Stop kiosk (from SSH or TTY2)
+pkill -f run_kiosk
 
-# Check status
-sudo systemctl status kiosk
+# Restart kiosk
+sudo reboot
 
-# View logs
-journalctl -u kiosk -f
+# Test server manually (via SSH)
+cd ~/chiba && node server.js
 
 # Disable auto-start
-sudo systemctl disable kiosk
+sed -i '/run_kiosk.sh/d' ~/.bash_profile
 ```
 
 ## Troubleshooting
@@ -235,20 +233,23 @@ sudo systemctl disable kiosk
 ### Server not responding
 
 ```bash
-sudo systemctl status kiosk
-journalctl -u kiosk -e
+# Check if processes are running
+ps aux | grep -E "node|chromium"
+
+# Test server manually
+cd ~/chiba && node server.js
 ```
 
 ### Screen stays blank
 
-1. Check logs: `journalctl -u kiosk -e`
-2. Verify Node.js: `node --version`
-3. Test manually: `./run_kiosk.sh`
+1. Verify Node.js: `node --version`
+2. Test manually: `cd ~/chiba && ./run_kiosk.sh`
+3. Check display: ensure HDMI is connected before boot
 
 ### Video not playing
 
-- Ensure video is in `/home/pi/media/`
-- Check permissions: `ls -la /home/pi/media/`
+- Ensure video is in `/home/pi/chiba/media/`
+- Check permissions: `ls -la /home/pi/chiba/media/`
 - Supported formats: mp4, webm, mov, mkv
 
 ### WebSocket not connecting
