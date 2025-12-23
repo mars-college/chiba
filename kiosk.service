@@ -1,0 +1,26 @@
+[Unit]
+Description=Kiosk Signage Server
+After=network.target
+
+[Service]
+User=pi
+Group=pi
+PAMName=login
+Type=simple
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WLR_LIBINPUT_NO_DEVICES=1
+Environment=NODE_ENV=production
+WorkingDirectory=/home/pi
+ExecStart=/home/pi/run_kiosk.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
