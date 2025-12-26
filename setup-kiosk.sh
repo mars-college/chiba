@@ -5,13 +5,13 @@
 # Usage:
 #   curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh | bash -s -- \
 #     --ngrok-token YOUR_NGROK_TOKEN \
-#     --ngrok-domain pi01.ngrok-free.app \
+#     --ngrok-domain your-domain.ngrok-free.app \
 #     --eden-key YOUR_EDEN_API_KEY
 #
 # Or download and run:
 #   wget https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh
 #   chmod +x setup-kiosk.sh
-#   ./setup-kiosk.sh --ngrok-token XXX --ngrok-domain pi01.ngrok-free.app --eden-key YYY
+#   ./setup-kiosk.sh --ngrok-token XXX --ngrok-domain XXX --eden-key YYY
 
 set -e
 
@@ -97,12 +97,23 @@ sudo apt install -y \
     chromium \
     nodejs \
     npm \
-    curl
+    curl \
+    wget
 
-echo "=== Installing ngrok ==="
-curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
-sudo apt update && sudo apt install -y ngrok
+echo "=== Installing ngrok (arm64) ==="
+# Download ngrok directly for arm64
+NGROK_VERSION="v3"
+wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-${NGROK_VERSION}-stable-linux-arm64.tgz -O /tmp/ngrok.tgz
+sudo tar -xzf /tmp/ngrok.tgz -C /usr/local/bin
+sudo chmod +x /usr/local/bin/ngrok
+rm /tmp/ngrok.tgz
+
+# Verify ngrok installed
+if ! command -v ngrok &>/dev/null; then
+    echo "Error: ngrok installation failed"
+    exit 1
+fi
+echo "ngrok installed: $(ngrok version)"
 
 # Configure ngrok
 ngrok config add-authtoken "$NGROK_AUTHTOKEN"
@@ -121,9 +132,14 @@ rm -rf "$INSTALL_DIR/node_modules" 2>/dev/null || true
 echo "=== Cloning repository ==="
 cd "$INSTALL_DIR"
 
+# Configure git for this user
+git config --global user.email "pi@localhost"
+git config --global user.name "pi"
+
 if [ -d "$INSTALL_DIR/chiba" ]; then
     echo "Repository exists, pulling latest..."
     cd "$INSTALL_DIR/chiba"
+    git reset --hard HEAD
     git pull
 else
     echo "Cloning repository..."
@@ -138,6 +154,7 @@ mkdir -p "$INSTALL_DIR/chiba/media"
 chmod +x "$INSTALL_DIR/chiba/run_kiosk.sh"
 chmod +x "$INSTALL_DIR/chiba/kiosk-server.sh"
 chmod +x "$INSTALL_DIR/chiba/status.sh" 2>/dev/null || true
+chmod +x "$INSTALL_DIR/chiba/setup-kiosk.sh" 2>/dev/null || true
 
 echo "=== Creating .env file ==="
 cat > "$INSTALL_DIR/chiba/.env" << EOF
@@ -203,7 +220,7 @@ Wants=network-online.target
 Type=simple
 User=pi
 Environment=HOME=/home/pi
-ExecStart=/usr/bin/ngrok http 8080 --domain=$NGROK_DOMAIN
+ExecStart=/usr/local/bin/ngrok http 8080 --domain=$NGROK_DOMAIN
 Restart=always
 RestartSec=10
 
@@ -228,11 +245,8 @@ sudo systemctl enable disable-blanking
 sudo systemctl enable ngrok
 
 echo "=== Setting up kiosk auto-start on login ==="
-sed -i '/# Kiosk auto-start/d' ~/.bash_profile 2>/dev/null || true
-sed -i '/run_kiosk.sh/d' ~/.bash_profile 2>/dev/null || true
-
-cat >> ~/.bash_profile << 'EOF'
-
+# Completely rewrite .bash_profile to avoid corruption
+cat > ~/.bash_profile << 'EOF'
 # Kiosk auto-start (only on TTY1 with display)
 if [ "$(tty)" = "/dev/tty1" ]; then
     cd ~/chiba && ./run_kiosk.sh
@@ -247,13 +261,26 @@ echo "Checking installed files..."
 [ -f "$INSTALL_DIR/chiba/public/index.html" ] && echo "  ✓ public/index.html" || echo "  ✗ public/index.html MISSING"
 [ -d "$INSTALL_DIR/chiba/node_modules/ws" ] && echo "  ✓ node_modules/ws" || echo "  ✗ node_modules/ws MISSING"
 [ -f "$INSTALL_DIR/chiba/.env" ] && echo "  ✓ .env configured" || echo "  ✗ .env MISSING"
-command -v ngrok &>/dev/null && echo "  ✓ ngrok installed" || echo "  ✗ ngrok MISSING"
+command -v ngrok &>/dev/null && echo "  ✓ ngrok installed ($(ngrok version))" || echo "  ✗ ngrok MISSING"
 
 echo ""
 echo "Checking services..."
 systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ screen blanking disabled" || echo "  ✗ screen blanking NOT enabled"
 systemctl is-enabled ngrok &>/dev/null && echo "  ✓ ngrok service enabled" || echo "  ✗ ngrok service NOT enabled"
 grep -q "run_kiosk.sh" ~/.bash_profile && echo "  ✓ kiosk auto-start configured" || echo "  ✗ kiosk auto-start NOT configured"
+
+# Test ngrok connection
+echo ""
+echo "Testing ngrok..."
+timeout 10 ngrok http 8080 --domain="$NGROK_DOMAIN" &
+NGROK_PID=$!
+sleep 5
+if kill -0 $NGROK_PID 2>/dev/null; then
+    echo "  ✓ ngrok tunnel working"
+    kill $NGROK_PID 2>/dev/null || true
+else
+    echo "  ✗ ngrok tunnel failed - check your token and domain"
+fi
 
 PI_IP=$(hostname -I | awk '{print $1}')
 
@@ -275,7 +302,6 @@ echo "    -d '{\"collectionId\":\"YOUR_COLLECTION_ID\"}'"
 echo ""
 echo "Player: https://$NGROK_DOMAIN/player"
 echo ""
-echo "To stop kiosk: Ctrl+Alt+F2, login, then: pkill -f run_kiosk"
 echo "To check status: cd ~/chiba && ./status.sh"
 echo ""
 
