@@ -105,20 +105,25 @@ export default function App() {
     wsRef.current = ws
 
     ws.onopen = () => {
+      console.log('[WS] Connected')
       ws.send(JSON.stringify({ type: 'ready' }))
     }
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        console.log('[WS] Received:', data)
         if (data.type === 'state') {
+          console.log('[WS] Setting state:', { mode: data.mode, file: data.file, url: data.url })
           setState({
             mode: data.mode,
             file: data.file,
             url: data.url,
           })
         }
-      } catch {}
+      } catch (e) {
+        console.error('[WS] Parse error:', e)
+      }
     }
 
     ws.onclose = () => {
@@ -164,36 +169,50 @@ export default function App() {
   // Handle video playback
   useEffect(() => {
     const video = videoRef.current
-    if (!video) return
+    console.log('[Video] Effect triggered:', { mode: state.mode, file: state.file, fileType, showVideo, showImage })
+
+    if (!video) {
+      console.log('[Video] No video ref')
+      return
+    }
 
     if (showVideo && state.file) {
       const newSrc = `/media/${state.file}`
+      console.log('[Video] Attempting to play:', newSrc, 'current src:', video.src)
       // Only reload if source changed
       if (!video.src.endsWith(newSrc)) {
+        console.log('[Video] Loading new source')
         // Set loop based on mode (loop for single video, no loop for playlist)
         video.loop = state.mode === 'video'
         video.src = newSrc
         video.muted = false // Try unmuted first
         video.load()
         video.play().then(() => {
+          console.log('[Video] Playing successfully (unmuted)')
           // Autoplay with audio worked (Pi kiosk mode)
           setMuted(false)
           setShowHint(false)
-        }).catch(() => {
+        }).catch((err) => {
+          console.log('[Video] Autoplay blocked, trying muted:', err.message)
           // Browser blocked autoplay with audio, fall back to muted
           video.muted = true
           setMuted(true)
           setShowHint(true)
-          video.play().catch(() => {})
+          video.play().catch((err2) => {
+            console.error('[Video] Even muted play failed:', err2.message)
+          })
         })
+      } else {
+        console.log('[Video] Source unchanged, skipping reload')
       }
     } else if (!showVideo) {
+      console.log('[Video] Not in video mode, pausing')
       video.pause()
       video.removeAttribute('src')
       video.load() // Free memory
       setShowHint(false)
     }
-  }, [state.mode, state.file, showVideo])
+  }, [state.mode, state.file, showVideo, fileType, showImage])
 
   return (
     <div style={styles.container}>
