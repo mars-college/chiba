@@ -20,8 +20,33 @@ const MEDIA_DIR = path.join(__dirname, 'media');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 // State
-let state = { mode: 'off', file: null, url: null };
+let state = { mode: 'off', file: null, url: null, playlist: null, playlistIndex: 0, loop: true };
 const wsClients = new Set();
+
+// Advance to next video in playlist
+function nextInPlaylist() {
+  if (!state.playlist || state.playlist.length === 0) return false;
+
+  let nextIndex = state.playlistIndex + 1;
+
+  if (nextIndex >= state.playlist.length) {
+    if (state.loop) {
+      nextIndex = 0;
+    } else {
+      // End of playlist, stop
+      state = { mode: 'off', file: null, url: null, playlist: null, playlistIndex: 0, loop: true };
+      broadcast();
+      log('Playlist ended');
+      return false;
+    }
+  }
+
+  state.playlistIndex = nextIndex;
+  state.file = state.playlist[nextIndex];
+  broadcast();
+  log(`Playlist: playing ${state.file} (${nextIndex + 1}/${state.playlist.length})`);
+  return true;
+}
 
 // Minimal logging in production
 const log = IS_PRODUCTION
@@ -278,7 +303,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET') {
     switch (urlPath) {
       case '/':
-        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off', '/cache', '/sync'] });
+        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off', '/cache', '/sync', '/sync_and_play'] });
         break;
       case '/status':
         jsonResponse(res, { ...state, wsClients: wsClients.size });
@@ -393,6 +418,59 @@ const server = http.createServer(async (req, res) => {
         }
         break;
       }
+      case '/sync_and_play': {
+        const collectionId = body.collectionId || body.collection;
+        const loop = body.loop !== false; // Default to true
+        if (!collectionId) {
+          jsonResponse(res, { error: 'Missing collectionId parameter' }, 400);
+          return;
+        }
+        if (!process.env.EDEN_API_KEY) {
+          jsonResponse(res, { error: 'EDEN_API_KEY not configured' }, 500);
+          return;
+        }
+        try {
+          log(`Sync and play collection: ${collectionId} (loop: ${loop})`);
+          const result = await syncCollection(collectionId, MEDIA_DIR);
+          log(`Sync complete: ${result.downloaded} downloaded, ${result.skipped} skipped`);
+
+          // Get list of successfully synced files
+          const playlist = result.files
+            .filter(f => f.status === 'downloaded' || f.status === 'skipped')
+            .map(f => f.filename);
+
+          if (playlist.length === 0) {
+            jsonResponse(res, { error: 'No videos found in collection' }, 400);
+            return;
+          }
+
+          // Start playlist
+          state = {
+            mode: 'playlist',
+            file: playlist[0],
+            url: null,
+            playlist,
+            playlistIndex: 0,
+            loop
+          };
+          broadcast();
+          log(`Playing playlist: ${playlist.length} videos, starting with ${playlist[0]}`);
+
+          jsonResponse(res, {
+            status: 'ok',
+            collectionId,
+            mode: 'playlist',
+            loop,
+            playlist,
+            currentFile: playlist[0],
+            syncResult: result
+          });
+        } catch (err) {
+          log(`Sync and play error: ${err.message}`);
+          jsonResponse(res, { error: err.message }, 400);
+        }
+        break;
+      }
       default:
         jsonResponse(res, { error: 'Not found' }, 404);
     }
@@ -426,6 +504,11 @@ wss.on('connection', (ws) => {
       const msg = JSON.parse(data);
       if (msg.type === 'ready') {
         ws.send(JSON.stringify({ type: 'state', ...state }));
+      } else if (msg.type === 'next') {
+        // Player requests next video in playlist
+        if (state.mode === 'playlist') {
+          nextInPlaylist();
+        }
       }
     } catch {}
   });

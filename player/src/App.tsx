@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 
-type Mode = 'video' | 'url' | 'off'
+type Mode = 'video' | 'playlist' | 'url' | 'off'
 
 interface State {
   mode: Mode
@@ -114,15 +114,26 @@ export default function App() {
     }
   }, [connect])
 
+  // Handle video ended (for playlist mode)
+  const handleVideoEnded = useCallback(() => {
+    if (state.mode === 'playlist' && wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'next' }))
+    }
+  }, [state.mode])
+
   // Handle video playback
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
-    if (state.mode === 'video' && state.file) {
+    const isVideoMode = state.mode === 'video' || state.mode === 'playlist'
+
+    if (isVideoMode && state.file) {
       const newSrc = `/media/${state.file}`
       // Only reload if source changed
       if (!video.src.endsWith(newSrc)) {
+        // Set loop based on mode (loop for single video, no loop for playlist)
+        video.loop = state.mode === 'video'
         video.src = newSrc
         video.muted = false // Try unmuted first
         video.load()
@@ -138,7 +149,7 @@ export default function App() {
           video.play().catch(() => {})
         })
       }
-    } else if (state.mode !== 'video') {
+    } else if (!isVideoMode) {
       video.pause()
       video.removeAttribute('src')
       video.load() // Free memory
@@ -146,19 +157,22 @@ export default function App() {
     }
   }, [state.mode, state.file])
 
+  const isVideoMode = state.mode === 'video' || state.mode === 'playlist'
+
   return (
     <div style={styles.container}>
       <video
         ref={videoRef}
         style={{
           ...styles.video,
-          ...(state.mode !== 'video' ? styles.hidden : {}),
+          ...(!isVideoMode ? styles.hidden : {}),
         }}
         autoPlay
         muted={muted}
-        loop
+        loop={state.mode === 'video'}
         playsInline
         preload="auto"
+        onEnded={handleVideoEnded}
       />
 
       {showHint && (

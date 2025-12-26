@@ -79,7 +79,7 @@ chmod +x "$INSTALL_DIR/chiba/kiosk-server.sh"
 
 echo "=== Installing Node.js dependencies ==="
 cd "$INSTALL_DIR/chiba"
-npm install ws
+npm install ws dotenv
 
 echo "=== Setting environment variables ==="
 # Add to /etc/environment for system-wide availability
