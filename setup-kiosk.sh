@@ -80,7 +80,7 @@ echo ""
 if [ "$(whoami)" != "pi" ]; then
     echo "Warning: This script is designed to run as 'pi' user"
     echo "Current user: $(whoami)"
-    read -p "Continue anyway? (y/N) " -n 1 -r
+    read -p "Continue anyway? (y/N) " -n 1 -r </dev/tty
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         exit 1
@@ -305,7 +305,7 @@ echo ""
 echo "To check status: cd ~/chiba && ./status.sh"
 echo ""
 
-read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r
+read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r </dev/tty
 echo
 if [[ $REPLY =~ ^[Nn]$ ]]; then
     echo "Reboot when ready: sudo reboot"
