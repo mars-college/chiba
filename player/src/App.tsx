@@ -75,10 +75,14 @@ function getWebSocketUrl(): string {
   return `${protocol}//${window.location.host}`
 }
 
+// Debug mode - set to true to show state overlay
+const DEBUG = true
+
 export default function App() {
   const [state, setState] = useState<State>({ mode: 'off', file: null, url: null })
   const [muted, setMuted] = useState(false) // Start unmuted, will auto-mute if blocked
   const [showHint, setShowHint] = useState(false)
+  const [videoError, setVideoError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<number>(0)
@@ -216,6 +220,30 @@ export default function App() {
 
   return (
     <div style={styles.container}>
+      {/* Debug overlay */}
+      {DEBUG && (
+        <div style={{
+          position: 'absolute',
+          top: 10,
+          left: 10,
+          background: 'rgba(0,0,0,0.8)',
+          color: '#0f0',
+          padding: 10,
+          borderRadius: 5,
+          fontSize: 12,
+          fontFamily: 'monospace',
+          zIndex: 9999,
+          maxWidth: '50%',
+        }}>
+          <div>mode: {state.mode}</div>
+          <div>file: {state.file?.slice(0, 20)}...</div>
+          <div>fileType: {fileType}</div>
+          <div>showVideo: {String(showVideo)}</div>
+          <div>showImage: {String(showImage)}</div>
+          {videoError && <div style={{color: 'red'}}>error: {videoError}</div>}
+        </div>
+      )}
+
       {/* Video player */}
       <video
         ref={videoRef}
@@ -229,6 +257,7 @@ export default function App() {
         playsInline
         preload="auto"
         onEnded={requestNext}
+        onError={(e) => setVideoError((e.target as HTMLVideoElement).error?.message || 'Unknown error')}
       />
 
       {/* Image display */}
