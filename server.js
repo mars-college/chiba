@@ -18,6 +18,46 @@ const PORT = process.env.PORT || 8080;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MEDIA_DIR = path.join(__dirname, 'media');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const API_KEY = process.env.API_KEY || null;
+
+// Routes that don't require authentication (public)
+const PUBLIC_ROUTES = ['/', '/status', '/player', '/files'];
+const PUBLIC_PREFIXES = ['/assets/', '/media/'];
+
+// Check if request is authenticated
+function isAuthenticated(req) {
+  // No API key configured = no auth required
+  if (!API_KEY) return true;
+
+  // Check Authorization header: "Bearer <key>"
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    if (token === API_KEY) return true;
+  }
+
+  // Check X-API-Key header
+  if (req.headers['x-api-key'] === API_KEY) return true;
+
+  // Check query param ?api_key=xxx (less secure, but convenient)
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  if (url.searchParams.get('api_key') === API_KEY) return true;
+
+  return false;
+}
+
+// Check if route requires auth
+function requiresAuth(method, urlPath) {
+  // GET requests to public routes don't need auth
+  if (method === 'GET') {
+    if (PUBLIC_ROUTES.includes(urlPath)) return false;
+    for (const prefix of PUBLIC_PREFIXES) {
+      if (urlPath.startsWith(prefix)) return false;
+    }
+  }
+  // All POST requests require auth
+  return true;
+}
 
 // State
 let state = { mode: 'off', file: null, url: null, playlist: null, playlistIndex: 0, loop: true };
@@ -300,9 +340,15 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
     });
     res.end();
+    return;
+  }
+
+  // Authentication check
+  if (requiresAuth(req.method, urlPath) && !isAuthenticated(req)) {
+    jsonResponse(res, { error: 'Unauthorized. Provide API key via Authorization: Bearer <key> header' }, 401);
     return;
   }
 
@@ -526,6 +572,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Kiosk server running on http://0.0.0.0:${PORT}`);
   console.log(`Player: http://localhost:${PORT}/player`);
   console.log(`Media dir: ${MEDIA_DIR}`);
+  console.log(`Auth: ${API_KEY ? 'enabled (API_KEY set)' : 'disabled (no API_KEY)'}`);
 });
 
 // Graceful shutdown

@@ -9,6 +9,7 @@ A lightweight digital signage solution for Raspberry Pi. Node.js server with rea
 - Playlist support (videos + images)
 - Eden collection sync (download and play from Eden API)
 - Public URL via ngrok tunnel
+- **API key authentication** for secure remote control
 - HTTP API for curl/scripting
 - Video with audio (HDMI output)
 - Local video files and web URLs
@@ -93,6 +94,22 @@ Open http://localhost:8080/player in your browser.
 ## API Reference
 
 The server runs on port **8080** with HTTP + WebSocket on the same port.
+
+> **Full API documentation:** See [API.md](API.md) for complete endpoint reference, code examples, and client libraries.
+
+### Authentication
+
+All POST endpoints require an API key. The setup script generates one automatically - **save it during setup!**
+
+Include the key in your requests:
+```bash
+curl -X POST https://your-domain.ngrok-free.app/file \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"file": "example.mp4"}'
+```
+
+GET endpoints (`/status`, `/files`, `/player`, `/media/*`) are public and don't require authentication.
 
 ### Endpoints
 

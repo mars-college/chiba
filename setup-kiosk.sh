@@ -19,6 +19,7 @@ set -e
 NGROK_AUTHTOKEN=""
 NGROK_DOMAIN=""
 EDEN_API_KEY=""
+API_KEY=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -34,14 +35,19 @@ while [[ $# -gt 0 ]]; do
             EDEN_API_KEY="$2"
             shift 2
             ;;
+        --api-key)
+            API_KEY="$2"
+            shift 2
+            ;;
         --help|-h)
-            echo "Usage: $0 --ngrok-token TOKEN --ngrok-domain DOMAIN [--eden-key KEY]"
+            echo "Usage: $0 --ngrok-token TOKEN --ngrok-domain DOMAIN [OPTIONS]"
             echo ""
             echo "Required:"
             echo "  --ngrok-token    Your ngrok authtoken (from dashboard.ngrok.com)"
             echo "  --ngrok-domain   Static domain for this Pi (e.g., pi01.ngrok-free.app)"
             echo ""
             echo "Optional:"
+            echo "  --api-key        API key for authenticating remote requests (auto-generated if not provided)"
             echo "  --eden-key       Eden API key for collection sync"
             exit 0
             ;;
@@ -51,6 +57,12 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Generate API key if not provided
+if [ -z "$API_KEY" ]; then
+    API_KEY=$(openssl rand -hex 24)
+    echo "Generated API key: $API_KEY"
+fi
 
 # Validate required args
 if [ -z "$NGROK_AUTHTOKEN" ]; then
@@ -158,6 +170,7 @@ chmod +x "$INSTALL_DIR/chiba/setup-kiosk.sh" 2>/dev/null || true
 
 echo "=== Creating .env file ==="
 cat > "$INSTALL_DIR/chiba/.env" << EOF
+API_KEY=$API_KEY
 EDEN_API_KEY=$EDEN_API_KEY
 NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN
 NGROK_DOMAIN=$NGROK_DOMAIN
@@ -289,20 +302,39 @@ echo "==========================================="
 echo "  Setup Complete!"
 echo "==========================================="
 echo ""
-echo "After reboot, your kiosk will be available at:"
+echo "Your kiosk will be available at:"
 echo "  Public:  https://$NGROK_DOMAIN"
 echo "  Local:   http://$PI_IP:8080"
 echo ""
-echo "API examples:"
+echo "============================================"
+echo "  IMPORTANT: Save your API key!"
+echo "============================================"
+echo ""
+echo "  API_KEY: $API_KEY"
+echo ""
+echo "  This key is required for all POST requests."
+echo "  Store it securely - it won't be shown again."
+echo ""
+echo "============================================"
+echo ""
+echo "API examples (with authentication):"
+echo ""
+echo "  # Check status (no auth required)"
 echo "  curl https://$NGROK_DOMAIN/status"
-echo "  curl https://$NGROK_DOMAIN/files"
+echo ""
+echo "  # Play a video (auth required)"
+echo "  curl -X POST https://$NGROK_DOMAIN/file \\"
+echo "    -H 'Authorization: Bearer $API_KEY' \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"file\":\"example.mp4\"}'"
+echo ""
+echo "  # Sync and play collection"
 echo "  curl -X POST https://$NGROK_DOMAIN/sync_and_play \\"
+echo "    -H 'Authorization: Bearer $API_KEY' \\"
 echo "    -H 'Content-Type: application/json' \\"
 echo "    -d '{\"collectionId\":\"YOUR_COLLECTION_ID\"}'"
 echo ""
 echo "Player: https://$NGROK_DOMAIN/player"
-echo ""
-echo "To check status: cd ~/chiba && ./status.sh"
 echo ""
 
 read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r </dev/tty
