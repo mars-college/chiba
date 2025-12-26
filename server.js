@@ -4,12 +4,15 @@
  * Optimized for Raspberry Pi - minimal memory, efficient streaming
  */
 
+require('dotenv').config({ quiet: true });
+
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
+const { syncCollection } = require('./eden');
 
 const PORT = process.env.PORT || 8080;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -275,7 +278,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET') {
     switch (urlPath) {
       case '/':
-        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off', '/cache'] });
+        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off', '/cache', '/sync'] });
         break;
       case '/status':
         jsonResponse(res, { ...state, wsClients: wsClients.size });
@@ -361,6 +364,31 @@ const server = http.createServer(async (req, res) => {
           });
         } catch (err) {
           log(`Cache error: ${err.message}`);
+          jsonResponse(res, { error: err.message }, 400);
+        }
+        break;
+      }
+      case '/sync': {
+        const collectionId = body.collectionId || body.collection;
+        if (!collectionId) {
+          jsonResponse(res, { error: 'Missing collectionId parameter' }, 400);
+          return;
+        }
+        if (!process.env.EDEN_API_KEY) {
+          jsonResponse(res, { error: 'EDEN_API_KEY not configured' }, 500);
+          return;
+        }
+        try {
+          log(`Syncing collection: ${collectionId}`);
+          const result = await syncCollection(collectionId, MEDIA_DIR);
+          log(`Sync complete: ${result.downloaded} downloaded, ${result.skipped} skipped`);
+          jsonResponse(res, {
+            status: 'ok',
+            collectionId,
+            ...result
+          });
+        } catch (err) {
+          log(`Sync error: ${err.message}`);
           jsonResponse(res, { error: err.message }, 400);
         }
         break;
