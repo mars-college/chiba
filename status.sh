@@ -70,16 +70,34 @@ fi
 
 echo ""
 
+# Check ngrok
+echo "Tunnel:"
+if systemctl is-active ngrok &>/dev/null; then
+    NGROK_DOMAIN=$(grep NGROK_DOMAIN "$SCRIPT_DIR/.env" 2>/dev/null | cut -d'=' -f2)
+    echo -e "  ${GREEN}✓${NC} ngrok running"
+    [ -n "$NGROK_DOMAIN" ] && echo "  Public URL: https://$NGROK_DOMAIN"
+else
+    echo -e "  ${YELLOW}○${NC} ngrok not running"
+    echo "  Start with: sudo systemctl start ngrok"
+fi
+
+echo ""
+
 # Check .env
 echo "Configuration:"
 if [ -f "$SCRIPT_DIR/.env" ]; then
-    if grep -q "EDEN_API_KEY" "$SCRIPT_DIR/.env"; then
+    if grep -q "EDEN_API_KEY=." "$SCRIPT_DIR/.env"; then
         echo -e "  ${GREEN}✓${NC} EDEN_API_KEY configured"
     else
-        echo -e "  ${YELLOW}○${NC} EDEN_API_KEY not set in .env"
+        echo -e "  ${YELLOW}○${NC} EDEN_API_KEY not set"
+    fi
+    if grep -q "NGROK_DOMAIN=." "$SCRIPT_DIR/.env"; then
+        echo -e "  ${GREEN}✓${NC} NGROK_DOMAIN configured"
+    else
+        echo -e "  ${YELLOW}○${NC} NGROK_DOMAIN not set"
     fi
 else
-    echo -e "  ${YELLOW}○${NC} .env file not found (needed for /sync)"
+    echo -e "  ${YELLOW}○${NC} .env file not found"
 fi
 
 echo ""

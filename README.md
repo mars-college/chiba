@@ -6,213 +6,227 @@ A lightweight digital signage solution for Raspberry Pi. Node.js server with rea
 
 - Full-screen kiosk mode with Chromium
 - Real-time WebSocket control (instant video switching)
-- Optimized React player (~61KB gzipped)
+- Playlist support (videos + images)
+- Eden collection sync (download and play from Eden API)
+- Public URL via ngrok tunnel
 - HTTP API for curl/scripting
 - Video with audio (HDMI output)
 - Local video files and web URLs
 - Auto-start on boot
 - Minimal resource usage
 
-## Quick Start (Local Development)
+## Quick Start
 
-Run the server locally to test:
+### Prerequisites
 
-```bash
-# Install dependencies
-npm install
+Before setting up a Pi, you need:
 
-# Start server
-node server.js
-```
+1. **ngrok account** (free): https://dashboard.ngrok.com
+   - Get your authtoken from the dashboard
+   - Create a free static domain (e.g., `pi01-xyz.ngrok-free.app`)
 
-Open http://localhost:8080/player in your browser.
+2. **Eden API key** (optional): For syncing collections from Eden
 
-Switch videos with curl:
+### Raspberry Pi Setup
 
-```bash
-curl -X POST http://localhost:8080/file -H "Content-Type: application/json" -d '{"file": "example.mp4"}'
-```
+**1. Flash Raspberry Pi OS**
 
-**Audio note:** Browsers block autoplay with audio. Click anywhere on the player to enable audio. For testing with auto-audio, launch Chrome with:
+Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/) to flash **Raspberry Pi OS 64-bit Lite** (or Desktop).
 
-```bash
-# macOS
-open -a "Google Chrome" --args --autoplay-policy=no-user-gesture-required http://localhost:8080/player
-```
+In the imager settings:
+- Enable SSH
+- Set username to `pi`
+- Configure WiFi (optional)
 
-On Pi kiosk mode, audio plays automatically (no click needed).
+**2. Run the setup script**
 
-## Raspberry Pi Deployment
-
-### Requirements
-
-- Raspberry Pi 5 (or Pi 4)
-- Raspberry Pi OS 64-bit (Bookworm)
-- Monitor connected via HDMI
-
-### 1. Flash Raspberry Pi OS
-
-Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/) to flash Raspberry Pi OS 64-bit. Enable SSH and set username to `pi`.
-
-### 2. Run setup script
-
-SSH into the Pi and run the setup script directly:
+SSH into the Pi and run:
 
 ```bash
-ssh pi@<IP>
-curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh | bash
+curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh | bash -s -- \
+  --ngrok-token YOUR_NGROK_AUTHTOKEN \
+  --ngrok-domain YOUR_DOMAIN.ngrok-free.app \
+  --eden-key YOUR_EDEN_API_KEY
 ```
 
 Or download and run manually:
 
 ```bash
-ssh pi@<IP>
 wget https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh
-chmod +x setup-kiosk.sh && ./setup-kiosk.sh
+chmod +x setup-kiosk.sh
+./setup-kiosk.sh \
+  --ngrok-token YOUR_NGROK_AUTHTOKEN \
+  --ngrok-domain YOUR_DOMAIN.ngrok-free.app \
+  --eden-key YOUR_EDEN_API_KEY
 ```
 
-The setup script will:
-- Clone the repository from GitHub
-- Install Node.js, Chromium, and cage (Wayland compositor)
-- Set environment variables (`NODE_ENV=production`, etc.)
-- Configure auto-start on boot (via autologin to TTY1)
-- Disable screen blanking
-- Prompt to reboot
+**3. Reboot**
 
-### 3. Add your videos
+The setup script will prompt to reboot. After reboot:
+- Kiosk starts automatically on the connected display
+- ngrok tunnel starts automatically
+- Your Pi is accessible at `https://YOUR_DOMAIN.ngrok-free.app`
 
-```bash
-scp your-video.mp4 pi@<IP>:/home/pi/chiba/media/
-```
+### Setting Up Multiple Pis
 
-The kiosk will auto-start on boot after setup completes.
+For each Pi, create a unique ngrok domain in your dashboard, then run the setup with that domain:
 
-## Running Modes
+| Pi | ngrok Domain | Setup Command |
+|----|--------------|---------------|
+| Pi 01 | `pi01-abc.ngrok-free.app` | `./setup-kiosk.sh --ngrok-token XXX --ngrok-domain pi01-abc.ngrok-free.app` |
+| Pi 02 | `pi02-def.ngrok-free.app` | `./setup-kiosk.sh --ngrok-token XXX --ngrok-domain pi02-def.ngrok-free.app` |
+| Pi 03 | `pi03-ghi.ngrok-free.app` | `./setup-kiosk.sh --ngrok-token XXX --ngrok-domain pi03-ghi.ngrok-free.app` |
 
-### Full Kiosk Mode (Pi)
+All Pis can share the same ngrok authtoken and Eden API key.
 
-Runs server + Chromium in full-screen kiosk mode. Used for production on Pi.
+## Local Development
 
-```bash
-./run_kiosk.sh
-```
-
-### Server-Only Mode
-
-Runs just the server without launching a browser. Use for:
-- Local development on your Mac/PC
-- Remote access (view player in any browser)
-- Headless Pi setups
+Run the server locally to test:
 
 ```bash
-./kiosk-server.sh
-# or
+npm install
 node server.js
 ```
 
-Then open http://\<IP\>:8080/player in any browser.
+Open http://localhost:8080/player in your browser.
 
 ## API Reference
 
 The server runs on port **8080** with HTTP + WebSocket on the same port.
 
-### HTTP Endpoints
+### Endpoints
 
 | Method | Endpoint | Body | Description |
 |--------|----------|------|-------------|
-| GET | `/` | - | API info |
 | GET | `/status` | - | Server status + connected clients |
 | GET | `/files` | - | List media files |
 | GET | `/player` | - | Serve the player app |
 | GET | `/media/<file>` | - | Serve a media file |
-| POST | `/file` | `{"file": "video.mp4"}` | Switch to video |
-| POST | `/url` | `{"url": "https://..."}` | Show website |
+| POST | `/file` | `{"file": "video.mp4"}` | Play a single video (loop) |
+| POST | `/url` | `{"url": "https://..."}` | Show website in iframe |
 | POST | `/off` | - | Black screen |
-| POST | `/cache` | `{"url": "https://..."}` | Download & cache video from URL |
+| POST | `/sync` | `{"collectionId": "..."}` | Download collection from Eden |
+| POST | `/sync_and_play` | `{"collectionId": "...", "loop": true}` | Sync + play as playlist |
 
 ### Examples
 
 ```bash
-# Switch to a video
-curl -X POST http://<IP>:8080/file \
+# Check status
+curl https://your-domain.ngrok-free.app/status
+
+# List files
+curl https://your-domain.ngrok-free.app/files
+
+# Play a single video (loops)
+curl -X POST https://your-domain.ngrok-free.app/file \
   -H "Content-Type: application/json" \
   -d '{"file": "example.mp4"}'
 
-# Switch to another video
-curl -X POST http://<IP>:8080/file \
+# Sync Eden collection and play as playlist
+curl -X POST https://your-domain.ngrok-free.app/sync_and_play \
   -H "Content-Type: application/json" \
-  -d '{"file": "example2.mp4"}'
+  -d '{"collectionId": "68538ccaf883914b6b8e09a1", "loop": true}'
 
-# Show a website
-curl -X POST http://<IP>:8080/url \
+# Play playlist without looping (stops after last item)
+curl -X POST https://your-domain.ngrok-free.app/sync_and_play \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com"}'
+  -d '{"collectionId": "68538ccaf883914b6b8e09a1", "loop": false}'
 
-# Turn off (black screen)
-curl -X POST http://<IP>:8080/off
-
-# Check status
-curl http://<IP>:8080/status
-
-# List available files
-curl http://<IP>:8080/files
-
-# Cache a video from URL (downloads and saves as MD5 hash)
-curl -X POST http://<IP>:8080/cache \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com/video.mp4"}'
-# Returns: {"status":"ok","filename":"a1b2c3d4...","alreadyCached":false}
-
-# Then play the cached video
-curl -X POST http://<IP>:8080/file \
-  -H "Content-Type: application/json" \
-  -d '{"file": "a1b2c3d4e5f6..."}'
+# Turn off display
+curl -X POST https://your-domain.ngrok-free.app/off
 ```
+
+### Playlist Behavior
+
+- **Videos**: Play to completion, then advance to next
+- **Images**: Display for 10 seconds, then advance to next
+- **Loop mode**: After last item, restart from beginning
+- **No loop**: After last item, display goes black
 
 ### WebSocket
 
-Connect to `ws://<IP>:8080` for real-time state updates:
+Connect to `wss://your-domain.ngrok-free.app` for real-time state updates:
 
 ```json
 {"type": "state", "mode": "video", "file": "example.mp4", "url": null}
-{"type": "state", "mode": "url", "file": null, "url": "https://..."}
+{"type": "state", "mode": "playlist", "file": "current.mp4", "playlist": [...], "loop": true}
 {"type": "state", "mode": "off", "file": null, "url": null}
-```
-
-### Test Script
-
-Run the included test script to cycle through commands:
-
-```bash
-./kiosk-client.sh <IP>
 ```
 
 ## File Structure
 
 ```
-project/
+chiba/
 ├── server.js           # Node.js server (HTTP + WebSocket)
+├── eden.js             # Eden API integration
 ├── run_kiosk.sh        # Full kiosk mode (server + Chromium)
-├── kiosk-server.sh     # Server-only mode
-├── setup-kiosk.sh      # Pi setup script
-├── kiosk-client.sh     # API test script
-├── package.json
+├── setup-kiosk.sh      # Pi setup script (with ngrok)
+├── status.sh           # Check kiosk status
+├── .env                # API keys (created by setup)
+├── .env.example        # Example env file
 ├── public/             # Player app (built)
 │   ├── index.html
 │   └── assets/
-├── media/              # Video files
-│   └── *.mp4
+├── media/              # Video/image files
 └── player/             # React source code
-    ├── src/
-    ├── vite.config.ts
-    └── package.json
+```
+
+## Kiosk Management
+
+```bash
+# Check status (from SSH)
+cd ~/chiba && ./status.sh
+
+# View ngrok tunnel status
+sudo systemctl status ngrok
+
+# View kiosk logs
+journalctl -u ngrok -f
+
+# Restart ngrok tunnel
+sudo systemctl restart ngrok
+
+# Stop kiosk (from TTY2: Ctrl+Alt+F2)
+pkill -f run_kiosk
+
+# Full restart
+sudo reboot
+```
+
+## Troubleshooting
+
+### ngrok not connecting
+
+```bash
+# Check ngrok status
+sudo systemctl status ngrok
+
+# Check ngrok logs
+journalctl -u ngrok --no-pager -n 50
+
+# Test ngrok manually
+ngrok http 8080 --domain=your-domain.ngrok-free.app
+```
+
+### Screen stays black
+
+1. Check if server is running: `curl http://localhost:8080/status`
+2. Check WebSocket clients: should show `wsClients: 1`
+3. Verify Chromium is running: `pgrep chromium`
+
+### No audio
+
+```bash
+# Check audio device
+amixer
+
+# Set HDMI audio
+sudo raspi-config  # System Options > Audio > HDMI
 ```
 
 ## Development
 
 ### Rebuilding the Player
-
-The React player source is in `player/`. To rebuild after changes:
 
 ```bash
 cd player
@@ -220,78 +234,15 @@ npm install
 npm run build   # Outputs to public/
 ```
 
-### Adding New Video Formats
+### Adding Support for New File Types
 
-Edit `server.js` and add MIME types to the `mimeTypes` object:
+Edit `server.js` to add MIME types:
 
 ```javascript
 const mimeTypes = {
   '.mp4': 'video/mp4',
-  '.webm': 'video/webm',
   // add more...
 };
-```
-
-## Kiosk Management (Pi)
-
-The kiosk auto-starts on boot via autologin to TTY1.
-
-```bash
-# Stop kiosk (from SSH or TTY2)
-pkill -f run_kiosk
-
-# Restart kiosk
-sudo reboot
-
-# Test server manually (via SSH)
-cd ~/chiba && node server.js
-
-# Disable auto-start
-sed -i '/run_kiosk.sh/d' ~/.bash_profile
-```
-
-## Troubleshooting
-
-### Server not responding
-
-```bash
-# Check if processes are running
-ps aux | grep -E "node|chromium"
-
-# Test server manually
-cd ~/chiba && node server.js
-```
-
-### Screen stays blank
-
-1. Verify Node.js: `node --version`
-2. Test manually: `cd ~/chiba && ./run_kiosk.sh`
-3. Check display: ensure HDMI is connected before boot
-
-### Video not playing
-
-- Ensure video is in `/home/pi/chiba/media/`
-- Check permissions: `ls -la /home/pi/chiba/media/`
-- Supported formats: mp4, webm, mov, mkv
-
-### WebSocket not connecting
-
-- Verify server is running: `curl http://<IP>:8080/status`
-- Check firewall: `sudo ufw status`
-- Both HTTP and WebSocket use port 8080
-
-### No audio on Pi
-
-```bash
-# Check audio output device
-amixer
-
-# Set HDMI audio output
-sudo raspi-config
-# Navigate to: System Options > Audio > HDMI
-
-# Test audio
-speaker-test -t wav -c 2
 ```
 
 ## License

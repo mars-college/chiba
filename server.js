@@ -72,6 +72,13 @@ const mimeTypes = {
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
   '.mkv': 'video/x-matroska',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml',
 };
 
 // Efficient file streaming with range support

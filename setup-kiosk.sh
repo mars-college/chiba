@@ -3,13 +3,67 @@
 # Run on a fresh Raspberry Pi OS 64-bit install
 #
 # Usage:
-#   curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh | bash
+#   curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh | bash -s -- \
+#     --ngrok-token YOUR_NGROK_TOKEN \
+#     --ngrok-domain pi01.ngrok-free.app \
+#     --eden-key YOUR_EDEN_API_KEY
 #
-# Or manually:
+# Or download and run:
 #   wget https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh
-#   chmod +x setup-kiosk.sh && ./setup-kiosk.sh
+#   chmod +x setup-kiosk.sh
+#   ./setup-kiosk.sh --ngrok-token XXX --ngrok-domain pi01.ngrok-free.app --eden-key YYY
 
 set -e
+
+# Parse arguments
+NGROK_AUTHTOKEN=""
+NGROK_DOMAIN=""
+EDEN_API_KEY=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --ngrok-token)
+            NGROK_AUTHTOKEN="$2"
+            shift 2
+            ;;
+        --ngrok-domain)
+            NGROK_DOMAIN="$2"
+            shift 2
+            ;;
+        --eden-key)
+            EDEN_API_KEY="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: $0 --ngrok-token TOKEN --ngrok-domain DOMAIN [--eden-key KEY]"
+            echo ""
+            echo "Required:"
+            echo "  --ngrok-token    Your ngrok authtoken (from dashboard.ngrok.com)"
+            echo "  --ngrok-domain   Static domain for this Pi (e.g., pi01.ngrok-free.app)"
+            echo ""
+            echo "Optional:"
+            echo "  --eden-key       Eden API key for collection sync"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate required args
+if [ -z "$NGROK_AUTHTOKEN" ]; then
+    echo "Error: --ngrok-token is required"
+    echo "Get your token at: https://dashboard.ngrok.com/get-started/your-authtoken"
+    exit 1
+fi
+
+if [ -z "$NGROK_DOMAIN" ]; then
+    echo "Error: --ngrok-domain is required"
+    echo "Create a free static domain at: https://dashboard.ngrok.com/cloud-edge/domains"
+    exit 1
+fi
 
 INSTALL_DIR="/home/pi"
 REPO_URL="https://github.com/mars-college/chiba.git"
@@ -19,7 +73,7 @@ echo "  Raspberry Pi Kiosk Setup"
 echo "==========================================="
 echo ""
 echo "Install directory: $INSTALL_DIR"
-echo "Repository: $REPO_URL"
+echo "ngrok domain: $NGROK_DOMAIN"
 echo ""
 
 # Check if running as pi user
@@ -42,10 +96,18 @@ sudo apt install -y \
     cage \
     chromium \
     nodejs \
-    npm
+    npm \
+    curl
+
+echo "=== Installing ngrok ==="
+curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+sudo apt update && sudo apt install -y ngrok
+
+# Configure ngrok
+ngrok config add-authtoken "$NGROK_AUTHTOKEN"
 
 echo "=== Cleaning up old installation ==="
-# Remove old files from previous setup (when files were in /home/pi/ directly)
 rm -f "$INSTALL_DIR/server.js" 2>/dev/null || true
 rm -f "$INSTALL_DIR/run_kiosk.sh" 2>/dev/null || true
 rm -f "$INSTALL_DIR/kiosk-server.sh" 2>/dev/null || true
@@ -59,7 +121,6 @@ rm -rf "$INSTALL_DIR/node_modules" 2>/dev/null || true
 echo "=== Cloning repository ==="
 cd "$INSTALL_DIR"
 
-# Clone or update the repo
 if [ -d "$INSTALL_DIR/chiba" ]; then
     echo "Repository exists, pulling latest..."
     cd "$INSTALL_DIR/chiba"
@@ -76,17 +137,24 @@ mkdir -p "$INSTALL_DIR/chiba/media"
 # Make scripts executable
 chmod +x "$INSTALL_DIR/chiba/run_kiosk.sh"
 chmod +x "$INSTALL_DIR/chiba/kiosk-server.sh"
+chmod +x "$INSTALL_DIR/chiba/status.sh" 2>/dev/null || true
+
+echo "=== Creating .env file ==="
+cat > "$INSTALL_DIR/chiba/.env" << EOF
+EDEN_API_KEY=$EDEN_API_KEY
+NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN
+NGROK_DOMAIN=$NGROK_DOMAIN
+EOF
+chmod 600 "$INSTALL_DIR/chiba/.env"
 
 echo "=== Installing Node.js dependencies ==="
 cd "$INSTALL_DIR/chiba"
 npm install ws dotenv
 
 echo "=== Setting environment variables ==="
-# Add to /etc/environment for system-wide availability
 sudo grep -q "NODE_ENV=production" /etc/environment || \
     echo "NODE_ENV=production" | sudo tee -a /etc/environment
 
-# Add to user profile for interactive sessions
 grep -q "export NODE_ENV=production" ~/.profile || \
     echo "export NODE_ENV=production" >> ~/.profile
 
@@ -94,8 +162,6 @@ grep -q "export XDG_RUNTIME_DIR=/run/user/1000" ~/.profile || \
     echo "export XDG_RUNTIME_DIR=/run/user/1000" >> ~/.profile
 
 echo "=== Disabling screen blanking ==="
-
-# Create screen blanking disable service
 sudo tee /etc/systemd/system/disable-blanking.service > /dev/null << 'EOF'
 [Unit]
 Description=Disable screen blanking
@@ -126,34 +192,45 @@ if [ -n "$CMDLINE_FILE" ]; then
     fi
 fi
 
+echo "=== Creating ngrok systemd service ==="
+sudo tee /etc/systemd/system/ngrok.service > /dev/null << EOF
+[Unit]
+Description=ngrok tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Environment=HOME=/home/pi
+ExecStart=/usr/bin/ngrok http 8080 --domain=$NGROK_DOMAIN
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 echo "=== Configuring boot options ==="
-
-# Set boot to console autologin (no desktop)
 sudo raspi-config nonint do_boot_behaviour B2
-
-# Disable desktop environment
 sudo systemctl set-default multi-user.target
 sudo systemctl disable lightdm 2>/dev/null || true
 sudo systemctl disable gdm3 2>/dev/null || true
 
-echo "=== Removing old systemd kiosk service ==="
+echo "=== Removing old services ==="
 sudo systemctl stop kiosk 2>/dev/null || true
 sudo systemctl disable kiosk 2>/dev/null || true
 sudo rm -f /etc/systemd/system/kiosk.service
 
-echo "=== Enabling screen blanking service ==="
+echo "=== Enabling services ==="
 sudo systemctl daemon-reload
 sudo systemctl enable disable-blanking
+sudo systemctl enable ngrok
 
-echo "=== Setting up auto-start on login ==="
-# The kiosk starts via .bash_profile when pi user logs in on TTY1
-# This works with the console autologin we configured earlier
-
-# Remove old entries if they exist
+echo "=== Setting up kiosk auto-start on login ==="
 sed -i '/# Kiosk auto-start/d' ~/.bash_profile 2>/dev/null || true
 sed -i '/run_kiosk.sh/d' ~/.bash_profile 2>/dev/null || true
 
-# Add kiosk auto-start to .bash_profile
 cat >> ~/.bash_profile << 'EOF'
 
 # Kiosk auto-start (only on TTY1 with display)
@@ -162,9 +239,6 @@ if [ "$(tty)" = "/dev/tty1" ]; then
 fi
 EOF
 
-echo "  Added kiosk auto-start to ~/.bash_profile"
-echo "  Kiosk will start automatically when pi user logs in on TTY1"
-
 echo "=== Verifying installation ==="
 echo ""
 echo "Checking installed files..."
@@ -172,15 +246,14 @@ echo "Checking installed files..."
 [ -f "$INSTALL_DIR/chiba/run_kiosk.sh" ] && echo "  ✓ run_kiosk.sh" || echo "  ✗ run_kiosk.sh MISSING"
 [ -f "$INSTALL_DIR/chiba/public/index.html" ] && echo "  ✓ public/index.html" || echo "  ✗ public/index.html MISSING"
 [ -d "$INSTALL_DIR/chiba/node_modules/ws" ] && echo "  ✓ node_modules/ws" || echo "  ✗ node_modules/ws MISSING"
+[ -f "$INSTALL_DIR/chiba/.env" ] && echo "  ✓ .env configured" || echo "  ✗ .env MISSING"
+command -v ngrok &>/dev/null && echo "  ✓ ngrok installed" || echo "  ✗ ngrok MISSING"
 
 echo ""
-echo "Checking configuration..."
-systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ screen blanking disabled" || echo "  ✗ screen blanking service NOT enabled"
+echo "Checking services..."
+systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ screen blanking disabled" || echo "  ✗ screen blanking NOT enabled"
+systemctl is-enabled ngrok &>/dev/null && echo "  ✓ ngrok service enabled" || echo "  ✗ ngrok service NOT enabled"
 grep -q "run_kiosk.sh" ~/.bash_profile && echo "  ✓ kiosk auto-start configured" || echo "  ✗ kiosk auto-start NOT configured"
-
-echo ""
-echo "Note: The kiosk starts on boot via autologin to TTY1."
-echo "      To test now: cd ~/chiba && node server.js"
 
 PI_IP=$(hostname -I | awk '{print $1}')
 
@@ -189,21 +262,21 @@ echo "==========================================="
 echo "  Setup Complete!"
 echo "==========================================="
 echo ""
-echo "The kiosk will auto-start on boot when a display is connected."
+echo "After reboot, your kiosk will be available at:"
+echo "  Public:  https://$NGROK_DOMAIN"
+echo "  Local:   http://$PI_IP:8080"
 echo ""
-echo "Add videos:"
-echo "  scp your-video.mp4 pi@$PI_IP:/home/pi/chiba/media/"
+echo "API examples:"
+echo "  curl https://$NGROK_DOMAIN/status"
+echo "  curl https://$NGROK_DOMAIN/files"
+echo "  curl -X POST https://$NGROK_DOMAIN/sync_and_play \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"collectionId\":\"YOUR_COLLECTION_ID\"}'"
 echo ""
-echo "API (after reboot):"
-echo "  curl http://$PI_IP:8080/status"
-echo "  curl http://$PI_IP:8080/files"
-echo "  curl -X POST http://$PI_IP:8080/file -H 'Content-Type: application/json' -d '{\"file\":\"example.mp4\"}'"
-echo "  curl -X POST http://$PI_IP:8080/off"
+echo "Player: https://$NGROK_DOMAIN/player"
 echo ""
-echo "Player: http://$PI_IP:8080/player"
-echo ""
-echo "To stop kiosk: Switch to TTY2 with Ctrl+Alt+F2, login, then: pkill -f run_kiosk"
-echo "To restart:    sudo reboot"
+echo "To stop kiosk: Ctrl+Alt+F2, login, then: pkill -f run_kiosk"
+echo "To check status: cd ~/chiba && ./status.sh"
 echo ""
 
 read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r
