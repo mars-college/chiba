@@ -8,6 +8,7 @@ A lightweight digital signage solution for Raspberry Pi. Node.js server with rea
 - Real-time WebSocket control (instant video switching)
 - Optimized React player (~61KB gzipped)
 - HTTP API for curl/scripting
+- Video with audio (HDMI output)
 - Local video files and web URLs
 - Auto-start on boot
 - Minimal resource usage
@@ -31,6 +32,15 @@ Switch videos with curl:
 ```bash
 curl -X POST http://localhost:8080/file -H "Content-Type: application/json" -d '{"file": "example.mp4"}'
 ```
+
+**Audio note:** Browsers block autoplay with audio. Click anywhere on the player to enable audio. For testing with auto-audio, launch Chrome with:
+
+```bash
+# macOS
+open -a "Google Chrome" --args --autoplay-policy=no-user-gesture-required http://localhost:8080/player
+```
+
+On Pi kiosk mode, audio plays automatically (no click needed).
 
 ## Raspberry Pi Deployment
 
@@ -118,6 +128,7 @@ The server runs on port **8080** with HTTP + WebSocket on the same port.
 | POST | `/file` | `{"file": "video.mp4"}` | Switch to video |
 | POST | `/url` | `{"url": "https://..."}` | Show website |
 | POST | `/off` | - | Black screen |
+| POST | `/cache` | `{"url": "https://..."}` | Download & cache video from URL |
 
 ### Examples
 
@@ -145,6 +156,17 @@ curl http://<IP>:8080/status
 
 # List available files
 curl http://<IP>:8080/files
+
+# Cache a video from URL (downloads and saves as MD5 hash)
+curl -X POST http://<IP>:8080/cache \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/video.mp4"}'
+# Returns: {"status":"ok","filename":"a1b2c3d4...","alreadyCached":false}
+
+# Then play the cached video
+curl -X POST http://<IP>:8080/file \
+  -H "Content-Type: application/json" \
+  -d '{"file": "a1b2c3d4e5f6..."}'
 ```
 
 ### WebSocket
@@ -257,6 +279,20 @@ cd ~/chiba && node server.js
 - Verify server is running: `curl http://<IP>:8080/status`
 - Check firewall: `sudo ufw status`
 - Both HTTP and WebSocket use port 8080
+
+### No audio on Pi
+
+```bash
+# Check audio output device
+amixer
+
+# Set HDMI audio output
+sudo raspi-config
+# Navigate to: System Options > Audio > HDMI
+
+# Test audio
+speaker-test -t wav -c 2
+```
 
 ## License
 

@@ -53,9 +53,26 @@ function getWebSocketUrl(): string {
 
 export default function App() {
   const [state, setState] = useState<State>({ mode: 'off', file: null, url: null })
+  const [muted, setMuted] = useState(false) // Start unmuted, will auto-mute if blocked
+  const [showHint, setShowHint] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<number>(0)
+
+  // Handle click to unmute (only needed if browser blocked autoplay with audio)
+  useEffect(() => {
+    const handleClick = () => {
+      if (videoRef.current && muted) {
+        videoRef.current.muted = false
+        videoRef.current.play().then(() => {
+          setMuted(false)
+          setShowHint(false)
+        }).catch(() => {})
+      }
+    }
+    document.addEventListener('click', handleClick)
+    return () => document.removeEventListener('click', handleClick)
+  }, [muted])
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -107,13 +124,25 @@ export default function App() {
       // Only reload if source changed
       if (!video.src.endsWith(newSrc)) {
         video.src = newSrc
+        video.muted = false // Try unmuted first
         video.load()
-        video.play().catch(() => {})
+        video.play().then(() => {
+          // Autoplay with audio worked (Pi kiosk mode)
+          setMuted(false)
+          setShowHint(false)
+        }).catch(() => {
+          // Browser blocked autoplay with audio, fall back to muted
+          video.muted = true
+          setMuted(true)
+          setShowHint(true)
+          video.play().catch(() => {})
+        })
       }
     } else if (state.mode !== 'video') {
       video.pause()
       video.removeAttribute('src')
       video.load() // Free memory
+      setShowHint(false)
     }
   }, [state.mode, state.file])
 
@@ -126,12 +155,27 @@ export default function App() {
           ...(state.mode !== 'video' ? styles.hidden : {}),
         }}
         autoPlay
-        muted
+        muted={muted}
         loop
         playsInline
-        // Pi optimizations
         preload="auto"
       />
+
+      {showHint && (
+        <div style={{
+          position: 'absolute',
+          bottom: 20,
+          right: 20,
+          background: 'rgba(0,0,0,0.7)',
+          color: 'white',
+          padding: '10px 20px',
+          borderRadius: 8,
+          fontSize: 14,
+          cursor: 'pointer',
+        }}>
+          🔇 Click anywhere for audio
+        </div>
+      )}
 
       {state.mode === 'url' && state.url && (
         <iframe

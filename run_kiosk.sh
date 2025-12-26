@@ -51,6 +51,9 @@ CHROMIUM_FLAGS=(
     --enable-gpu-rasterization
     --enable-zero-copy
     --ignore-gpu-blocklist
+    # Audio
+    --alsa-output-device=default
+    --enable-features=AudioServiceOutOfProcess
 )
 
 # Launch browser in cage (Wayland compositor)

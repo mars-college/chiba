@@ -5,8 +5,10 @@
  */
 
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 8080;
@@ -110,6 +112,150 @@ function jsonResponse(res, data, status = 200) {
   res.end(body);
 }
 
+// Valid video extensions
+const VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v'];
+
+// Video magic bytes signatures
+const VIDEO_SIGNATURES = [
+  { bytes: [0x00, 0x00, 0x00], offset: 0, check: (buf) => buf.length > 11 && buf.toString('ascii', 4, 8) === 'ftyp' }, // MP4/M4V
+  { bytes: [0x1A, 0x45, 0xDF, 0xA3], offset: 0 }, // WebM/MKV
+  { bytes: [0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70], offset: 0 }, // MOV
+  { bytes: [0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70], offset: 0 }, // MOV variant
+  { bytes: [0x52, 0x49, 0x46, 0x46], offset: 0, check: (buf) => buf.length > 11 && buf.toString('ascii', 8, 11) === 'AVI' }, // AVI
+];
+
+// Check if buffer starts with video signature
+function isVideoFile(buffer) {
+  for (const sig of VIDEO_SIGNATURES) {
+    if (sig.check) {
+      if (sig.check(buffer)) return true;
+    } else {
+      let match = true;
+      for (let i = 0; i < sig.bytes.length; i++) {
+        if (buffer[sig.offset + i] !== sig.bytes[i]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return true;
+    }
+  }
+  return false;
+}
+
+// Download file from URL and cache it
+function downloadAndCache(url) {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+
+    // Extract extension from URL
+    const urlPath = new URL(url).pathname;
+    let ext = path.extname(urlPath).toLowerCase();
+
+    // Default to .mp4 if no valid extension
+    if (!VIDEO_EXTENSIONS.includes(ext)) {
+      ext = '.mp4';
+    }
+
+    const tempPath = path.join(MEDIA_DIR, `_temp_${Date.now()}${ext}`);
+    const fileStream = fs.createWriteStream(tempPath);
+    const hash = crypto.createHash('md5');
+
+    const request = protocol.get(url, {
+      headers: { 'User-Agent': 'Kiosk-Server/1.0' },
+      timeout: 60000
+    }, (response) => {
+      // Handle redirects
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        fileStream.close();
+        fs.unlinkSync(tempPath);
+        downloadAndCache(response.headers.location).then(resolve).catch(reject);
+        return;
+      }
+
+      if (response.statusCode !== 200) {
+        fileStream.close();
+        fs.unlinkSync(tempPath);
+        reject(new Error(`HTTP ${response.statusCode}`));
+        return;
+      }
+
+      let headerChecked = false;
+      let isVideo = false;
+
+      response.on('data', (chunk) => {
+        // Check first chunk for video signature
+        if (!headerChecked) {
+          headerChecked = true;
+          isVideo = isVideoFile(chunk);
+          if (!isVideo) {
+            log(`Not a video file: ${url}`);
+            response.destroy();
+            fileStream.close();
+            fs.unlink(tempPath, () => {});
+            reject(new Error('Not a video file'));
+            return;
+          }
+        }
+        hash.update(chunk);
+        fileStream.write(chunk);
+      });
+
+      response.on('end', () => {
+        fileStream.end(() => {
+          if (!isVideo) {
+            fs.unlink(tempPath, () => {});
+            reject(new Error('Not a video file'));
+            return;
+          }
+
+          const md5 = hash.digest('hex');
+          const finalName = `${md5}${ext}`;
+          const finalPath = path.join(MEDIA_DIR, finalName);
+
+          // Check if file already exists
+          if (fs.existsSync(finalPath)) {
+            fs.unlinkSync(tempPath);
+            log(`Already cached: ${finalName}`);
+            resolve({ filename: finalName, cached: true });
+            return;
+          }
+
+          // Rename temp file to final name
+          fs.rename(tempPath, finalPath, (err) => {
+            if (err) {
+              fs.unlink(tempPath, () => {});
+              reject(err);
+              return;
+            }
+            log(`Cached: ${finalName}`);
+            resolve({ filename: finalName, cached: false });
+          });
+        });
+      });
+
+      response.on('error', (err) => {
+        fileStream.close();
+        fs.unlink(tempPath, () => {});
+        reject(err);
+      });
+    });
+
+    request.on('error', (err) => {
+      fileStream.close();
+      fs.unlink(tempPath, () => {});
+      reject(err);
+    });
+
+    request.on('timeout', () => {
+      request.destroy();
+      fileStream.close();
+      fs.unlink(tempPath, () => {});
+      reject(new Error('Download timeout'));
+    });
+  });
+}
+
 // HTTP server
 const server = http.createServer(async (req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -129,7 +275,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET') {
     switch (urlPath) {
       case '/':
-        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off'] });
+        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off', '/cache'] });
         break;
       case '/status':
         jsonResponse(res, { ...state, wsClients: wsClients.size });
@@ -198,6 +344,27 @@ const server = http.createServer(async (req, res) => {
         log('Display off');
         jsonResponse(res, { status: 'ok', ...state });
         break;
+      case '/cache': {
+        const url = body.url;
+        if (!url) {
+          jsonResponse(res, { error: 'Missing url parameter' }, 400);
+          return;
+        }
+        try {
+          log(`Caching: ${url}`);
+          const result = await downloadAndCache(url);
+          jsonResponse(res, {
+            status: 'ok',
+            filename: result.filename,
+            alreadyCached: result.cached,
+            playUrl: `/media/${result.filename}`
+          });
+        } catch (err) {
+          log(`Cache error: ${err.message}`);
+          jsonResponse(res, { error: err.message }, 400);
+        }
+        break;
+      }
       default:
         jsonResponse(res, { error: 'Not found' }, 404);
     }
