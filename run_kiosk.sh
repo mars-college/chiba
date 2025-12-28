@@ -32,7 +32,7 @@ CHROMIUM_FLAGS=(
     --disable-restore-session-state
     --no-first-run
     --disable-translate
-    --disable-features=TranslateUI
+    --disable-features=TranslateUI,PasswordManager
     --disable-component-update
     --check-for-update-interval=31536000
     --disable-pinch
@@ -51,6 +51,8 @@ CHROMIUM_FLAGS=(
     --enable-gpu-rasterization
     --enable-zero-copy
     --ignore-gpu-blocklist
+    # Disable keyring/password prompts
+    --password-store=basic
     # Audio
     --alsa-output-device=default
     --enable-features=AudioServiceOutOfProcess
