@@ -21,19 +21,35 @@ NGROK_DOMAIN=""
 EDEN_API_KEY=""
 API_KEY=""
 
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
     case $1 in
+        --ngrok-token=*)
+            NGROK_AUTHTOKEN="${1#*=}"
+            shift
+            ;;
         --ngrok-token)
             NGROK_AUTHTOKEN="$2"
             shift 2
+            ;;
+        --ngrok-domain=*)
+            NGROK_DOMAIN="${1#*=}"
+            shift
             ;;
         --ngrok-domain)
             NGROK_DOMAIN="$2"
             shift 2
             ;;
+        --eden-key=*)
+            EDEN_API_KEY="${1#*=}"
+            shift
+            ;;
         --eden-key)
             EDEN_API_KEY="$2"
             shift 2
+            ;;
+        --api-key=*)
+            API_KEY="${1#*=}"
+            shift
             ;;
         --api-key)
             API_KEY="$2"
