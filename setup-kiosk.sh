@@ -181,6 +181,42 @@ echo "=== Installing Node.js dependencies ==="
 cd "$INSTALL_DIR/chiba"
 npm install ws dotenv
 
+echo "=== Configuring audio output ==="
+# Find USB audio device (exclude HDMI and built-in headphones)
+USB_AUDIO=$(aplay -l 2>/dev/null | grep -E "^card [0-9]+" | grep -v "vc4-hdmi" | grep -v "bcm2835" | head -1 | sed -E 's/^card ([0-9]+): ([^,]+),.*/\2/' | xargs)
+
+if [ -n "$USB_AUDIO" ]; then
+    echo "Found USB audio device: $USB_AUDIO"
+    AUDIO_DEVICE="$USB_AUDIO"
+else
+    echo "No USB audio device found, using headphone jack"
+    AUDIO_DEVICE="Headphones"
+fi
+
+# Create ALSA config to set default audio output
+cat > ~/.asoundrc << EOF
+# Default audio output device
+pcm.!default {
+    type plug
+    slave.pcm "hw:${AUDIO_DEVICE},0"
+}
+
+ctl.!default {
+    type hw
+    card ${AUDIO_DEVICE}
+}
+EOF
+
+echo "Audio configured to use: $AUDIO_DEVICE"
+
+# Set volume to 100% if device exists
+if aplay -l 2>/dev/null | grep -q "$AUDIO_DEVICE"; then
+    amixer -c "$AUDIO_DEVICE" set PCM 100% unmute 2>/dev/null || \
+    amixer -c "$AUDIO_DEVICE" set Speaker 100% unmute 2>/dev/null || \
+    amixer -c "$AUDIO_DEVICE" set Master 100% unmute 2>/dev/null || true
+    echo "Volume set to 100%"
+fi
+
 echo "=== Setting environment variables ==="
 sudo grep -q "NODE_ENV=production" /etc/environment || \
     echo "NODE_ENV=production" | sudo tee -a /etc/environment
@@ -281,6 +317,7 @@ echo "Checking services..."
 systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ screen blanking disabled" || echo "  ✗ screen blanking NOT enabled"
 systemctl is-enabled ngrok &>/dev/null && echo "  ✓ ngrok service enabled" || echo "  ✗ ngrok service NOT enabled"
 grep -q "run_kiosk.sh" ~/.bash_profile && echo "  ✓ kiosk auto-start configured" || echo "  ✗ kiosk auto-start NOT configured"
+[ -f ~/.asoundrc ] && echo "  ✓ audio configured ($AUDIO_DEVICE)" || echo "  ✗ audio NOT configured"
 
 # Test ngrok connection
 echo ""
