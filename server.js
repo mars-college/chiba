@@ -448,8 +448,13 @@ const server = http.createServer(async (req, res) => {
       }
       case '/sync': {
         const collectionId = body.collectionId || body.collection;
+        const db = (body.db || 'PROD').toUpperCase();
         if (!collectionId) {
           jsonResponse(res, { error: 'Missing collectionId parameter' }, 400);
+          return;
+        }
+        if (!['PROD', 'STAGE'].includes(db)) {
+          jsonResponse(res, { error: 'Invalid db parameter. Use PROD or STAGE' }, 400);
           return;
         }
         if (!process.env.EDEN_API_KEY) {
@@ -457,12 +462,13 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         try {
-          log(`Syncing collection: ${collectionId}`);
-          const result = await syncCollection(collectionId, MEDIA_DIR);
+          log(`Syncing collection: ${collectionId} (${db})`);
+          const result = await syncCollection(collectionId, MEDIA_DIR, { db });
           log(`Sync complete: ${result.downloaded} downloaded, ${result.skipped} skipped`);
           jsonResponse(res, {
             status: 'ok',
             collectionId,
+            db,
             ...result
           });
         } catch (err) {
@@ -473,9 +479,14 @@ const server = http.createServer(async (req, res) => {
       }
       case '/sync_and_play': {
         const collectionId = body.collectionId || body.collection;
+        const db = (body.db || 'PROD').toUpperCase();
         const loop = body.loop !== false; // Default to true
         if (!collectionId) {
           jsonResponse(res, { error: 'Missing collectionId parameter' }, 400);
+          return;
+        }
+        if (!['PROD', 'STAGE'].includes(db)) {
+          jsonResponse(res, { error: 'Invalid db parameter. Use PROD or STAGE' }, 400);
           return;
         }
         if (!process.env.EDEN_API_KEY) {
@@ -483,8 +494,8 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         try {
-          log(`Sync and play collection: ${collectionId} (loop: ${loop})`);
-          const result = await syncCollection(collectionId, MEDIA_DIR);
+          log(`Sync and play collection: ${collectionId} (${db}, loop: ${loop})`);
+          const result = await syncCollection(collectionId, MEDIA_DIR, { db });
           log(`Sync complete: ${result.downloaded} downloaded, ${result.skipped} skipped`);
 
           // Get list of successfully synced files
@@ -512,6 +523,7 @@ const server = http.createServer(async (req, res) => {
           jsonResponse(res, {
             status: 'ok',
             collectionId,
+            db,
             mode: 'playlist',
             loop,
             playlist,

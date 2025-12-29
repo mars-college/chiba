@@ -9,20 +9,32 @@ const path = require('path');
 // Load API key from environment
 require('dotenv').config({ quiet: true });
 const EDEN_API_KEY = process.env.EDEN_API_KEY;
-const EDEN_API_BASE = 'https://api.eden.art';
+
+// API base URLs for different environments
+const EDEN_API_BASES = {
+  PROD: 'https://api.eden.art',
+  STAGE: 'https://staging.api.eden.art'
+};
+
+function getApiBase(db) {
+  const env = (db || 'PROD').toUpperCase();
+  return EDEN_API_BASES[env] || EDEN_API_BASES.PROD;
+}
 
 /**
  * Fetch all creations from an Eden collection (handles pagination)
  * @param {string} collectionId - The collection ID
+ * @param {string} db - Database environment: 'PROD' or 'STAGE' (default: 'PROD')
  * @returns {Promise<Array>} - Array of creation objects
  */
-async function getCollectionCreations(collectionId) {
+async function getCollectionCreations(collectionId, db = 'PROD') {
+  const apiBase = getApiBase(db);
   const creations = [];
   let page = 1;
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const url = `${EDEN_API_BASE}/v2/collections/${collectionId}/creations?page=${page}&limit=100`;
+    const url = `${apiBase}/v2/collections/${collectionId}/creations?page=${page}&limit=100`;
 
     const data = await new Promise((resolve, reject) => {
       const req = https.get(url, {
@@ -104,18 +116,20 @@ function downloadFile(url, destPath) {
  * @param {string} destDir - Destination directory
  * @param {object} options - Options
  * @param {boolean} options.skipExisting - Skip files that already exist
+ * @param {string} options.db - Database environment: 'PROD' or 'STAGE' (default: 'PROD')
  * @returns {Promise<object>} - Sync results
  */
 async function syncCollection(collectionId, destDir, options = {}) {
-  const { skipExisting = true } = options;
+  const { skipExisting = true, db = 'PROD' } = options;
 
   // Ensure destination directory exists
   if (!fs.existsSync(destDir)) {
     fs.mkdirSync(destDir, { recursive: true });
   }
 
-  console.log(`Fetching creations from collection ${collectionId}...`);
-  const creations = await getCollectionCreations(collectionId);
+  const apiBase = getApiBase(db);
+  console.log(`Fetching creations from collection ${collectionId} (${db} - ${apiBase})...`);
+  const creations = await getCollectionCreations(collectionId, db);
   console.log(`Found ${creations.length} creations`);
 
   const results = {
@@ -161,12 +175,26 @@ module.exports = {
 
 // CLI usage
 if (require.main === module) {
-  const collectionId = process.argv[2];
-  const destDir = process.argv[3] || './downloads';
+  const args = process.argv.slice(2);
+  let collectionId = null;
+  let destDir = './downloads';
+  let db = 'PROD';
+
+  // Parse arguments
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--db' && args[i + 1]) {
+      db = args[i + 1].toUpperCase();
+      i++;
+    } else if (!collectionId) {
+      collectionId = args[i];
+    } else {
+      destDir = args[i];
+    }
+  }
 
   if (!collectionId) {
-    console.log('Usage: node eden.js <collectionId> [destDir]');
-    console.log('Example: node eden.js 68538ccaf883914b6b8e09a1 ./downloads');
+    console.log('Usage: node eden.js <collectionId> [destDir] [--db PROD|STAGE]');
+    console.log('Example: node eden.js 68538ccaf883914b6b8e09a1 ./downloads --db STAGE');
     process.exit(1);
   }
 
@@ -175,7 +203,7 @@ if (require.main === module) {
     process.exit(1);
   }
 
-  syncCollection(collectionId, destDir)
+  syncCollection(collectionId, destDir, { db })
     .then(results => {
       console.log('\n--- Sync Complete ---');
       console.log(`Total: ${results.total}`);
