@@ -53,6 +53,7 @@ Get current kiosk state.
   "playlist": null,
   "playlistIndex": 0,
   "loop": true,
+  "paused": false,
   "wsClients": 1
 }
 ```
@@ -347,13 +348,190 @@ Sync an Eden collection and immediately start playing as a playlist.
 
 ---
 
+### POST /playlist
+
+Create a playlist from mixed sources (local files and URLs). URLs are downloaded sequentially.
+
+**Request:**
+```json
+{
+  "items": [
+    { "file": "cached-video.mp4" },
+    { "url": "https://example.com/video.mp4" },
+    { "url": "https://youtube.com/watch?v=xxx" }
+  ],
+  "loop": true
+}
+```
+
+**Parameters:**
+- `items` (required): Array of playlist items
+  - `{ "file": "filename.mp4" }` - Play a cached file (must exist)
+  - `{ "url": "https://..." }` - Download and cache, then add to playlist
+  - YouTube URLs are auto-detected and downloaded via yt-dlp
+- `loop` (optional, default: true): Whether to loop the playlist
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "mode": "playlist",
+  "playlist": ["cached-video.mp4", "abc123.mp4", "def456.mp4"],
+  "currentFile": "cached-video.mp4",
+  "loop": true,
+  "failed": [{ "url": "https://bad.url", "error": "Download failed" }]
+}
+```
+
+**Notes:**
+- URLs are processed sequentially (safer for Pi resources)
+- Failed downloads are skipped, playlist continues with successful items
+- Returns error if no items could be added to playlist
+
+---
+
+### POST /next
+
+Skip to the next item in the playlist. In single video mode, restarts the video.
+
+**Request:** Empty body or `{}`
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "mode": "playlist",
+  "file": "next-video.mp4",
+  "playlistIndex": 1
+}
+```
+
+---
+
+### POST /previous
+
+Go to the previous item in the playlist. In single video mode, restarts the video.
+
+**Request:** Empty body or `{}`
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "mode": "playlist",
+  "file": "previous-video.mp4",
+  "playlistIndex": 0
+}
+```
+
+---
+
+### POST /pause
+
+Pause the current playback. Works for all modes (video, playlist, url).
+
+**Request:** Empty body or `{}`
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "paused": true
+}
+```
+
+---
+
+### POST /resume
+
+Resume paused playback. Works for all modes.
+
+**Request:** Empty body or `{}`
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "paused": false
+}
+```
+
+---
+
+### POST /restart
+
+Restart the playlist from the beginning.
+
+**Request:** Empty body or `{}`
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "mode": "playlist",
+  "file": "first-video.mp4",
+  "playlistIndex": 0
+}
+```
+
+**Notes:**
+- Only works in playlist mode
+- Returns error if not in playlist mode
+
+---
+
+### GET /volume
+
+Get the current volume level.
+
+**Response:**
+```json
+{
+  "level": 10
+}
+```
+
+**Notes:**
+- Level range: 0-10 (0 = mute, 10 = max)
+- No authentication required
+
+---
+
+### POST /volume
+
+Set the system volume level.
+
+**Request:**
+```json
+{
+  "level": 7
+}
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "level": 7
+}
+```
+
+**Parameters:**
+- `level` (required): Volume level 0-10 (0 = mute, 10 = max)
+
+**Notes:**
+- Maps to ALSA percentage (level * 10)%
+- Attempts USB audio device first, falls back to default
+
+---
+
 ## WebSocket API
 
 Connect to `wss://<kiosk-domain>.ngrok-free.app` for real-time state updates.
 
 **Received messages:**
 ```json
-{"type": "state", "mode": "video", "file": "example.mp4", "url": null, "playlist": null, "playlistIndex": 0, "loop": true}
+{"type": "state", "mode": "video", "file": "example.mp4", "url": null, "playlist": null, "playlistIndex": 0, "loop": true, "paused": false}
 ```
 
 **Send messages:**
@@ -450,6 +628,62 @@ curl -X POST https://kiosk.ngrok-free.app/off \
   -H "Authorization: Bearer $API_KEY"
 ```
 
+### 8. Create custom playlist from mixed sources
+```bash
+curl -X POST https://kiosk.ngrok-free.app/playlist \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [
+      {"file": "intro.mp4"},
+      {"url": "https://example.com/video.mp4"},
+      {"url": "https://youtube.com/watch?v=dQw4w9WgXcQ"}
+    ],
+    "loop": true
+  }'
+```
+
+### 9. Control playback
+```bash
+# Pause
+curl -X POST https://kiosk.ngrok-free.app/pause \
+  -H "Authorization: Bearer $API_KEY"
+
+# Resume
+curl -X POST https://kiosk.ngrok-free.app/resume \
+  -H "Authorization: Bearer $API_KEY"
+
+# Skip to next
+curl -X POST https://kiosk.ngrok-free.app/next \
+  -H "Authorization: Bearer $API_KEY"
+
+# Go back to previous
+curl -X POST https://kiosk.ngrok-free.app/previous \
+  -H "Authorization: Bearer $API_KEY"
+
+# Restart playlist from beginning
+curl -X POST https://kiosk.ngrok-free.app/restart \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+### 10. Control volume
+```bash
+# Get current volume
+curl https://kiosk.ngrok-free.app/volume
+
+# Set volume to 70%
+curl -X POST https://kiosk.ngrok-free.app/volume \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"level": 7}'
+
+# Mute (volume 0)
+curl -X POST https://kiosk.ngrok-free.app/volume \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"level": 0}'
+```
+
 ---
 
 ## Python Client Example
@@ -543,6 +777,52 @@ class KioskClient:
         )
         return r.json()
 
+    def playlist(self, items: list, loop: bool = True) -> dict:
+        """Create playlist from mixed sources (files and URLs)."""
+        r = requests.post(
+            f'{self.base_url}/playlist',
+            headers=self.headers,
+            json={'items': items, 'loop': loop}
+        )
+        return r.json()
+
+    def next(self) -> dict:
+        """Skip to next item in playlist."""
+        r = requests.post(f'{self.base_url}/next', headers=self.headers)
+        return r.json()
+
+    def previous(self) -> dict:
+        """Go to previous item in playlist."""
+        r = requests.post(f'{self.base_url}/previous', headers=self.headers)
+        return r.json()
+
+    def pause(self) -> dict:
+        """Pause playback."""
+        r = requests.post(f'{self.base_url}/pause', headers=self.headers)
+        return r.json()
+
+    def resume(self) -> dict:
+        """Resume playback."""
+        r = requests.post(f'{self.base_url}/resume', headers=self.headers)
+        return r.json()
+
+    def restart(self) -> dict:
+        """Restart playlist from beginning."""
+        r = requests.post(f'{self.base_url}/restart', headers=self.headers)
+        return r.json()
+
+    def volume(self, level: int = None) -> dict:
+        """Get or set volume level (0-10)."""
+        if level is None:
+            r = requests.get(f'{self.base_url}/volume')
+        else:
+            r = requests.post(
+                f'{self.base_url}/volume',
+                headers=self.headers,
+                json={'level': level}
+            )
+        return r.json()
+
 # Usage
 kiosk = KioskClient('https://pi01.ngrok-free.app', 'your-api-key')
 print(kiosk.status())
@@ -563,6 +843,7 @@ interface KioskStatus {
   playlist: string[] | null;
   playlistIndex: number;
   loop: boolean;
+  paused: boolean;
   wsClients: number;
 }
 
@@ -627,6 +908,38 @@ class KioskClient {
 
   async syncAndPlay(collectionId: string, db: EdenDb = 'PROD', loop = true) {
     return this.request('POST', '/sync_and_play', { collectionId, db, loop });
+  }
+
+  async playlist(items: Array<{file?: string, url?: string}>, loop = true) {
+    return this.request('POST', '/playlist', { items, loop });
+  }
+
+  async next() {
+    return this.request('POST', '/next');
+  }
+
+  async previous() {
+    return this.request('POST', '/previous');
+  }
+
+  async pause() {
+    return this.request('POST', '/pause');
+  }
+
+  async resume() {
+    return this.request('POST', '/resume');
+  }
+
+  async restart() {
+    return this.request('POST', '/restart');
+  }
+
+  async volume(level?: number) {
+    if (level === undefined) {
+      const res = await fetch(`${this.baseUrl}/volume`);
+      return res.json();
+    }
+    return this.request('POST', '/volume', { level });
   }
 }
 

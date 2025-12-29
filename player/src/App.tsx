@@ -6,6 +6,7 @@ interface State {
   mode: Mode
   file: string | null
   url: string | null
+  paused: boolean
 }
 
 // Image display duration in playlist mode (ms)
@@ -79,7 +80,7 @@ function getWebSocketUrl(): string {
 const DEBUG = true
 
 export default function App() {
-  const [state, setState] = useState<State>({ mode: 'off', file: null, url: null })
+  const [state, setState] = useState<State>({ mode: 'off', file: null, url: null, paused: false })
   const [muted, setMuted] = useState(false) // Start unmuted, will auto-mute if blocked
   const [showHint, setShowHint] = useState(false)
   const [videoError, setVideoError] = useState<string | null>(null)
@@ -118,11 +119,12 @@ export default function App() {
         const data = JSON.parse(event.data)
         console.log('[WS] Received:', data)
         if (data.type === 'state') {
-          console.log('[WS] Setting state:', { mode: data.mode, file: data.file, url: data.url })
+          console.log('[WS] Setting state:', { mode: data.mode, file: data.file, url: data.url, paused: data.paused })
           setState({
             mode: data.mode,
             file: data.file,
             url: data.url,
+            paused: data.paused || false,
           })
         }
       } catch (e) {
@@ -218,6 +220,22 @@ export default function App() {
     }
   }, [state.mode, state.file, showVideo, fileType, showImage])
 
+  // Handle pause/resume state from server
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    if (state.paused) {
+      console.log('[Video] Pausing due to server state')
+      video.pause()
+    } else if (showVideo && video.paused && video.src) {
+      console.log('[Video] Resuming due to server state')
+      video.play().catch((err) => {
+        console.log('[Video] Resume play failed:', err.message)
+      })
+    }
+  }, [state.paused, showVideo])
+
   return (
     <div style={styles.container}>
       {/* Debug overlay */}
@@ -240,6 +258,7 @@ export default function App() {
           <div>fileType: {fileType}</div>
           <div>showVideo: {String(showVideo)}</div>
           <div>showImage: {String(showImage)}</div>
+          <div>paused: {String(state.paused)}</div>
           {videoError && <div style={{color: 'red'}}>error: {videoError}</div>}
         </div>
       )}

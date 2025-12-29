@@ -11,7 +11,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { syncCollection } = require('./eden');
 
@@ -61,7 +61,8 @@ function requiresAuth(method, urlPath) {
 }
 
 // State
-let state = { mode: 'off', file: null, url: null, playlist: null, playlistIndex: 0, loop: true };
+let state = { mode: 'off', file: null, url: null, playlist: null, playlistIndex: 0, loop: true, paused: false };
+let currentVolume = 10; // 0-10 scale, default max
 const wsClients = new Set();
 
 // Advance to next video in playlist
@@ -84,9 +85,63 @@ function nextInPlaylist() {
 
   state.playlistIndex = nextIndex;
   state.file = state.playlist[nextIndex];
+  state.paused = false;
   broadcast();
   log(`Playlist: playing ${state.file} (${nextIndex + 1}/${state.playlist.length})`);
   return true;
+}
+
+// Go to previous video in playlist
+function previousInPlaylist() {
+  if (!state.playlist || state.playlist.length === 0) return false;
+
+  let prevIndex = state.playlistIndex - 1;
+
+  if (prevIndex < 0) {
+    if (state.loop) {
+      prevIndex = state.playlist.length - 1;
+    } else {
+      prevIndex = 0; // Stay at start if not looping
+    }
+  }
+
+  state.playlistIndex = prevIndex;
+  state.file = state.playlist[prevIndex];
+  state.paused = false;
+  broadcast();
+  log(`Playlist: playing ${state.file} (${prevIndex + 1}/${state.playlist.length})`);
+  return true;
+}
+
+// Set system volume using ALSA
+function setVolume(level) {
+  const clampedLevel = Math.min(10, Math.max(0, Math.round(level)));
+  const percent = clampedLevel * 10;
+  currentVolume = clampedLevel;
+
+  try {
+    // Try common ALSA device names
+    try {
+      execSync(`amixer set PCM ${percent}%`, { stdio: 'ignore' });
+    } catch {
+      try {
+        execSync(`amixer set Master ${percent}%`, { stdio: 'ignore' });
+      } catch {
+        // Try with specific card
+        execSync(`amixer -c 0 set PCM ${percent}%`, { stdio: 'ignore' });
+      }
+    }
+    log(`Volume set to ${clampedLevel} (${percent}%)`);
+    return true;
+  } catch (err) {
+    log(`Volume error: ${err.message}`);
+    return false;
+  }
+}
+
+// Check if URL is a YouTube link
+function isYouTubeUrl(url) {
+  return /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(url);
 }
 
 // Minimal logging in production
@@ -429,10 +484,13 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET') {
     switch (urlPath) {
       case '/':
-        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off', '/cache', '/cache_and_play', '/youtube', '/youtube_and_play', '/sync', '/sync_and_play'] });
+        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off', '/cache', '/cache_and_play', '/youtube', '/youtube_and_play', '/sync', '/sync_and_play', '/playlist', '/next', '/previous', '/pause', '/resume', '/restart', '/volume'] });
         break;
       case '/status':
         jsonResponse(res, { ...state, wsClients: wsClients.size });
+        break;
+      case '/volume':
+        jsonResponse(res, { level: currentVolume });
         break;
       case '/files':
         try {
@@ -657,7 +715,8 @@ const server = http.createServer(async (req, res) => {
             url: null,
             playlist,
             playlistIndex: 0,
-            loop
+            loop,
+            paused: false
           };
           broadcast();
           log(`Playing playlist: ${playlist.length} videos, starting with ${playlist[0]}`);
@@ -676,6 +735,161 @@ const server = http.createServer(async (req, res) => {
           log(`Sync and play error: ${err.message}`);
           jsonResponse(res, { error: err.message }, 400);
         }
+        break;
+      }
+      case '/playlist': {
+        const items = body.items;
+        const loop = body.loop !== false; // Default to true
+        if (!items || !Array.isArray(items) || items.length === 0) {
+          jsonResponse(res, { error: 'Missing or empty items array' }, 400);
+          return;
+        }
+
+        log(`Creating playlist with ${items.length} items`);
+        const playlist = [];
+        const failed = [];
+
+        // Process items sequentially
+        for (const item of items) {
+          if (item.file) {
+            // Cached file - verify it exists
+            const filePath = path.join(MEDIA_DIR, item.file);
+            if (fs.existsSync(filePath)) {
+              playlist.push(item.file);
+              log(`  Added cached file: ${item.file}`);
+            } else {
+              failed.push({ file: item.file, error: 'File not found' });
+              log(`  Skipped (not found): ${item.file}`);
+            }
+          } else if (item.url) {
+            // URL to download
+            try {
+              let result;
+              if (isYouTubeUrl(item.url)) {
+                log(`  Downloading YouTube: ${item.url}`);
+                result = await downloadYouTube(item.url);
+              } else {
+                log(`  Downloading URL: ${item.url}`);
+                result = await downloadAndCache(item.url);
+              }
+              playlist.push(result.filename);
+              log(`  Added: ${result.filename} (cached: ${result.cached})`);
+            } catch (err) {
+              failed.push({ url: item.url, error: err.message });
+              log(`  Skipped (download failed): ${item.url} - ${err.message}`);
+            }
+          } else {
+            failed.push({ item, error: 'Item must have "file" or "url" property' });
+          }
+        }
+
+        if (playlist.length === 0) {
+          jsonResponse(res, { error: 'No valid items in playlist', failed }, 400);
+          return;
+        }
+
+        // Start playlist
+        state = {
+          mode: 'playlist',
+          file: playlist[0],
+          url: null,
+          playlist,
+          playlistIndex: 0,
+          loop,
+          paused: false
+        };
+        broadcast();
+        log(`Playing playlist: ${playlist.length} items, starting with ${playlist[0]}`);
+
+        jsonResponse(res, {
+          status: 'ok',
+          mode: 'playlist',
+          playlist,
+          currentFile: playlist[0],
+          loop,
+          failed: failed.length > 0 ? failed : undefined
+        });
+        break;
+      }
+      case '/next': {
+        if (state.mode === 'playlist') {
+          nextInPlaylist();
+          jsonResponse(res, { status: 'ok', ...state });
+        } else if (state.mode === 'video' && state.file) {
+          // Restart single video
+          state.paused = false;
+          broadcast();
+          jsonResponse(res, { status: 'ok', action: 'restart', ...state });
+        } else {
+          jsonResponse(res, { error: 'No active playback' }, 400);
+        }
+        break;
+      }
+      case '/previous': {
+        if (state.mode === 'playlist') {
+          previousInPlaylist();
+          jsonResponse(res, { status: 'ok', ...state });
+        } else if (state.mode === 'video' && state.file) {
+          // Restart single video
+          state.paused = false;
+          broadcast();
+          jsonResponse(res, { status: 'ok', action: 'restart', ...state });
+        } else {
+          jsonResponse(res, { error: 'No active playback' }, 400);
+        }
+        break;
+      }
+      case '/pause': {
+        if (state.mode === 'off') {
+          jsonResponse(res, { error: 'No active playback' }, 400);
+          return;
+        }
+        state.paused = true;
+        broadcast();
+        log('Playback paused');
+        jsonResponse(res, { status: 'ok', ...state });
+        break;
+      }
+      case '/resume': {
+        if (state.mode === 'off') {
+          jsonResponse(res, { error: 'No active playback' }, 400);
+          return;
+        }
+        state.paused = false;
+        broadcast();
+        log('Playback resumed');
+        jsonResponse(res, { status: 'ok', ...state });
+        break;
+      }
+      case '/restart': {
+        if (state.mode === 'playlist' && state.playlist && state.playlist.length > 0) {
+          state.playlistIndex = 0;
+          state.file = state.playlist[0];
+          state.paused = false;
+          broadcast();
+          log(`Playlist restarted: ${state.file}`);
+          jsonResponse(res, { status: 'ok', ...state });
+        } else if (state.mode === 'video' && state.file) {
+          state.paused = false;
+          broadcast();
+          jsonResponse(res, { status: 'ok', action: 'restart', ...state });
+        } else {
+          jsonResponse(res, { error: 'No active playback to restart' }, 400);
+        }
+        break;
+      }
+      case '/volume': {
+        const level = body.level;
+        if (level === undefined || typeof level !== 'number') {
+          jsonResponse(res, { error: 'Missing or invalid level parameter (0-10)' }, 400);
+          return;
+        }
+        if (level < 0 || level > 10) {
+          jsonResponse(res, { error: 'Level must be between 0 and 10' }, 400);
+          return;
+        }
+        setVolume(level);
+        jsonResponse(res, { status: 'ok', level: currentVolume });
         break;
       }
       default:

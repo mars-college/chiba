@@ -130,6 +130,14 @@ GET endpoints (`/status`, `/files`, `/player`, `/media/*`) are public and don't 
 | POST | `/youtube_and_play` | `{"url": "https://youtube.com/..."}` | Download YouTube + play |
 | POST | `/sync` | `{"collectionId": "...", "db": "PROD"}` | Download collection from Eden |
 | POST | `/sync_and_play` | `{"collectionId": "...", "db": "PROD", "loop": true}` | Sync + play as playlist |
+| POST | `/playlist` | `{"items": [...], "loop": true}` | Create playlist from files/URLs |
+| POST | `/next` | `{}` | Skip to next item |
+| POST | `/previous` | `{}` | Go to previous item |
+| POST | `/pause` | `{}` | Pause playback |
+| POST | `/resume` | `{}` | Resume playback |
+| POST | `/restart` | `{}` | Restart playlist from beginning |
+| GET | `/volume` | - | Get current volume (0-10) |
+| POST | `/volume` | `{"level": 7}` | Set volume (0-10) |
 
 **Note:** Eden endpoints accept `db` parameter: `"PROD"` (default) or `"STAGE"` for staging API.
 
@@ -175,6 +183,25 @@ curl -X POST https://your-domain.ngrok-free.app/sync_and_play \
 # Turn off display
 curl -X POST https://your-domain.ngrok-free.app/off \
   -H "Authorization: Bearer YOUR_API_KEY"
+
+# Create a custom playlist from files and URLs
+curl -X POST https://your-domain.ngrok-free.app/playlist \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{"file": "video1.mp4"}, {"url": "https://example.com/video.mp4"}], "loop": true}'
+
+# Playback controls
+curl -X POST https://your-domain.ngrok-free.app/pause -H "Authorization: Bearer YOUR_API_KEY"
+curl -X POST https://your-domain.ngrok-free.app/resume -H "Authorization: Bearer YOUR_API_KEY"
+curl -X POST https://your-domain.ngrok-free.app/next -H "Authorization: Bearer YOUR_API_KEY"
+curl -X POST https://your-domain.ngrok-free.app/previous -H "Authorization: Bearer YOUR_API_KEY"
+
+# Volume control (0-10)
+curl https://your-domain.ngrok-free.app/volume
+curl -X POST https://your-domain.ngrok-free.app/volume \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"level": 7}'
 ```
 
 ### Playlist Behavior
@@ -189,9 +216,9 @@ curl -X POST https://your-domain.ngrok-free.app/off \
 Connect to `wss://your-domain.ngrok-free.app` for real-time state updates:
 
 ```json
-{"type": "state", "mode": "video", "file": "example.mp4", "url": null}
-{"type": "state", "mode": "playlist", "file": "current.mp4", "playlist": [...], "loop": true}
-{"type": "state", "mode": "off", "file": null, "url": null}
+{"type": "state", "mode": "video", "file": "example.mp4", "url": null, "paused": false}
+{"type": "state", "mode": "playlist", "file": "current.mp4", "playlist": [...], "loop": true, "paused": false}
+{"type": "state", "mode": "off", "file": null, "url": null, "paused": false}
 ```
 
 ## File Structure
