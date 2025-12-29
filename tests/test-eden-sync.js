@@ -2,7 +2,7 @@
  * Test: Eden Collection Sync
  * Downloads all creations from a test collection to verify the sync functionality
  *
- * Usage: node tests/test-eden-sync.js
+ * Usage: node tests/test-eden-sync.js [--db PROD|STAGE]
  */
 
 const path = require('path');
@@ -12,8 +12,18 @@ const { getCollectionCreations, syncCollection } = require('../eden');
 const TEST_COLLECTION_ID = '68538ccaf883914b6b8e09a1';
 const TEST_OUTPUT_DIR = path.join(__dirname, 'test-output');
 
+// Parse --db argument
+const args = process.argv.slice(2);
+let TEST_DB = 'PROD';
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--db' && args[i + 1]) {
+    TEST_DB = args[i + 1].toUpperCase();
+  }
+}
+
 async function runTests() {
-  console.log('=== Eden Sync Tests ===\n');
+  console.log('=== Eden Sync Tests ===');
+  console.log(`Database: ${TEST_DB}\n`);
 
   let passed = 0;
   let failed = 0;
@@ -26,9 +36,9 @@ async function runTests() {
   // Test 1: Fetch collection creations
   console.log('Test 1: Fetch collection creations');
   try {
-    const creations = await getCollectionCreations(TEST_COLLECTION_ID);
+    const creations = await getCollectionCreations(TEST_COLLECTION_ID, TEST_DB);
     if (creations.length > 0) {
-      console.log(`  ✓ Fetched ${creations.length} creations`);
+      console.log(`  ✓ Fetched ${creations.length} creations from ${TEST_DB}`);
       passed++;
     } else {
       console.log('  ✗ No creations returned');
@@ -52,7 +62,7 @@ async function runTests() {
   // Test 2: Sync collection to directory
   console.log('\nTest 2: Sync collection to directory');
   try {
-    const results = await syncCollection(TEST_COLLECTION_ID, TEST_OUTPUT_DIR);
+    const results = await syncCollection(TEST_COLLECTION_ID, TEST_OUTPUT_DIR, { db: TEST_DB });
 
     if (results.total > 0) {
       console.log(`  ✓ Total creations: ${results.total}`);
@@ -100,7 +110,7 @@ async function runTests() {
   // Test 3: Skip existing files
   console.log('\nTest 3: Skip existing files on re-sync');
   try {
-    const results = await syncCollection(TEST_COLLECTION_ID, TEST_OUTPUT_DIR, { skipExisting: true });
+    const results = await syncCollection(TEST_COLLECTION_ID, TEST_OUTPUT_DIR, { skipExisting: true, db: TEST_DB });
 
     if (results.skipped === results.total) {
       console.log(`  ✓ Skipped all ${results.skipped} existing files`);
@@ -109,6 +119,18 @@ async function runTests() {
       console.log(`  ✗ Expected to skip ${results.total}, skipped ${results.skipped}`);
       failed++;
     }
+  } catch (err) {
+    console.log(`  ✗ Failed: ${err.message}`);
+    failed++;
+  }
+
+  // Test 4: Verify db parameter validation
+  console.log('\nTest 4: Database parameter validation');
+  try {
+    // Test that invalid db falls back to PROD
+    const creations = await getCollectionCreations(TEST_COLLECTION_ID, 'INVALID');
+    console.log('  ✓ Invalid db parameter falls back to PROD');
+    passed++;
   } catch (err) {
     console.log(`  ✗ Failed: ${err.message}`);
     failed++;

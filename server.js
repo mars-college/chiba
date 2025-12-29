@@ -11,6 +11,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { syncCollection } = require('./eden');
 
@@ -331,6 +332,78 @@ function downloadAndCache(url) {
   });
 }
 
+// Download YouTube video using yt-dlp
+function downloadYouTube(url) {
+  return new Promise((resolve, reject) => {
+    // Generate a temp filename based on URL hash
+    const urlHash = crypto.createHash('md5').update(url).digest('hex');
+    const outputTemplate = path.join(MEDIA_DIR, `${urlHash}.%(ext)s`);
+
+    // Check if we already have this video cached
+    const existingFiles = fs.readdirSync(MEDIA_DIR).filter(f => f.startsWith(urlHash));
+    if (existingFiles.length > 0) {
+      log(`YouTube already cached: ${existingFiles[0]}`);
+      return resolve({ filename: existingFiles[0], cached: true });
+    }
+
+    log(`Downloading YouTube: ${url}`);
+
+    // yt-dlp arguments for best quality up to 1080p
+    const args = [
+      '-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+      '--merge-output-format', 'mp4',
+      '-o', outputTemplate,
+      '--no-playlist',
+      '--no-warnings',
+      '--progress',
+      url
+    ];
+
+    const ytdlp = spawn('yt-dlp', args);
+
+    let stderr = '';
+    let lastProgress = '';
+
+    ytdlp.stdout.on('data', (data) => {
+      const output = data.toString();
+      // Log progress updates
+      if (output.includes('%')) {
+        const match = output.match(/(\d+\.?\d*)%/);
+        if (match && match[1] !== lastProgress) {
+          lastProgress = match[1];
+          log(`YouTube download: ${lastProgress}%`);
+        }
+      }
+    });
+
+    ytdlp.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ytdlp.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`yt-dlp failed: ${stderr || 'Unknown error'}`));
+        return;
+      }
+
+      // Find the downloaded file
+      const files = fs.readdirSync(MEDIA_DIR).filter(f => f.startsWith(urlHash));
+      if (files.length === 0) {
+        reject(new Error('Download completed but file not found'));
+        return;
+      }
+
+      const filename = files[0];
+      log(`YouTube cached: ${filename}`);
+      resolve({ filename, cached: false });
+    });
+
+    ytdlp.on('error', (err) => {
+      reject(new Error(`Failed to start yt-dlp: ${err.message}. Is yt-dlp installed?`));
+    });
+  });
+}
+
 // HTTP server
 const server = http.createServer(async (req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -356,7 +429,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET') {
     switch (urlPath) {
       case '/':
-        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off', '/cache', '/sync', '/sync_and_play'] });
+        jsonResponse(res, { service: 'kiosk-server', endpoints: ['/status', '/files', '/file', '/url', '/off', '/cache', '/cache_and_play', '/youtube', '/youtube_and_play', '/sync', '/sync_and_play'] });
         break;
       case '/status':
         jsonResponse(res, { ...state, wsClients: wsClients.size });
@@ -442,6 +515,75 @@ const server = http.createServer(async (req, res) => {
           });
         } catch (err) {
           log(`Cache error: ${err.message}`);
+          jsonResponse(res, { error: err.message }, 400);
+        }
+        break;
+      }
+      case '/cache_and_play': {
+        const url = body.url;
+        if (!url) {
+          jsonResponse(res, { error: 'Missing url parameter' }, 400);
+          return;
+        }
+        try {
+          log(`Cache and play: ${url}`);
+          const result = await downloadAndCache(url);
+          state = { mode: 'video', file: result.filename, url: null, playlist: null, playlistIndex: 0, loop: true };
+          broadcast();
+          log(`Playing: ${result.filename}`);
+          jsonResponse(res, {
+            status: 'ok',
+            filename: result.filename,
+            alreadyCached: result.cached,
+            playUrl: `/media/${result.filename}`,
+            ...state
+          });
+        } catch (err) {
+          log(`Cache and play error: ${err.message}`);
+          jsonResponse(res, { error: err.message }, 400);
+        }
+        break;
+      }
+      case '/youtube': {
+        const url = body.url;
+        if (!url) {
+          jsonResponse(res, { error: 'Missing url parameter' }, 400);
+          return;
+        }
+        try {
+          const result = await downloadYouTube(url);
+          jsonResponse(res, {
+            status: 'ok',
+            filename: result.filename,
+            alreadyCached: result.cached,
+            playUrl: `/media/${result.filename}`
+          });
+        } catch (err) {
+          log(`YouTube error: ${err.message}`);
+          jsonResponse(res, { error: err.message }, 400);
+        }
+        break;
+      }
+      case '/youtube_and_play': {
+        const url = body.url;
+        if (!url) {
+          jsonResponse(res, { error: 'Missing url parameter' }, 400);
+          return;
+        }
+        try {
+          const result = await downloadYouTube(url);
+          state = { mode: 'video', file: result.filename, url: null, playlist: null, playlistIndex: 0, loop: true };
+          broadcast();
+          log(`Playing YouTube: ${result.filename}`);
+          jsonResponse(res, {
+            status: 'ok',
+            filename: result.filename,
+            alreadyCached: result.cached,
+            playUrl: `/media/${result.filename}`,
+            ...state
+          });
+        } catch (err) {
+          log(`YouTube and play error: ${err.message}`);
           jsonResponse(res, { error: err.message }, 400);
         }
         break;

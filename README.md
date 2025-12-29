@@ -8,10 +8,12 @@ A lightweight digital signage solution for Raspberry Pi. Node.js server with rea
 - Real-time WebSocket control (instant video switching)
 - Playlist support (videos + images)
 - Eden collection sync (download and play from Eden API)
+- **YouTube video download** via yt-dlp (up to 1080p)
 - Public URL via ngrok tunnel
 - **API key authentication** for secure remote control
 - HTTP API for curl/scripting
-- Video with audio (HDMI output)
+- USB audio device auto-detection
+- Video with audio (USB speakers or HDMI)
 - Local video files and web URLs
 - Auto-start on boot
 - Minimal resource usage
@@ -122,8 +124,14 @@ GET endpoints (`/status`, `/files`, `/player`, `/media/*`) are public and don't 
 | POST | `/file` | `{"file": "video.mp4"}` | Play a single video (loop) |
 | POST | `/url` | `{"url": "https://..."}` | Show website in iframe |
 | POST | `/off` | - | Black screen |
-| POST | `/sync` | `{"collectionId": "..."}` | Download collection from Eden |
-| POST | `/sync_and_play` | `{"collectionId": "...", "loop": true}` | Sync + play as playlist |
+| POST | `/cache` | `{"url": "https://..."}` | Download video from URL |
+| POST | `/cache_and_play` | `{"url": "https://..."}` | Download + play immediately |
+| POST | `/youtube` | `{"url": "https://youtube.com/..."}` | Download YouTube video |
+| POST | `/youtube_and_play` | `{"url": "https://youtube.com/..."}` | Download YouTube + play |
+| POST | `/sync` | `{"collectionId": "...", "db": "PROD"}` | Download collection from Eden |
+| POST | `/sync_and_play` | `{"collectionId": "...", "db": "PROD", "loop": true}` | Sync + play as playlist |
+
+**Note:** Eden endpoints accept `db` parameter: `"PROD"` (default) or `"STAGE"` for staging API.
 
 ### Examples
 
@@ -136,21 +144,37 @@ curl https://your-domain.ngrok-free.app/files
 
 # Play a single video (loops)
 curl -X POST https://your-domain.ngrok-free.app/file \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"file": "example.mp4"}'
 
+# Download and play a YouTube video
+curl -X POST https://your-domain.ngrok-free.app/youtube_and_play \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+
+# Download any video URL and play immediately
+curl -X POST https://your-domain.ngrok-free.app/cache_and_play \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/video.mp4"}'
+
 # Sync Eden collection and play as playlist
 curl -X POST https://your-domain.ngrok-free.app/sync_and_play \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"collectionId": "68538ccaf883914b6b8e09a1", "loop": true}'
 
-# Play playlist without looping (stops after last item)
+# Sync from Eden staging environment
 curl -X POST https://your-domain.ngrok-free.app/sync_and_play \
+  -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"collectionId": "68538ccaf883914b6b8e09a1", "loop": false}'
+  -d '{"collectionId": "68538ccaf883914b6b8e09a1", "db": "STAGE"}'
 
 # Turn off display
-curl -X POST https://your-domain.ngrok-free.app/off
+curl -X POST https://your-domain.ngrok-free.app/off \
+  -H "Authorization: Bearer YOUR_API_KEY"
 ```
 
 ### Playlist Behavior
@@ -233,11 +257,25 @@ ngrok http 8080 --domain=your-domain.ngrok-free.app
 
 ### No audio
 
-```bash
-# Check audio device
-amixer
+The setup script auto-detects USB audio devices and configures them as default.
 
-# Set HDMI audio
+```bash
+# List audio devices
+aplay -l
+
+# Check current ALSA config
+cat ~/.asoundrc
+
+# Test audio output
+speaker-test -t wav -c 2
+
+# For USB speakers, check it's not in Bluetooth mode
+# The speaker should show "USB" on its display, not a Bluetooth device name
+
+# Set volume to max
+amixer -c S3 set PCM 100% unmute  # Replace S3 with your device name
+
+# For HDMI audio instead of USB
 sudo raspi-config  # System Options > Audio > HDMI
 ```
 

@@ -177,14 +177,14 @@ Download a video from URL and save it locally. The file is saved with its MD5 ha
 
 ---
 
-### POST /sync
+### POST /cache_and_play
 
-Sync media files from an Eden collection (download only, don't play).
+Download a video from URL and immediately start playing it.
 
 **Request:**
 ```json
 {
-  "collectionId": "68538ccaf883914b6b8e09a1"
+  "url": "https://example.com/video.mp4"
 }
 ```
 
@@ -192,7 +192,98 @@ Sync media files from an Eden collection (download only, don't play).
 ```json
 {
   "status": "ok",
+  "filename": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.mp4",
+  "alreadyCached": false,
+  "playUrl": "/media/a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.mp4",
+  "mode": "video",
+  "file": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.mp4"
+}
+```
+
+---
+
+### POST /youtube
+
+Download a YouTube video using yt-dlp and cache it locally. Downloads best quality up to 1080p.
+
+**Request:**
+```json
+{
+  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+}
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "filename": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.mp4",
+  "alreadyCached": false,
+  "playUrl": "/media/a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.mp4"
+}
+```
+
+**Notes:**
+- Requires `yt-dlp` installed on the kiosk (setup script installs it)
+- Caches by URL hash - same URL won't be re-downloaded
+- Downloads best quality up to 1080p, merged to MP4
+- Supports YouTube, Vimeo, and other yt-dlp compatible sites
+
+**Errors:**
+```json
+{"error": "yt-dlp failed: Video unavailable"}
+{"error": "Failed to start yt-dlp: Is yt-dlp installed?"}
+```
+
+---
+
+### POST /youtube_and_play
+
+Download a YouTube video and immediately start playing it.
+
+**Request:**
+```json
+{
+  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+}
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "filename": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.mp4",
+  "alreadyCached": false,
+  "playUrl": "/media/a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.mp4",
+  "mode": "video",
+  "file": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.mp4"
+}
+```
+
+---
+
+### POST /sync
+
+Sync media files from an Eden collection (download only, don't play).
+
+**Request:**
+```json
+{
   "collectionId": "68538ccaf883914b6b8e09a1",
+  "db": "PROD"
+}
+```
+
+**Parameters:**
+- `collectionId` (required): Eden collection ID
+- `db` (optional, default: "PROD"): Database environment - `"PROD"` or `"STAGE"`
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "collectionId": "68538ccaf883914b6b8e09a1",
+  "db": "PROD",
   "downloaded": 5,
   "skipped": 2,
   "failed": 0,
@@ -202,6 +293,10 @@ Sync media files from an Eden collection (download only, don't play).
   ]
 }
 ```
+
+**API Environments:**
+- `PROD` → `https://api.eden.art`
+- `STAGE` → `https://staging.api.eden.art`
 
 **Requires:** `EDEN_API_KEY` configured on the kiosk.
 
@@ -215,12 +310,14 @@ Sync an Eden collection and immediately start playing as a playlist.
 ```json
 {
   "collectionId": "68538ccaf883914b6b8e09a1",
+  "db": "PROD",
   "loop": true
 }
 ```
 
 **Parameters:**
 - `collectionId` (required): Eden collection ID
+- `db` (optional, default: "PROD"): Database environment - `"PROD"` or `"STAGE"`
 - `loop` (optional, default: true): Whether to loop the playlist
 
 **Response:**
@@ -228,6 +325,7 @@ Sync an Eden collection and immediately start playing as a playlist.
 {
   "status": "ok",
   "collectionId": "68538ccaf883914b6b8e09a1",
+  "db": "PROD",
   "mode": "playlist",
   "loop": true,
   "playlist": ["abc123.mp4", "def456.mp4", "ghi789.jpg"],
@@ -289,7 +387,23 @@ HTTP status codes:
 
 ## Example Workflows
 
-### 1. Cache and play a video from URL
+### 1. Download and play a YouTube video
+```bash
+curl -X POST https://kiosk.ngrok-free.app/youtube_and_play \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+```
+
+### 2. Cache and play a video from URL (one step)
+```bash
+curl -X POST https://kiosk.ngrok-free.app/cache_and_play \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/video.mp4"}'
+```
+
+### 3. Cache and play a video from URL (two steps)
 ```bash
 # Download video
 RESULT=$(curl -s -X POST https://kiosk.ngrok-free.app/cache \
@@ -307,7 +421,7 @@ curl -X POST https://kiosk.ngrok-free.app/file \
   -d "{\"file\": \"$FILENAME\"}"
 ```
 
-### 2. Sync collection and play
+### 4. Sync collection and play (production)
 ```bash
 curl -X POST https://kiosk.ngrok-free.app/sync_and_play \
   -H "Authorization: Bearer $API_KEY" \
@@ -315,14 +429,22 @@ curl -X POST https://kiosk.ngrok-free.app/sync_and_play \
   -d '{"collectionId": "68538ccaf883914b6b8e09a1", "loop": true}'
 ```
 
-### 3. Check status and list files
+### 5. Sync collection from staging environment
+```bash
+curl -X POST https://kiosk.ngrok-free.app/sync_and_play \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"collectionId": "68538ccaf883914b6b8e09a1", "db": "STAGE", "loop": true}'
+```
+
+### 6. Check status and list files
 ```bash
 # No auth needed for GET requests
 curl https://kiosk.ngrok-free.app/status
 curl https://kiosk.ngrok-free.app/files
 ```
 
-### 4. Turn off display
+### 7. Turn off display
 ```bash
 curl -X POST https://kiosk.ngrok-free.app/off \
   -H "Authorization: Bearer $API_KEY"
@@ -376,12 +498,48 @@ class KioskClient:
         )
         return r.json()
 
-    def sync_and_play(self, collection_id: str, loop: bool = True) -> dict:
+    def cache_and_play(self, url: str) -> dict:
+        """Download a video from URL and play immediately."""
+        r = requests.post(
+            f'{self.base_url}/cache_and_play',
+            headers=self.headers,
+            json={'url': url}
+        )
+        return r.json()
+
+    def youtube(self, url: str) -> dict:
+        """Download and cache a YouTube video."""
+        r = requests.post(
+            f'{self.base_url}/youtube',
+            headers=self.headers,
+            json={'url': url}
+        )
+        return r.json()
+
+    def youtube_and_play(self, url: str) -> dict:
+        """Download a YouTube video and play immediately."""
+        r = requests.post(
+            f'{self.base_url}/youtube_and_play',
+            headers=self.headers,
+            json={'url': url}
+        )
+        return r.json()
+
+    def sync(self, collection_id: str, db: str = 'PROD') -> dict:
+        """Sync Eden collection (download only)."""
+        r = requests.post(
+            f'{self.base_url}/sync',
+            headers=self.headers,
+            json={'collectionId': collection_id, 'db': db}
+        )
+        return r.json()
+
+    def sync_and_play(self, collection_id: str, db: str = 'PROD', loop: bool = True) -> dict:
         """Sync Eden collection and play as playlist."""
         r = requests.post(
             f'{self.base_url}/sync_and_play',
             headers=self.headers,
-            json={'collectionId': collection_id, 'loop': loop}
+            json={'collectionId': collection_id, 'db': db, 'loop': loop}
         )
         return r.json()
 
@@ -389,6 +547,8 @@ class KioskClient:
 kiosk = KioskClient('https://pi01.ngrok-free.app', 'your-api-key')
 print(kiosk.status())
 kiosk.play('example.mp4')
+kiosk.youtube_and_play('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+kiosk.sync_and_play('collection-id', db='STAGE')
 ```
 
 ---
@@ -405,6 +565,8 @@ interface KioskStatus {
   loop: boolean;
   wsClients: number;
 }
+
+type EdenDb = 'PROD' | 'STAGE';
 
 class KioskClient {
   constructor(
@@ -447,8 +609,24 @@ class KioskClient {
     return this.request('POST', '/cache', { url });
   }
 
-  async syncAndPlay(collectionId: string, loop = true) {
-    return this.request('POST', '/sync_and_play', { collectionId, loop });
+  async cacheAndPlay(url: string) {
+    return this.request('POST', '/cache_and_play', { url });
+  }
+
+  async youtube(url: string) {
+    return this.request('POST', '/youtube', { url });
+  }
+
+  async youtubeAndPlay(url: string) {
+    return this.request('POST', '/youtube_and_play', { url });
+  }
+
+  async sync(collectionId: string, db: EdenDb = 'PROD') {
+    return this.request('POST', '/sync', { collectionId, db });
+  }
+
+  async syncAndPlay(collectionId: string, db: EdenDb = 'PROD', loop = true) {
+    return this.request('POST', '/sync_and_play', { collectionId, db, loop });
   }
 }
 
@@ -456,4 +634,6 @@ class KioskClient {
 const kiosk = new KioskClient('https://pi01.ngrok-free.app', 'your-api-key');
 console.log(await kiosk.status());
 await kiosk.play('example.mp4');
+await kiosk.youtubeAndPlay('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+await kiosk.syncAndPlay('collection-id', 'STAGE');
 ```

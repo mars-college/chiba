@@ -110,7 +110,18 @@ sudo apt install -y \
     nodejs \
     npm \
     curl \
-    wget
+    wget \
+    python3 \
+    python3-pip
+
+echo "=== Installing yt-dlp ==="
+sudo pip3 install --break-system-packages yt-dlp 2>/dev/null || sudo pip3 install yt-dlp
+# Verify installation
+if command -v yt-dlp &>/dev/null; then
+    echo "yt-dlp installed: $(yt-dlp --version)"
+else
+    echo "Warning: yt-dlp installation may have failed"
+fi
 
 echo "=== Installing ngrok (arm64) ==="
 # Download ngrok directly for arm64
@@ -183,7 +194,8 @@ npm install ws dotenv
 
 echo "=== Configuring audio output ==="
 # Find USB audio device (exclude HDMI and built-in headphones)
-USB_AUDIO=$(aplay -l 2>/dev/null | grep -E "^card [0-9]+" | grep -v "vc4-hdmi" | grep -v "bcm2835" | head -1 | sed -E 's/^card ([0-9]+): ([^,]+),.*/\2/' | xargs)
+# Extract just the card name (before the space/bracket), e.g., "S3" from "S3 [PowerConf S3]"
+USB_AUDIO=$(aplay -l 2>/dev/null | grep -E "^card [0-9]+" | grep -v "vc4-hdmi" | grep -v "bcm2835" | head -1 | sed -E 's/^card ([0-9]+): ([^ \[]+).*/\2/')
 
 if [ -n "$USB_AUDIO" ]; then
     echo "Found USB audio device: $USB_AUDIO"
@@ -311,6 +323,7 @@ echo "Checking installed files..."
 [ -d "$INSTALL_DIR/chiba/node_modules/ws" ] && echo "  ✓ node_modules/ws" || echo "  ✗ node_modules/ws MISSING"
 [ -f "$INSTALL_DIR/chiba/.env" ] && echo "  ✓ .env configured" || echo "  ✗ .env MISSING"
 command -v ngrok &>/dev/null && echo "  ✓ ngrok installed ($(ngrok version))" || echo "  ✗ ngrok MISSING"
+command -v yt-dlp &>/dev/null && echo "  ✓ yt-dlp installed ($(yt-dlp --version))" || echo "  ✗ yt-dlp MISSING"
 
 echo ""
 echo "Checking services..."
@@ -365,11 +378,29 @@ echo "    -H 'Authorization: Bearer $API_KEY' \\"
 echo "    -H 'Content-Type: application/json' \\"
 echo "    -d '{\"file\":\"example.mp4\"}'"
 echo ""
-echo "  # Sync and play collection"
+echo "  # Download and play YouTube video"
+echo "  curl -X POST https://$NGROK_DOMAIN/youtube_and_play \\"
+echo "    -H 'Authorization: Bearer $API_KEY' \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"url\":\"https://www.youtube.com/watch?v=VIDEO_ID\"}'"
+echo ""
+echo "  # Download URL and play immediately"
+echo "  curl -X POST https://$NGROK_DOMAIN/cache_and_play \\"
+echo "    -H 'Authorization: Bearer $API_KEY' \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"url\":\"https://example.com/video.mp4\"}'"
+echo ""
+echo "  # Sync and play Eden collection (PROD)"
 echo "  curl -X POST https://$NGROK_DOMAIN/sync_and_play \\"
 echo "    -H 'Authorization: Bearer $API_KEY' \\"
 echo "    -H 'Content-Type: application/json' \\"
 echo "    -d '{\"collectionId\":\"YOUR_COLLECTION_ID\"}'"
+echo ""
+echo "  # Sync and play from staging"
+echo "  curl -X POST https://$NGROK_DOMAIN/sync_and_play \\"
+echo "    -H 'Authorization: Bearer $API_KEY' \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"collectionId\":\"YOUR_COLLECTION_ID\", \"db\":\"STAGE\"}'"
 echo ""
 echo "Player: https://$NGROK_DOMAIN/player"
 echo ""
