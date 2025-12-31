@@ -1,13 +1,26 @@
 #!/bin/bash
 # Kiosk Client - Example script to test remote control
-# Usage: ./kiosk-client.sh <pi-ip-address>
+#
+# Usage:
+#   ./kiosk-client.sh                           # localhost, no auth
+#   ./kiosk-client.sh 192.168.1.100             # custom IP, no auth
+#   ./kiosk-client.sh 192.168.1.100 YOUR_API_KEY # custom IP with auth
+#   API_KEY=xxx ./kiosk-client.sh               # localhost with auth via env
 
-HOST="${1:-10.10.13.241}"
+HOST="${1:-localhost}"
 PORT="8080"
 BASE="http://${HOST}:${PORT}"
 
-echo "=== Kiosk Client Test (Instant Switching) ==="
+# API key from argument or environment variable
+API_KEY="${2:-$API_KEY}"
+
+echo "=== Kiosk Client Test ==="
 echo "Target: $BASE"
+if [ -n "$API_KEY" ]; then
+    echo "Auth: Bearer token configured"
+else
+    echo "Auth: None (POST requests may fail if server requires auth)"
+fi
 echo ""
 
 # Helper function
@@ -18,9 +31,18 @@ call() {
 
     echo ">> $method $endpoint"
     if [ "$method" = "GET" ]; then
-        curl -s "$BASE$endpoint" | jq .
+        curl -s "$BASE$endpoint" | jq . 2>/dev/null || cat
     else
-        curl -s -X POST -H "Content-Type: application/json" -d "$data" "$BASE$endpoint" | jq .
+        if [ -n "$API_KEY" ]; then
+            curl -s -X POST \
+                -H "Authorization: Bearer $API_KEY" \
+                -H "Content-Type: application/json" \
+                -d "$data" "$BASE$endpoint" | jq . 2>/dev/null || cat
+        else
+            curl -s -X POST \
+                -H "Content-Type: application/json" \
+                -d "$data" "$BASE$endpoint" | jq . 2>/dev/null || cat
+        fi
     fi
     echo ""
 }
@@ -37,50 +59,42 @@ echo "--- Test 3: Play example.mp4 (3 seconds) ---"
 call POST /file '{"file": "example.mp4"}'
 sleep 3
 
-echo "--- Test 4: INSTANT switch to example2.mp4 (3 seconds) ---"
+echo "--- Test 4: Switch to example2.mp4 (3 seconds) ---"
 call POST /file '{"file": "example2.mp4"}'
 sleep 3
 
-echo "--- Test 5: INSTANT switch back to example.mp4 (3 seconds) ---"
-call POST /file '{"file": "example.mp4"}'
-sleep 3
-
-echo "--- Test 6: INSTANT switch to example2.mp4 again (3 seconds) ---"
-call POST /file '{"file": "example2.mp4"}'
-sleep 3
-
-echo "--- Test 7: Show a website (3 seconds) ---"
+echo "--- Test 5: Show a website (3 seconds) ---"
 call POST /url '{"url": "https://www.wikipedia.org"}'
 sleep 3
 
-echo "--- Test 8: Back to video (3 seconds) ---"
+echo "--- Test 6: Back to video (3 seconds) ---"
 call POST /file '{"file": "example.mp4"}'
 sleep 3
 
-echo "--- Test 9: Turn off (black screen, 2 seconds) ---"
+echo "--- Test 7: Turn off (black screen, 2 seconds) ---"
 call POST /off '{}'
 sleep 2
 
-echo "--- Test 10: Back on with video ---"
-call POST /file '{"file": "example.mp4"}'
-sleep 2
-
-echo "--- Test 11: Final status ---"
+echo "--- Test 8: Final status ---"
 call GET /status
 
 echo ""
-echo "=== Test complete (~30 seconds) ==="
+echo "=== Test complete ==="
 echo ""
-echo "Quick commands:"
-echo "  # Switch videos"
-echo "  curl -X POST -H 'Content-Type: application/json' -d '{\"file\":\"example.mp4\"}' $BASE/file"
-echo "  curl -X POST -H 'Content-Type: application/json' -d '{\"file\":\"example2.mp4\"}' $BASE/file"
+echo "Quick commands (add -H 'Authorization: Bearer YOUR_KEY' for auth):"
 echo ""
-echo "  # Show websites"
-echo "  curl -X POST -H 'Content-Type: application/json' -d '{\"url\":\"https://app.eden.art/collections/68538ccaf883914b6b8e09a1\"}' $BASE/url"
-echo "  curl -X POST -H 'Content-Type: application/json' -d '{\"url\":\"https://wikipedia.org\"}' $BASE/url"
-echo ""
-echo "  # Control"
-echo "  curl -X POST $BASE/off"
+echo "  # Check status (no auth required)"
 echo "  curl $BASE/status"
-echo "  curl $BASE/files"
+echo ""
+echo "  # Play video"
+echo "  curl -X POST -H 'Content-Type: application/json' -d '{\"file\":\"example.mp4\"}' $BASE/file"
+echo ""
+echo "  # Play playlist"
+echo "  curl -X POST -H 'Content-Type: application/json' -d '{\"urls\":[\"video1.mp4\",\"video2.mp4\"]}' $BASE/playlist"
+echo ""
+echo "  # Show website"
+echo "  curl -X POST -H 'Content-Type: application/json' -d '{\"url\":\"https://example.com\"}' $BASE/url"
+echo ""
+echo "  # Turn off display"
+echo "  curl -X POST $BASE/off"
+echo ""

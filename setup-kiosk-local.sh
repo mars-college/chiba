@@ -1,44 +1,21 @@
 #!/bin/bash
-# Raspberry Pi Kiosk Setup Script
-# Run on a fresh Raspberry Pi OS 64-bit install
+# Raspberry Pi Local Kiosk Setup Script
+# Simplified setup for Pis controlled by central controller
+# NO ngrok, NO API key authentication (local network trust)
 #
 # Usage:
-#   curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh | bash -s -- \
-#     --ngrok-token YOUR_NGROK_TOKEN \
-#     --ngrok-domain your-domain.ngrok-free.app \
-#     --eden-key YOUR_EDEN_API_KEY
+#   curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk-local.sh | bash
 #
-# Or download and run:
-#   wget https://raw.githubusercontent.com/mars-college/chiba/main/setup-kiosk.sh
-#   chmod +x setup-kiosk.sh
-#   ./setup-kiosk.sh --ngrok-token XXX --ngrok-domain XXX --eden-key YYY
+# Or with Eden API key:
+#   ./setup-kiosk-local.sh --eden-key YOUR_EDEN_API_KEY
 
 set -e
 
 # Parse arguments
-NGROK_AUTHTOKEN=""
-NGROK_DOMAIN=""
 EDEN_API_KEY=""
-API_KEY=""
 
 while [ $# -gt 0 ]; do
     case $1 in
-        --ngrok-token=*)
-            NGROK_AUTHTOKEN="${1#*=}"
-            shift
-            ;;
-        --ngrok-token)
-            NGROK_AUTHTOKEN="$2"
-            shift 2
-            ;;
-        --ngrok-domain=*)
-            NGROK_DOMAIN="${1#*=}"
-            shift
-            ;;
-        --ngrok-domain)
-            NGROK_DOMAIN="$2"
-            shift 2
-            ;;
         --eden-key=*)
             EDEN_API_KEY="${1#*=}"
             shift
@@ -47,24 +24,15 @@ while [ $# -gt 0 ]; do
             EDEN_API_KEY="$2"
             shift 2
             ;;
-        --api-key=*)
-            API_KEY="${1#*=}"
-            shift
-            ;;
-        --api-key)
-            API_KEY="$2"
-            shift 2
-            ;;
         --help|-h)
-            echo "Usage: $0 --ngrok-token TOKEN --ngrok-domain DOMAIN [OPTIONS]"
+            echo "Usage: $0 [OPTIONS]"
             echo ""
-            echo "Required:"
-            echo "  --ngrok-token    Your ngrok authtoken (from dashboard.ngrok.com)"
-            echo "  --ngrok-domain   Static domain for this Pi (e.g., pi01.ngrok-free.app)"
+            echo "Options:"
+            echo "  --eden-key    Eden API key for collection sync (optional)"
             echo ""
-            echo "Optional:"
-            echo "  --api-key        API key for authenticating remote requests (auto-generated if not provided)"
-            echo "  --eden-key       Eden API key for collection sync"
+            echo "This script sets up a Pi as a local kiosk WITHOUT ngrok."
+            echo "The Pi will be accessible on the local network at http://\$(hostname).local:8080"
+            echo "Control via central controller using the Pi's hostname (e.g., mars01.local)"
             exit 0
             ;;
         *)
@@ -74,34 +42,18 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Generate API key if not provided
-if [ -z "$API_KEY" ]; then
-    API_KEY=$(openssl rand -hex 24)
-    echo "Generated API key: $API_KEY"
-fi
-
-# Validate required args
-if [ -z "$NGROK_AUTHTOKEN" ]; then
-    echo "Error: --ngrok-token is required"
-    echo "Get your token at: https://dashboard.ngrok.com/get-started/your-authtoken"
-    exit 1
-fi
-
-if [ -z "$NGROK_DOMAIN" ]; then
-    echo "Error: --ngrok-domain is required"
-    echo "Create a free static domain at: https://dashboard.ngrok.com/cloud-edge/domains"
-    exit 1
-fi
-
 INSTALL_DIR="/home/pi"
 REPO_URL="https://github.com/mars-college/chiba.git"
 
 echo "==========================================="
-echo "  Raspberry Pi Kiosk Setup"
+echo "  Raspberry Pi Local Kiosk Setup"
 echo "==========================================="
 echo ""
 echo "Install directory: $INSTALL_DIR"
-echo "ngrok domain: $NGROK_DOMAIN"
+echo "Hostname: $(hostname).local"
+echo ""
+echo "NOTE: This Pi will NOT have ngrok."
+echo "      Control via central controller only."
 echo ""
 
 # Check if running as pi user
@@ -120,6 +72,7 @@ echo "=== Updating system ==="
 sudo apt update && sudo apt upgrade -y
 
 echo "=== Installing required packages ==="
+# Note: NO ngrok installation
 sudo apt install -y \
     git \
     cage \
@@ -129,34 +82,20 @@ sudo apt install -y \
     curl \
     wget \
     python3 \
-    python3-pip
+    python3-pip \
+    avahi-daemon
+
+echo "=== Enabling mDNS (avahi) ==="
+sudo systemctl enable avahi-daemon
+sudo systemctl start avahi-daemon
 
 echo "=== Installing yt-dlp ==="
 sudo pip3 install --break-system-packages yt-dlp 2>/dev/null || sudo pip3 install yt-dlp
-# Verify installation
 if command -v yt-dlp &>/dev/null; then
     echo "yt-dlp installed: $(yt-dlp --version)"
 else
     echo "Warning: yt-dlp installation may have failed"
 fi
-
-echo "=== Installing ngrok (arm64) ==="
-# Download ngrok directly for arm64
-NGROK_VERSION="v3"
-wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-${NGROK_VERSION}-stable-linux-arm64.tgz -O /tmp/ngrok.tgz
-sudo tar -xzf /tmp/ngrok.tgz -C /usr/local/bin
-sudo chmod +x /usr/local/bin/ngrok
-rm /tmp/ngrok.tgz
-
-# Verify ngrok installed
-if ! command -v ngrok &>/dev/null; then
-    echo "Error: ngrok installation failed"
-    exit 1
-fi
-echo "ngrok installed: $(ngrok version)"
-
-# Configure ngrok
-ngrok config add-authtoken "$NGROK_AUTHTOKEN"
 
 echo "=== Cleaning up old installation ==="
 rm -f "$INSTALL_DIR/server.js" 2>/dev/null || true
@@ -194,14 +133,13 @@ mkdir -p "$INSTALL_DIR/chiba/media"
 chmod +x "$INSTALL_DIR/chiba/run_kiosk.sh"
 chmod +x "$INSTALL_DIR/chiba/kiosk-server.sh"
 chmod +x "$INSTALL_DIR/chiba/status.sh" 2>/dev/null || true
-chmod +x "$INSTALL_DIR/chiba/setup-kiosk.sh" 2>/dev/null || true
 
 echo "=== Creating .env file ==="
+# NOTE: No API_KEY = authentication disabled
 cat > "$INSTALL_DIR/chiba/.env" << EOF
-API_KEY=$API_KEY
+# No API_KEY = authentication disabled (local network trust)
+# This Pi is controlled via central controller
 EDEN_API_KEY=$EDEN_API_KEY
-NGROK_AUTHTOKEN=$NGROK_AUTHTOKEN
-NGROK_DOMAIN=$NGROK_DOMAIN
 EOF
 chmod 600 "$INSTALL_DIR/chiba/.env"
 
@@ -210,8 +148,6 @@ cd "$INSTALL_DIR/chiba"
 npm install ws dotenv
 
 echo "=== Configuring audio output ==="
-# Find USB audio device (exclude HDMI and built-in headphones)
-# Extract just the card name (before the space/bracket), e.g., "S3" from "S3 [PowerConf S3]"
 USB_AUDIO=$(aplay -l 2>/dev/null | grep -E "^card [0-9]+" | grep -v "vc4-hdmi" | grep -v "bcm2835" | head -1 | sed -E 's/^card ([0-9]+): ([^ \[]+).*/\2/')
 
 if [ -n "$USB_AUDIO" ]; then
@@ -222,9 +158,7 @@ else
     AUDIO_DEVICE="Headphones"
 fi
 
-# Create ALSA config to set default audio output
 cat > ~/.asoundrc << EOF
-# Default audio output device
 pcm.!default {
     type plug
     slave.pcm "hw:${AUDIO_DEVICE},0"
@@ -238,7 +172,6 @@ EOF
 
 echo "Audio configured to use: $AUDIO_DEVICE"
 
-# Set volume to 100% if device exists
 if aplay -l 2>/dev/null | grep -q "$AUDIO_DEVICE"; then
     amixer -c "$AUDIO_DEVICE" set PCM 100% unmute 2>/dev/null || \
     amixer -c "$AUDIO_DEVICE" set Speaker 100% unmute 2>/dev/null || \
@@ -272,7 +205,6 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-# Disable console blanking in kernel cmdline
 CMDLINE_FILE=""
 if [ -f /boot/firmware/cmdline.txt ]; then
     CMDLINE_FILE="/boot/firmware/cmdline.txt"
@@ -287,25 +219,6 @@ if [ -n "$CMDLINE_FILE" ]; then
     fi
 fi
 
-echo "=== Creating ngrok systemd service ==="
-sudo tee /etc/systemd/system/ngrok.service > /dev/null << EOF
-[Unit]
-Description=ngrok tunnel
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=pi
-Environment=HOME=/home/pi
-ExecStart=/usr/local/bin/ngrok http 8080 --domain=$NGROK_DOMAIN
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
 echo "=== Configuring boot options ==="
 sudo raspi-config nonint do_boot_behaviour B2
 sudo systemctl set-default multi-user.target
@@ -316,14 +229,16 @@ echo "=== Removing old services ==="
 sudo systemctl stop kiosk 2>/dev/null || true
 sudo systemctl disable kiosk 2>/dev/null || true
 sudo rm -f /etc/systemd/system/kiosk.service
+# Remove ngrok if it was previously installed
+sudo systemctl stop ngrok 2>/dev/null || true
+sudo systemctl disable ngrok 2>/dev/null || true
+sudo rm -f /etc/systemd/system/ngrok.service
 
 echo "=== Enabling services ==="
 sudo systemctl daemon-reload
 sudo systemctl enable disable-blanking
-sudo systemctl enable ngrok
 
 echo "=== Setting up kiosk auto-start on login ==="
-# Completely rewrite .bash_profile to avoid corruption
 cat > ~/.bash_profile << 'EOF'
 # Kiosk auto-start (only on TTY1 with display)
 if [ "$(tty)" = "/dev/tty1" ]; then
@@ -339,87 +254,45 @@ echo "Checking installed files..."
 [ -f "$INSTALL_DIR/chiba/public/index.html" ] && echo "  ✓ public/index.html" || echo "  ✗ public/index.html MISSING"
 [ -d "$INSTALL_DIR/chiba/node_modules/ws" ] && echo "  ✓ node_modules/ws" || echo "  ✗ node_modules/ws MISSING"
 [ -f "$INSTALL_DIR/chiba/.env" ] && echo "  ✓ .env configured" || echo "  ✗ .env MISSING"
-command -v ngrok &>/dev/null && echo "  ✓ ngrok installed ($(ngrok version))" || echo "  ✗ ngrok MISSING"
 command -v yt-dlp &>/dev/null && echo "  ✓ yt-dlp installed ($(yt-dlp --version))" || echo "  ✗ yt-dlp MISSING"
+systemctl is-active avahi-daemon &>/dev/null && echo "  ✓ mDNS (avahi) running" || echo "  ✗ mDNS NOT running"
 
 echo ""
 echo "Checking services..."
 systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ screen blanking disabled" || echo "  ✗ screen blanking NOT enabled"
-systemctl is-enabled ngrok &>/dev/null && echo "  ✓ ngrok service enabled" || echo "  ✗ ngrok service NOT enabled"
 grep -q "run_kiosk.sh" ~/.bash_profile && echo "  ✓ kiosk auto-start configured" || echo "  ✗ kiosk auto-start NOT configured"
 [ -f ~/.asoundrc ] && echo "  ✓ audio configured ($AUDIO_DEVICE)" || echo "  ✗ audio NOT configured"
 
-# Test ngrok connection
-echo ""
-echo "Testing ngrok..."
-timeout 10 ngrok http 8080 --domain="$NGROK_DOMAIN" &
-NGROK_PID=$!
-sleep 5
-if kill -0 $NGROK_PID 2>/dev/null; then
-    echo "  ✓ ngrok tunnel working"
-    kill $NGROK_PID 2>/dev/null || true
-else
-    echo "  ✗ ngrok tunnel failed - check your token and domain"
-fi
+# Note: No ngrok check since we don't use it
+echo "  ✓ ngrok NOT installed (controlled via central controller)"
 
 PI_IP=$(hostname -I | awk '{print $1}')
+PI_HOSTNAME=$(hostname)
 
 echo ""
 echo "==========================================="
 echo "  Setup Complete!"
 echo "==========================================="
 echo ""
-echo "Your kiosk will be available at:"
-echo "  Public:  https://$NGROK_DOMAIN"
-echo "  Local:   http://$PI_IP:8080"
+echo "This kiosk is accessible at:"
+echo "  Local:    http://$PI_IP:8080"
+echo "  mDNS:     http://${PI_HOSTNAME}.local:8080"
 echo ""
-echo "============================================"
-echo "  IMPORTANT: Save your API key!"
-echo "============================================"
+echo "Control this Pi via the central controller:"
 echo ""
-echo "  API_KEY: $API_KEY"
+echo "  # From central controller"
+echo "  curl 'http://CONTROLLER:8080/status?kiosk=${PI_HOSTNAME}.local'"
 echo ""
-echo "  This key is required for all POST requests."
-echo "  Store it securely - it won't be shown again."
-echo ""
-echo "============================================"
-echo ""
-echo "API examples (with authentication):"
-echo ""
-echo "  # Check status (no auth required)"
-echo "  curl https://$NGROK_DOMAIN/status"
-echo ""
-echo "  # Play a video (auth required)"
-echo "  curl -X POST https://$NGROK_DOMAIN/file \\"
-echo "    -H 'Authorization: Bearer $API_KEY' \\"
+echo "  # Play video"
+echo "  curl -X POST http://CONTROLLER:8080/file \\"
+echo "    -H 'Authorization: Bearer API_KEY' \\"
 echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"file\":\"example.mp4\"}'"
+echo "    -d '{\"kiosk\":\"${PI_HOSTNAME}.local\", \"file\":\"video.mp4\"}'"
 echo ""
-echo "  # Download and play YouTube video"
-echo "  curl -X POST https://$NGROK_DOMAIN/youtube_and_play \\"
-echo "    -H 'Authorization: Bearer $API_KEY' \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"url\":\"https://www.youtube.com/watch?v=VIDEO_ID\"}'"
+echo "Player (local): http://$PI_IP:8080/player"
 echo ""
-echo "  # Download URL and play immediately"
-echo "  curl -X POST https://$NGROK_DOMAIN/cache_and_play \\"
-echo "    -H 'Authorization: Bearer $API_KEY' \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"url\":\"https://example.com/video.mp4\"}'"
-echo ""
-echo "  # Sync and play Eden collection (PROD)"
-echo "  curl -X POST https://$NGROK_DOMAIN/sync_and_play \\"
-echo "    -H 'Authorization: Bearer $API_KEY' \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"collectionId\":\"YOUR_COLLECTION_ID\"}'"
-echo ""
-echo "  # Sync and play from staging"
-echo "  curl -X POST https://$NGROK_DOMAIN/sync_and_play \\"
-echo "    -H 'Authorization: Bearer $API_KEY' \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"collectionId\":\"YOUR_COLLECTION_ID\", \"db\":\"STAGE\"}'"
-echo ""
-echo "Player: https://$NGROK_DOMAIN/player"
+echo "NOTE: This Pi has NO external access."
+echo "      All control goes through the central controller."
 echo ""
 
 read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r </dev/tty

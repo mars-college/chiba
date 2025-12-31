@@ -2,6 +2,138 @@
 
 This document describes the HTTP API for controlling Chiba digital signage kiosks remotely. Use this to build tools, automations, or integrations.
 
+## Architecture Options
+
+### Option 1: Central Controller (Recommended for Multiple Pis)
+
+A single controller server routes commands to multiple Pis via local network:
+
+```
+Client → ngrok → Central Controller → local network → mars01.local:8080
+                                    → local network → mars02.local:8080
+                                    → local network → mars04.local:8080
+```
+
+**Controller Base URL:**
+```
+https://<controller-domain>.ngrok-free.app
+```
+
+All endpoints require a `kiosk` parameter to specify the target Pi.
+
+### Option 2: Direct Access (Single Pi)
+
+Each kiosk has its own public URL via ngrok tunnel:
+```
+https://<kiosk-domain>.ngrok-free.app
+```
+
+---
+
+## Controller API
+
+When using the central controller, all standard kiosk endpoints are available with an added `kiosk` parameter.
+
+### GET /discover
+
+Discover available Pis on the local network using mDNS.
+
+**Response:**
+```json
+{
+  "kiosks": [
+    {"hostname": "mars01.local", "ip": "192.168.1.101", "status": "online"},
+    {"hostname": "mars02.local", "ip": "192.168.1.102", "status": "online"},
+    {"hostname": "mars04.local", "ip": "192.168.1.104", "status": "online"}
+  ],
+  "timestamp": "2025-01-01T12:00:00.000Z",
+  "prefix": "mars",
+  "scanRange": "mars01.local - mars20.local"
+}
+```
+
+### GET / (Controller Info)
+
+Get controller service info.
+
+**Response:**
+```json
+{
+  "service": "kiosk-controller",
+  "version": "1.0.0",
+  "endpoints": ["/discover", "/status", "/files", ...],
+  "usage": "Add 'kiosk' parameter to route commands",
+  "discoveryPrefix": "mars",
+  "discoveryMax": 20
+}
+```
+
+### Routing to Kiosks
+
+**GET requests:** Add `?kiosk=hostname` query parameter
+```bash
+curl 'https://controller.ngrok-free.app/status?kiosk=mars01.local'
+curl 'https://controller.ngrok-free.app/files?kiosk=mars02.local'
+```
+
+**POST requests:** Add `"kiosk": "hostname"` to request body
+```bash
+curl -X POST https://controller.ngrok-free.app/file \
+  -H "Authorization: Bearer API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"kiosk": "mars01.local", "file": "video.mp4"}'
+```
+
+### Controller Client Script
+
+Use the included `controller-client.sh` for easy command-line access:
+
+```bash
+# Discover Pis
+./controller-client.sh discover
+
+# Check status of a Pi
+./controller-client.sh --kiosk mars01.local status
+
+# Play video
+./controller-client.sh --kiosk mars01.local file video.mp4
+
+# Download and play YouTube
+./controller-client.sh --kiosk mars02.local youtube "https://youtube.com/watch?v=xxx"
+
+# Set volume
+./controller-client.sh --kiosk mars01.local volume 7
+```
+
+### Controller Error Responses
+
+**Missing kiosk parameter:**
+```json
+{
+  "error": "Missing 'kiosk' parameter. Specify target Pi hostname (e.g., mars01.local)",
+  "usage": {
+    "GET": "Add ?kiosk=mars01.local query parameter",
+    "POST": "Add \"kiosk\": \"mars01.local\" in request body"
+  },
+  "discover": "Use GET /discover to find available kiosks"
+}
+```
+
+**Kiosk not reachable:**
+```json
+{
+  "error": "Cannot reach kiosk: mars01.local",
+  "details": "ECONNREFUSED",
+  "suggestion": "Check that the Pi is powered on and connected to the network."
+}
+```
+
+---
+
+## Direct Kiosk API
+
+The following endpoints work both directly on a Pi and via the central controller (with `kiosk` parameter).
+
 ## Base URL
 
 Each kiosk has a unique public URL via ngrok tunnel:
@@ -276,7 +408,7 @@ Sync media files from an Eden collection (download only, don't play).
 ```
 
 **Parameters:**
-- `collectionId` (required): Eden collection ID
+- `collectionId` (required): Eden collection ID (alias: `collection`)
 - `db` (optional, default: "PROD"): Database environment - `"PROD"` or `"STAGE"`
 
 **Response:**
@@ -317,7 +449,7 @@ Sync an Eden collection and immediately start playing as a playlist.
 ```
 
 **Parameters:**
-- `collectionId` (required): Eden collection ID
+- `collectionId` (required): Eden collection ID (alias: `collection`)
 - `db` (optional, default: "PROD"): Database environment - `"PROD"` or `"STAGE"`
 - `loop` (optional, default: true): Whether to loop the playlist
 
@@ -529,16 +661,90 @@ Set the system volume level.
 
 Connect to `wss://<kiosk-domain>.ngrok-free.app` for real-time state updates.
 
-**Received messages:**
-```json
-{"type": "state", "mode": "video", "file": "example.mp4", "url": null, "playlist": null, "playlistIndex": 0, "loop": true, "paused": false}
+### Connection
+
+WebSocket connections do not require authentication. The player app uses WebSocket for real-time control.
+
+```javascript
+const ws = new WebSocket('wss://kiosk.ngrok-free.app');
+
+ws.onopen = () => {
+  console.log('Connected');
+  ws.send(JSON.stringify({ type: 'ready' }));
+};
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'state') {
+    console.log('State update:', data);
+  }
+};
 ```
 
-**Send messages:**
+### Server → Client Messages
+
+**State update** (sent on connect and whenever state changes):
 ```json
-{"type": "ready"}   // Request current state
+{
+  "type": "state",
+  "mode": "video",
+  "file": "example.mp4",
+  "url": null,
+  "playlist": null,
+  "playlistIndex": 0,
+  "loop": true,
+  "paused": false
+}
+```
+
+### Client → Server Messages
+
+```json
+{"type": "ready"}   // Request current state (server responds with state message)
 {"type": "next"}    // Skip to next item in playlist
 ```
+
+### Auto-Reconnect
+
+The player automatically reconnects after 1 second if the connection is lost. Implement similar logic in custom clients:
+
+```javascript
+ws.onclose = () => {
+  setTimeout(() => connect(), 1000);
+};
+```
+
+---
+
+## Media Support
+
+### Video Formats
+
+Supported video formats (validated by magic bytes):
+- **MP4** (`.mp4`, `.m4v`) - Recommended
+- **WebM** (`.webm`)
+- **MOV** (`.mov`)
+- **MKV** (`.mkv`)
+- **AVI** (`.avi`)
+
+### Image Formats
+
+Images are supported in playlists:
+- **JPG/JPEG** (`.jpg`, `.jpeg`)
+- **PNG** (`.png`)
+- **GIF** (`.gif`)
+- **WebP** (`.webp`)
+- **BMP** (`.bmp`)
+- **SVG** (`.svg`)
+
+**Image display duration:** 10 seconds (fixed, then advances to next item)
+
+### Video Streaming
+
+Videos are served with HTTP Range request support for efficient streaming:
+- Supports `Range: bytes=start-end` headers
+- Default chunk size: 1MB
+- Enables seeking without downloading entire file
 
 ---
 

@@ -76,8 +76,8 @@ function getWebSocketUrl(): string {
   return `${protocol}//${window.location.host}`
 }
 
-// Debug mode - set to true to show state overlay
-const DEBUG = true
+// Debug mode - shows state overlay (disable for production)
+const DEBUG = false
 
 export default function App() {
   const [state, setState] = useState<State>({ mode: 'off', file: null, url: null, paused: false })
