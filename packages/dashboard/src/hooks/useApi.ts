@@ -1,6 +1,40 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 const API_BASE = '/api';
+
+// Cached API key - fetched once from controller
+let cachedApiKey: string | null = null;
+let apiKeyPromise: Promise<string> | null = null;
+
+async function getApiKey(): Promise<string> {
+  // Return cached key if available
+  if (cachedApiKey !== null) return cachedApiKey;
+
+  // Check localStorage first (user override)
+  const storedKey = localStorage.getItem('apiKey');
+  if (storedKey) {
+    cachedApiKey = storedKey;
+    return storedKey;
+  }
+
+  // Fetch from controller (deduplicated)
+  if (!apiKeyPromise) {
+    apiKeyPromise = fetch(`${API_BASE}/config`)
+      .then(res => res.json())
+      .then(data => {
+        cachedApiKey = data.apiKey || '';
+        return cachedApiKey;
+      })
+      .catch(() => {
+        cachedApiKey = '';
+        return '';
+      });
+  }
+  return apiKeyPromise;
+}
+
+// Initialize API key on module load
+getApiKey();
 
 interface ApiOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -29,7 +63,7 @@ export function useApi<T>() {
         'Content-Type': 'application/json',
       };
 
-      const apiKey = options.apiKey || localStorage.getItem('apiKey');
+      const apiKey = options.apiKey || await getApiKey();
       if (apiKey) {
         headers['Authorization'] = `Bearer ${apiKey}`;
       }
@@ -72,7 +106,7 @@ export function useApi<T>() {
 // Simple fetch helpers for one-off requests
 export async function apiGet<T>(endpoint: string): Promise<T> {
   const headers: Record<string, string> = {};
-  const apiKey = localStorage.getItem('apiKey');
+  const apiKey = await getApiKey();
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
@@ -89,26 +123,40 @@ export async function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  const apiKey = localStorage.getItem('apiKey');
+  const apiKey = await getApiKey();
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    method: 'POST',
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `Request failed: ${response.status}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Request failed: ${response.status}`);
+    }
+    return response.json();
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Request timed out after 30 seconds');
+    }
+    throw err;
   }
-  return response.json();
 }
 
 export async function apiDelete<T>(endpoint: string): Promise<T> {
   const headers: Record<string, string> = {};
-  const apiKey = localStorage.getItem('apiKey');
+  const apiKey = await getApiKey();
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }

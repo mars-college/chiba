@@ -189,6 +189,14 @@ async function handleRequest(
         sendJson(res, { status: 'ok', uptime: process.uptime() });
         return;
 
+      case '/api/config':
+        // Provide API key to dashboard (same-origin only in production)
+        sendJson(res, {
+          apiKey: process.env.API_KEY || '',
+          version: VERSION,
+        });
+        return;
+
       case '/api/nodes':
         sendJson(res, {
           success: true,

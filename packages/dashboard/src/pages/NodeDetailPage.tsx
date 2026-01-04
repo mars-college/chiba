@@ -34,14 +34,23 @@ export function NodeDetailPage() {
     return () => clearInterval(interval);
   }, [id]);
 
+  const [playError, setPlayError] = useState<string | null>(null);
+  const [playLoading, setPlayLoading] = useState(false);
+
   const handlePlay = async (source: { type: string; url?: string; filename?: string; loop?: boolean }) => {
     if (!id) return;
+    setPlayError(null);
+    setPlayLoading(true);
     try {
       await apiPost(`/nodes/${id}/play`, source);
       // Fetch updated state after a short delay
       setTimeout(fetchNode, 500);
     } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Play failed';
+      setPlayError(errorMsg);
       console.error('Play failed:', err);
+    } finally {
+      setPlayLoading(false);
     }
   };
 
@@ -132,16 +141,23 @@ export function NodeDetailPage() {
         </p>
       </div>
 
+      {playError && (
+        <div className="alert alert-error" style={{ marginBottom: '20px' }}>
+          <strong>Play failed:</strong> {playError}
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px' }}>
         {/* Playback Controls */}
         <div className="card">
           <div className="card-header">
             <h3 className="card-title">Playback</h3>
+            {playLoading && <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Loading...</span>}
           </div>
           <div className="card-body">
             <PlaybackControls
               playbackState={node.playbackState}
-              disabled={!node.connected}
+              disabled={!node.connected || playLoading}
               onPlay={handlePlay}
               onStop={handleStop}
               onPause={handlePause}
@@ -189,6 +205,7 @@ export function NodeDetailPage() {
             <CachedContentList
               content={node.cachedContent || []}
               onPlay={(filename) => handlePlay({ type: 'file', filename })}
+              disabled={playLoading}
             />
           </div>
         </div>

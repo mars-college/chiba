@@ -3,9 +3,10 @@ import type { ContentSummary } from '@chiba/shared';
 interface CachedContentListProps {
   content: ContentSummary[];
   onPlay: (filename: string) => void;
+  disabled?: boolean;
 }
 
-export function CachedContentList({ content, onPlay }: CachedContentListProps) {
+export function CachedContentList({ content, onPlay, disabled }: CachedContentListProps) {
   const formatBytes = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -79,8 +80,9 @@ export function CachedContentList({ content, onPlay }: CachedContentListProps) {
             <button
               className="btn btn-primary btn-sm"
               onClick={() => onPlay(item.filename)}
+              disabled={disabled}
             >
-              Play
+              {disabled ? 'Loading...' : 'Play'}
             </button>
           </div>
         </div>
