@@ -139,15 +139,20 @@ sudo apt update && sudo apt upgrade -y
 
 echo "=== Installing required packages ==="
 # chromium-browser was renamed to chromium in newer Raspberry Pi OS
-CHROMIUM_PKG="chromium"
-if apt-cache show chromium-browser &>/dev/null; then
+# Check which package is actually installable
+if apt-cache policy chromium 2>/dev/null | grep -q "Candidate:"; then
+    CHROMIUM_PKG="chromium"
+elif apt-cache policy chromium-browser 2>/dev/null | grep -q "Candidate:"; then
     CHROMIUM_PKG="chromium-browser"
+else
+    echo "Warning: No Chromium package found, skipping..."
+    CHROMIUM_PKG=""
 fi
 
 sudo apt install -y \
     git \
     cage \
-    "$CHROMIUM_PKG" \
+    ${CHROMIUM_PKG:+$CHROMIUM_PKG} \
     curl \
     wget \
     python3 \
