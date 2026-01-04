@@ -396,6 +396,64 @@ async function handleRequest(
       }
       return;
     }
+
+    // Serve player app
+    if (url.pathname === '/player' || url.pathname.startsWith('/player/')) {
+      const playerDistDir = path.join(__dirname, '../../player/dist');
+
+      // Map /player to index.html, /player/assets/... to assets/...
+      let filePath: string;
+      if (url.pathname === '/player' || url.pathname === '/player/') {
+        filePath = path.join(playerDistDir, 'index.html');
+      } else {
+        const relativePath = url.pathname.slice('/player/'.length);
+        filePath = path.join(playerDistDir, relativePath);
+      }
+
+      // Security: ensure path is within player dist directory
+      const realPath = path.resolve(filePath);
+      if (!realPath.startsWith(path.resolve(playerDistDir))) {
+        sendError(res, 'Invalid path', 403);
+        return;
+      }
+
+      // Check if file exists
+      if (!fs.existsSync(realPath)) {
+        // For SPA routing, serve index.html for non-asset paths
+        const indexPath = path.join(playerDistDir, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          res.writeHead(200, {
+            'Content-Type': 'text/html',
+            'Access-Control-Allow-Origin': '*',
+          });
+          fs.createReadStream(indexPath).pipe(res);
+          return;
+        }
+        sendError(res, 'Player not found - run pnpm build', 404);
+        return;
+      }
+
+      // Determine content type
+      const ext = path.extname(realPath).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        '.html': 'text/html',
+        '.js': 'application/javascript',
+        '.css': 'text/css',
+        '.json': 'application/json',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.svg': 'image/svg+xml',
+        '.ico': 'image/x-icon',
+      };
+      const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Access-Control-Allow-Origin': '*',
+      });
+      fs.createReadStream(realPath).pipe(res);
+      return;
+    }
   }
 
   // Protected routes (require auth)

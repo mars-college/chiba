@@ -1,6 +1,6 @@
 #!/bin/bash
 # Initialize secrets for Chiba deployment
-# Usage: ./scripts/init-secrets.sh [--eden-key YOUR_EDEN_KEY]
+# Usage: ./scripts/init-chiba.sh [--eden-key YOUR_EDEN_KEY]
 
 set -e
 
@@ -79,7 +79,7 @@ echo ""
 
 if [ -n "$EDEN_API_KEY" ]; then
     cat << EOF
-curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh | bash -s -- \\
+curl -sL "https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh?\$(date +%s)" | bash -s -- \\
   --controller-url http://CONTROLLER_IP:8080 \\
   --node-name NODE_NAME \\
   --api-key "$API_KEY" \\
@@ -87,7 +87,7 @@ curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup
 EOF
 else
     cat << EOF
-curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh | bash -s -- \\
+curl -sL "https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh?\$(date +%s)" | bash -s -- \\
   --controller-url http://CONTROLLER_IP:8080 \\
   --node-name NODE_NAME \\
   --api-key "$API_KEY"

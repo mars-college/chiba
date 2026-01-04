@@ -94,7 +94,7 @@ This outputs the deploy command with secrets pre-filled.
 SSH into each Pi and run the command from step 1:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh | bash -s -- \
+curl -sL "https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh?v=$(date +%s)" | bash -s -- \
   --controller-url http://CONTROLLER_IP:8080 \
   --node-name living-room \
   --api-key "your-api-key" \
