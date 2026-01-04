@@ -339,26 +339,33 @@ cat > "$INSTALL_DIR/scripts/run-kiosk.sh" << 'EOF'
 # Chiba Kiosk Launcher
 # Runs Chromium in kiosk mode connecting to the local node server
 
+# Required environment for Wayland
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export WLR_NO_HARDWARE_CURSORS=1
+
 # Wait for node server to be ready
-echo "Waiting for node server..."
+echo "Waiting for node server on port 8080..."
 for i in {1..30}; do
     if curl -s http://localhost:8080/health > /dev/null 2>&1; then
-        echo "Node server is ready"
+        echo "Server ready, launching kiosk..."
         break
     fi
     sleep 1
 done
 
+# Find chromium binary (name varies by OS version)
+CHROMIUM_BIN="/usr/bin/chromium"
+[ -x "/usr/bin/chromium-browser" ] && CHROMIUM_BIN="/usr/bin/chromium-browser"
+
 # Chromium kiosk flags
 CHROMIUM_FLAGS=(
-    --ozone-platform=wayland
     --kiosk
+    --start-fullscreen
     --noerrdialogs
     --disable-infobars
     --disable-session-crashed-bubble
     --disable-restore-session-state
     --no-first-run
-    --start-fullscreen
     --autoplay-policy=no-user-gesture-required
     --check-for-update-interval=31536000
     --disable-features=TranslateUI
@@ -367,13 +374,10 @@ CHROMIUM_FLAGS=(
     --disable-background-networking
     --disable-sync
     --password-store=basic
-    --disable-gpu-shader-disk-cache
     --disable-breakpad
+    --disable-dev-shm-usage
+    --no-sandbox
 )
-
-# Find chromium binary (name varies by OS version)
-CHROMIUM_BIN="chromium"
-command -v chromium-browser &>/dev/null && CHROMIUM_BIN="chromium-browser"
 
 # Run Chromium in cage (Wayland compositor)
 exec cage -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
