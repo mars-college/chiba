@@ -27,8 +27,14 @@ Thumbs.db
 # TypeScript
 *.tsbuildinfo
 
-# Media files (too large for git)
-media/*.mp4
-media/*.webm
-media/*.mov
-media/*.mkv
+# Media files (cached content, too large for git)
+media/
+*.mp4
+*.webm
+*.mov
+*.mkv
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp

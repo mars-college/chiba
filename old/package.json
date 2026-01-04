@@ -1,0 +1,17 @@
+{
+  "name": "chiba",
+  "version": "1.0.0",
+  "description": "A DIY digital signage solution for Raspberry Pi 5 running Raspberry Pi OS 64-bit. No third-party services required. Features real-time WebSocket control and a React-based player.",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "ws": "^8.18.3"
+  }
+}
