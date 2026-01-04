@@ -10,12 +10,12 @@
 # - Configures the node to auto-register with the controller
 #
 # Usage:
-#   curl -sL https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh | bash -s -- \
+#   curl -sL "https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh?v=$(date +%s)" | bash -s -- \
 #     --controller-url http://192.168.1.100:8080 \
 #     --node-name living-room
 #
 # Or download and run:
-#   wget https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh
+#   wget "https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh?v=$(date +%s)" -O setup-node.sh
 #   chmod +x setup-node.sh
 #   ./setup-node.sh --controller-url http://192.168.1.100:8080 --node-name living-room
 
@@ -365,6 +365,9 @@ CHROMIUM_FLAGS=(
     --overscroll-history-navigation=0
     --disable-background-networking
     --disable-sync
+    --password-store=basic
+    --disable-gpu-shader-disk-cache
+    --disable-breakpad
 )
 
 # Find chromium binary (name varies by OS version)
