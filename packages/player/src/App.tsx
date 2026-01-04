@@ -27,9 +27,24 @@ function getWebSocketUrl(): string {
 }
 
 // Check if user has interacted with the page (required for autoplay in browsers)
+// In kiosk mode with --autoplay-policy=no-user-gesture-required, this isn't needed
 const INTERACTION_KEY = 'chiba_user_interacted';
 
+function isKioskMode(): boolean {
+  // Check for kiosk indicators:
+  // 1. Running in fullscreen/standalone mode
+  // 2. Served from localhost (Pi serving to itself)
+  // 3. Has ?kiosk query param
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('kiosk')) return true;
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') return true;
+  if (window.matchMedia('(display-mode: fullscreen)').matches) return true;
+  return false;
+}
+
 function hasUserInteracted(): boolean {
+  // Skip interaction requirement in kiosk mode
+  if (isKioskMode()) return true;
   return localStorage.getItem(INTERACTION_KEY) === 'true';
 }
 
