@@ -1,6 +1,6 @@
 {
   "name": "chiba",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "Digital signage system for Raspberry Pi kiosks with central controller",
   "private": true,
   "type": "module",

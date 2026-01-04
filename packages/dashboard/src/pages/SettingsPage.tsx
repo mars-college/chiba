@@ -174,7 +174,7 @@ export function SettingsPage() {
         <div className="card-body">
           <div className="node-info-row">
             <span className="node-info-label">Version</span>
-            <span className="node-info-value">2.0.0</span>
+            <span className="node-info-value">0.1.0</span>
           </div>
           <div className="node-info-row">
             <span className="node-info-label">Package</span>

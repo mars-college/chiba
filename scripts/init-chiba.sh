@@ -56,6 +56,16 @@ EOF
 
 chmod 600 "$ENV_FILE"
 
+# Get this machine's IP address (for controller URL)
+if command -v ip &>/dev/null; then
+    # Linux
+    CONTROLLER_IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
+elif command -v ipconfig &>/dev/null; then
+    # macOS
+    CONTROLLER_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+fi
+CONTROLLER_IP="${CONTROLLER_IP:-YOUR_IP}"
+
 echo ""
 echo "=================================="
 echo "  Secrets initialized"
@@ -74,13 +84,13 @@ echo "=================================="
 echo "  Deploy to Pi"
 echo "=================================="
 echo ""
-echo "Copy and run on each Pi (replace CONTROLLER_IP and NODE_NAME):"
+echo "Copy and run on each Pi (replace NODE_NAME with a friendly name):"
 echo ""
 
 if [ -n "$EDEN_API_KEY" ]; then
     cat << EOF
 curl -sL "https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh?\$(date +%s)" | bash -s -- \\
-  --controller-url http://CONTROLLER_IP:8080 \\
+  --controller-url http://$CONTROLLER_IP:8080 \\
   --node-name NODE_NAME \\
   --api-key "$API_KEY" \\
   --eden-key "$EDEN_API_KEY"
@@ -88,7 +98,7 @@ EOF
 else
     cat << EOF
 curl -sL "https://raw.githubusercontent.com/mars-college/chiba/main/scripts/setup-node.sh?\$(date +%s)" | bash -s -- \\
-  --controller-url http://CONTROLLER_IP:8080 \\
+  --controller-url http://$CONTROLLER_IP:8080 \\
   --node-name NODE_NAME \\
   --api-key "$API_KEY"
 EOF

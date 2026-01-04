@@ -1,6 +1,6 @@
 {
   "name": "@chiba/controller",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "Central controller for Chiba digital signage system",
   "type": "module",
   "main": "./dist/server.js",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@chiba/shared": "workspace:*",
     "better-sqlite3": "^11.7.0",
+    "dotenv": "^17.2.3",
     "ws": "^8.18.0"
   },
   "devDependencies": {

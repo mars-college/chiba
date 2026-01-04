@@ -60,7 +60,7 @@ export const SAMPLE_NODE_INFO: NodeInfo = {
   hostname: 'raspberrypi',
   ip: '192.168.1.100',
   port: 8080,
-  version: '2.0.0',
+  version: '0.1.0',
   uptime: 3600,
 };
 

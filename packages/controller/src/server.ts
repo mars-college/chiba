@@ -8,8 +8,11 @@
  * - Provides WebSocket connections for real-time updates
  */
 
+import dotenv from 'dotenv';
 import http from 'http';
 import https from 'https';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   createLogger,
@@ -22,7 +25,13 @@ import {
   type ControllerToDashboardMessage,
   type DashboardToControllerMessage,
 } from '@chiba/shared';
+
 import { initDatabase, closeDatabase, getDatabase, generateId } from './db/index.js';
+
+// Load .env from project root
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 const logger = createLogger('controller', 'server');
 

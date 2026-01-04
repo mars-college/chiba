@@ -66,7 +66,7 @@ export default function App() {
           </NavLink>
         </nav>
         <div className="sidebar-footer">
-          Chiba v2.0.0
+          Chiba v0.1.0
         </div>
       </aside>
       <main className="main-content">
