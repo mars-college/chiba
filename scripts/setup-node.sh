@@ -138,10 +138,16 @@ echo "=== Updating system ==="
 sudo apt update && sudo apt upgrade -y
 
 echo "=== Installing required packages ==="
+# chromium-browser was renamed to chromium in newer Raspberry Pi OS
+CHROMIUM_PKG="chromium"
+if apt-cache show chromium-browser &>/dev/null; then
+    CHROMIUM_PKG="chromium-browser"
+fi
+
 sudo apt install -y \
     git \
     cage \
-    chromium-browser \
+    "$CHROMIUM_PKG" \
     curl \
     wget \
     python3 \
@@ -356,8 +362,12 @@ CHROMIUM_FLAGS=(
     --disable-sync
 )
 
+# Find chromium binary (name varies by OS version)
+CHROMIUM_BIN="chromium"
+command -v chromium-browser &>/dev/null && CHROMIUM_BIN="chromium-browser"
+
 # Run Chromium in cage (Wayland compositor)
-exec cage -- chromium-browser "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
+exec cage -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
 EOF
 chmod +x "$INSTALL_DIR/scripts/run-kiosk.sh"
 
