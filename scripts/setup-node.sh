@@ -351,6 +351,7 @@ done
 
 # Chromium kiosk flags
 CHROMIUM_FLAGS=(
+    --ozone-platform=wayland
     --kiosk
     --noerrdialogs
     --disable-infobars
