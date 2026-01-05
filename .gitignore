@@ -40,3 +40,4 @@ media/
 *.webp
 *.db-shm
 *.db-wal
+*.db
