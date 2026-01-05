@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 
 const API_BASE = '/api';
 
@@ -22,15 +22,16 @@ async function getApiKey(): Promise<string> {
     apiKeyPromise = fetch(`${API_BASE}/config`)
       .then(res => res.json())
       .then(data => {
-        cachedApiKey = data.apiKey || '';
-        return cachedApiKey;
+        const key = data.apiKey || '';
+        cachedApiKey = key;
+        return key;
       })
       .catch(() => {
         cachedApiKey = '';
         return '';
       });
   }
-  return apiKeyPromise;
+  return apiKeyPromise!;
 }
 
 // Initialize API key on module load
