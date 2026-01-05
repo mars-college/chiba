@@ -4,7 +4,7 @@ import type { NodeStatus } from '@chiba/shared';
 interface DashboardMessage {
   type: 'nodes' | 'node_update' | 'node_disconnected' | 'error';
   nodes?: NodeStatus[];
-  node?: NodeStatus;
+  status?: NodeStatus;  // For node_update
   nodeId?: string;
   error?: string;
 }
@@ -50,16 +50,16 @@ export function useWebSocket(): UseWebSocketResult {
               break;
 
             case 'node_update':
-              // Single node update
-              if (message.node) {
+              // Single node update - controller sends { nodeId, status }
+              if (message.nodeId && message.status) {
                 setNodes(prev => {
-                  const index = prev.findIndex(n => n.node.id === message.node!.node.id);
+                  const index = prev.findIndex(n => n.node.id === message.nodeId);
                   if (index >= 0) {
                     const updated = [...prev];
-                    updated[index] = message.node!;
+                    updated[index] = message.status!;
                     return updated;
                   }
-                  return [...prev, message.node!];
+                  return [...prev, message.status!];
                 });
               }
               break;
