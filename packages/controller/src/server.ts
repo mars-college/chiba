@@ -9,6 +9,7 @@
  */
 
 import dotenv from 'dotenv';
+import fs from 'fs';
 import http from 'http';
 import https from 'https';
 import path from 'path';
@@ -116,6 +117,76 @@ function sendError(
   sendJson(res, { success: false, error: message }, statusCode);
 }
 
+// ============================================================================
+// Static File Serving (Dashboard)
+// ============================================================================
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+};
+
+// Dashboard dist directory (relative to compiled server.js)
+const DASHBOARD_DIR = path.resolve(__dirname, '../../dashboard/dist');
+
+/**
+ * Serve static files from the dashboard dist directory.
+ * Returns true if a file was served, false otherwise.
+ */
+function serveStaticFile(
+  _req: http.IncomingMessage,
+  res: http.ServerResponse,
+  urlPath: string
+): boolean {
+  // Security: prevent directory traversal
+  const safePath = path.normalize(urlPath).replace(/^(\.\.[\/\\])+/, '');
+  let filePath = path.join(DASHBOARD_DIR, safePath);
+
+  // Check if dashboard dist exists
+  if (!fs.existsSync(DASHBOARD_DIR)) {
+    return false;
+  }
+
+  // If path is a directory or doesn't exist, try index.html (SPA routing)
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    // For SPA routing, serve index.html for non-file paths
+    const indexPath = path.join(DASHBOARD_DIR, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      filePath = indexPath;
+    } else {
+      return false;
+    }
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
+
+  try {
+    const content = fs.readFileSync(filePath);
+    res.writeHead(200, {
+      'Content-Type': mimeType,
+      'Content-Length': content.length,
+      'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000',
+    });
+    res.end(content);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Check API key authentication.
  */
@@ -166,12 +237,12 @@ async function handleRequest(
   // Public routes (no auth required)
   if (method === 'GET') {
     switch (url.pathname) {
-      case '/':
+      case '/api/info':
         sendJson(res, {
           name: 'chiba-controller',
           version: VERSION,
           endpoints: [
-            'GET /',
+            'GET /api/info',
             'GET /api/nodes',
             'GET /api/nodes/:id',
             'POST /api/nodes/register',
@@ -263,6 +334,13 @@ async function handleRequest(
         } else {
           sendError(res, 'Node not found', 404);
         }
+        return;
+      }
+    }
+
+    // Serve static files (dashboard) for non-API GET requests
+    if (!url.pathname.startsWith('/api/')) {
+      if (serveStaticFile(req, res, url.pathname)) {
         return;
       }
     }
