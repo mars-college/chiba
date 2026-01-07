@@ -88,6 +88,9 @@ importers:
       better-sqlite3:
         specifier: ^11.7.0
         version: 11.10.0
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
       ws:
         specifier: ^8.18.0
         version: 8.18.3

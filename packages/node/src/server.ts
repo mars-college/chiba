@@ -8,6 +8,7 @@
  * - Connects to the central controller
  */
 
+import dotenv from 'dotenv';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -18,6 +19,10 @@ import os from 'os';
 // ES modules don't have __dirname, so we create it
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load .env from project root (for local dev) or current dir (for Pi deployment)
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+dotenv.config(); // Also check current working directory
 import {
   createLogger,
   DEFAULT_PORT,
