@@ -1,5 +1,5 @@
 /**
- * Eden API integration for syncing collections.
+ * Eden API integration for syncing collections and fetching creations.
  * Downloads content from Eden collections with pagination support.
  */
 
@@ -17,7 +17,7 @@ const logger = createLogger('node', 'eden');
 /**
  * Eden creation object from API.
  */
-interface EdenCreation {
+export interface EdenCreation {
   _id: string;
   url: string;
   filename?: string;
@@ -26,6 +26,34 @@ interface EdenCreation {
   user?: {
     username?: string;
   };
+  mediaAttributes?: {
+    mimeType?: string;
+    width?: number;
+    height?: number;
+  };
+}
+
+/**
+ * Eden collection object from API.
+ */
+export interface EdenCollection {
+  _id: string;
+  name: string;
+  description?: string;
+  user?: {
+    username?: string;
+  };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Parsed Eden URL info.
+ */
+export interface EdenUrlInfo {
+  type: 'creation' | 'collection';
+  id: string;
+  db: 'PROD' | 'STAGE';
 }
 
 /**
@@ -68,6 +96,172 @@ export type EdenProgressCallback = (progress: EdenProgress) => void;
  */
 function getApiBase(db: 'PROD' | 'STAGE' = 'PROD'): string {
   return db === 'STAGE' ? EDEN_API.STAGE : EDEN_API.PROD;
+}
+
+/**
+ * Parse an Eden URL to extract type, ID, and database.
+ * Supports:
+ * - https://app.eden.art/creation/[id]
+ * - https://eden.art/creations/[id]
+ * - https://app.eden.art/collection/[id]
+ * - https://eden.art/collections/[id]
+ * - https://staging.eden.art/... (STAGE db)
+ */
+export function parseEdenUrl(url: string): EdenUrlInfo | null {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    const pathParts = parsed.pathname.split('/').filter(Boolean);
+
+    // Determine database from hostname
+    const db: 'PROD' | 'STAGE' = hostname.includes('staging') ? 'STAGE' : 'PROD';
+
+    // Check if it's an Eden domain
+    if (!hostname.includes('eden.art')) {
+      return null;
+    }
+
+    // Parse path: /creation/[id], /creations/[id], /collection/[id], /collections/[id]
+    if (pathParts.length >= 2) {
+      const resourceType = pathParts[0]?.toLowerCase();
+      const id = pathParts[1];
+
+      if ((resourceType === 'creation' || resourceType === 'creations') && id) {
+        return { type: 'creation', id, db };
+      }
+      if ((resourceType === 'collection' || resourceType === 'collections') && id) {
+        return { type: 'collection', id, db };
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if a string is a valid Eden URL.
+ */
+export function isEdenUrl(url: string): boolean {
+  return parseEdenUrl(url) !== null;
+}
+
+/**
+ * Fetch a single creation by ID from Eden API.
+ */
+export async function getCreation(
+  creationId: string,
+  db: 'PROD' | 'STAGE' = 'PROD'
+): Promise<EdenCreation | null> {
+  const apiKey = process.env.EDEN_API_KEY;
+  if (!apiKey) {
+    throw new Error('EDEN_API_KEY not configured');
+  }
+
+  const apiBase = getApiBase(db);
+  const url = `${apiBase}/v2/creations/${creationId}`;
+
+  logger.info('Fetching Eden creation', { creationId, db });
+
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: { 'X-Api-Key': apiKey }
+    }, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 404) {
+            resolve(null);
+            return;
+          }
+          if (res.statusCode !== 200) {
+            reject(new Error(`Eden API returned ${res.statusCode}: ${body}`));
+            return;
+          }
+          const data = JSON.parse(body) as EdenCreation;
+          resolve(data);
+        } catch (e) {
+          reject(new Error(`Failed to parse creation response: ${body}`));
+        }
+      });
+    });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Get creation from URL - parses URL and fetches the creation.
+ */
+export async function getCreationFromUrl(
+  url: string
+): Promise<{ creation: EdenCreation; db: 'PROD' | 'STAGE' } | null> {
+  const info = parseEdenUrl(url);
+  if (!info || info.type !== 'creation') {
+    return null;
+  }
+
+  const creation = await getCreation(info.id, info.db);
+  if (!creation) {
+    return null;
+  }
+
+  return { creation, db: info.db };
+}
+
+/**
+ * Get collection metadata (without creations).
+ */
+export async function getCollectionInfo(
+  collectionId: string,
+  db: 'PROD' | 'STAGE' = 'PROD'
+): Promise<EdenCollection | null> {
+  const apiKey = process.env.EDEN_API_KEY;
+  if (!apiKey) {
+    throw new Error('EDEN_API_KEY not configured');
+  }
+
+  const apiBase = getApiBase(db);
+  const url = `${apiBase}/v2/collections/${collectionId}`;
+
+  logger.info('Fetching Eden collection info', { collectionId, db });
+
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: { 'X-Api-Key': apiKey }
+    }, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 404) {
+            resolve(null);
+            return;
+          }
+          if (res.statusCode !== 200) {
+            reject(new Error(`Eden API returned ${res.statusCode}: ${body}`));
+            return;
+          }
+          const data = JSON.parse(body) as EdenCollection;
+          resolve(data);
+        } catch (e) {
+          reject(new Error(`Failed to parse collection response: ${body}`));
+        }
+      });
+    });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Get all creations from a collection (for listing, not downloading).
+ */
+export async function getCollectionCreationsList(
+  collectionId: string,
+  db: 'PROD' | 'STAGE' = 'PROD'
+): Promise<EdenCreation[]> {
+  return getCollectionCreations(collectionId, db);
 }
 
 /**
@@ -344,4 +538,115 @@ export async function syncCollection(
   });
 
   return result;
+}
+
+/**
+ * Result of downloading a single Eden creation.
+ */
+export interface EdenCreationDownloadResult {
+  content: Content;
+  alreadyCached: boolean;
+  creation: EdenCreation;
+}
+
+/**
+ * Download and cache a single Eden creation.
+ * Returns the cached content object.
+ */
+export async function downloadCreation(
+  creationId: string,
+  options: {
+    db?: 'PROD' | 'STAGE';
+    name?: string;
+  } = {}
+): Promise<EdenCreationDownloadResult> {
+  const { db = 'PROD', name } = options;
+  const mediaDir = getMediaDir();
+
+  logger.info('Downloading Eden creation', { creationId, db });
+
+  // Fetch creation metadata
+  const creation = await getCreation(creationId, db);
+  if (!creation) {
+    throw new Error(`Creation not found: ${creationId}`);
+  }
+
+  if (!creation.url) {
+    throw new Error(`Creation ${creationId} has no media URL`);
+  }
+
+  // Determine filename
+  const urlHash = crypto.createHash('md5').update(creation.url).digest('hex');
+  const ext = path.extname(new URL(creation.url).pathname) || '.mp4';
+  const filename = `${urlHash}${ext}`;
+  const destPath = path.join(mediaDir, filename);
+
+  // Check if already cached
+  const existing = getExistingContent(urlHash);
+  if (existing && fs.existsSync(destPath)) {
+    logger.info('Creation already cached', { creationId, filename });
+    return { content: existing, alreadyCached: true, creation };
+  }
+
+  // Download file
+  logger.info('Downloading creation media', { creationId, url: creation.url });
+  await downloadFile(creation.url, destPath);
+
+  const stats = fs.statSync(destPath);
+  const metadata: ContentMetadata = {
+    title: name || creation.title || creation.name,
+    author: creation.user?.username,
+  };
+
+  const content: Content = {
+    id: generateId(),
+    hash: urlHash,
+    filename,
+    name: name || creation.title || creation.name,
+    originalUrl: creation.url,
+    source: { type: 'eden', collectionId: creationId, db },
+    type: 'video',
+    sizeBytes: stats.size,
+    metadata,
+    createdAt: Date.now(),
+  };
+
+  // Save to database
+  const database = getDatabase();
+  database.prepare(`
+    INSERT OR REPLACE INTO cached_content (
+      hash, filename, name, original_url, source_type, source_data,
+      content_type, size_bytes, metadata, cached_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    content.hash,
+    content.filename,
+    content.name ?? null,
+    creation.url,
+    'eden',
+    JSON.stringify({ type: 'eden', creationId, db }),
+    'video',
+    content.sizeBytes,
+    JSON.stringify(metadata),
+    content.createdAt
+  );
+
+  logger.info('Creation downloaded', { creationId, filename, size: stats.size });
+
+  return { content, alreadyCached: false, creation };
+}
+
+/**
+ * Download creation from URL - parses URL and downloads.
+ */
+export async function downloadCreationFromUrl(
+  url: string,
+  options: { name?: string } = {}
+): Promise<EdenCreationDownloadResult | null> {
+  const info = parseEdenUrl(url);
+  if (!info || info.type !== 'creation') {
+    return null;
+  }
+
+  return downloadCreation(info.id, { db: info.db, name: options.name });
 }

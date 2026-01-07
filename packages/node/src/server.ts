@@ -39,7 +39,12 @@ import { initDatabase, closeDatabase, setConfig, getAllConfig } from './db/index
 import { getMediaDir, listCachedContent, getCacheSize, getContentByFilename, downloadAndCache, clearAllCache } from './services/content-cache.js';
 import { getDiskUsage as getDiskUsageActual, getHardwareMetrics as getHardwareMetricsActual } from './services/hardware.js';
 import { isYouTubeUrl, downloadYouTube } from './services/youtube.js';
-import { syncCollection } from './services/eden.js';
+import {
+  syncCollection,
+  downloadCreation,
+  isEdenUrl,
+  parseEdenUrl,
+} from './services/eden.js';
 import {
   playbackManager,
   addPlayerClient,
@@ -473,18 +478,39 @@ async function handleRequest(
     switch (url.pathname) {
       case '/play': {
         // Play content - auto-detects source type
-        // Accepts: filename, url (auto-detects YouTube/media), collectionId (Eden), content, playlist
+        // Accepts: filename, url (auto-detects YouTube/media/Eden), collectionId (Eden), creationId (Eden), content, playlist
         logger.info('Play command received', body as Record<string, unknown>);
 
         const urlToPlay = body?.url as string | undefined;
         const filenameToPlay = body?.filename as string | undefined;
         const collectionId = body?.collectionId as string | undefined;
+        const creationId = body?.creationId as string | undefined;
         const db = (body?.db as 'PROD' | 'STAGE') || 'PROD';
         const contentName = body?.name as string | undefined;
         const playOptions = {
           loop: body?.loop !== false,
           showIntro: body?.showIntro === true,
         };
+
+        // Eden single creation by ID
+        if (creationId) {
+          logger.info('Playing Eden creation', { creationId, db });
+          try {
+            const result = await downloadCreation(creationId, { db, name: contentName });
+            playContent(result.content, playOptions);
+            sendJson(res, {
+              success: true,
+              data: {
+                state: playbackManager.getState(),
+                alreadyCached: result.alreadyCached,
+              },
+            });
+          } catch (err) {
+            logger.error('Eden creation play failed', err as Error);
+            sendError(res, `Eden creation play failed: ${(err as Error).message}`, 500);
+          }
+          return;
+        }
 
         // Eden collection - sync and play as playlist
         if (collectionId) {
@@ -524,6 +550,47 @@ async function handleRequest(
 
         // URL - auto-detect type
         if (urlToPlay) {
+          // Eden URL (creation or collection)
+          if (isEdenUrl(urlToPlay)) {
+            const edenInfo = parseEdenUrl(urlToPlay);
+            if (edenInfo?.type === 'creation') {
+              logger.info('Playing Eden creation URL', { url: urlToPlay, id: edenInfo.id });
+              try {
+                const result = await downloadCreation(edenInfo.id, { db: edenInfo.db, name: contentName });
+                playContent(result.content, playOptions);
+                sendJson(res, {
+                  success: true,
+                  data: { state: playbackManager.getState(), alreadyCached: result.alreadyCached },
+                });
+              } catch (err) {
+                logger.error('Eden creation play failed', err as Error);
+                sendError(res, `Eden creation play failed: ${(err as Error).message}`, 500);
+              }
+              return;
+            } else if (edenInfo?.type === 'collection') {
+              logger.info('Playing Eden collection URL', { url: urlToPlay, id: edenInfo.id });
+              try {
+                const result = await syncCollection(edenInfo.id, { db: edenInfo.db });
+                if (!result.playlist || result.playlist.items.length === 0) {
+                  sendError(res, 'No content found in Eden collection', 404);
+                  return;
+                }
+                playPlaylist(result.playlist, 0);
+                sendJson(res, {
+                  success: true,
+                  data: {
+                    state: playbackManager.getState(),
+                    sync: { total: result.total, downloaded: result.downloaded, skipped: result.skipped, failed: result.failed },
+                  },
+                });
+              } catch (err) {
+                logger.error('Eden collection play failed', err as Error);
+                sendError(res, `Eden collection play failed: ${(err as Error).message}`, 500);
+              }
+              return;
+            }
+          }
+
           // YouTube
           if (isYouTubeUrl(urlToPlay)) {
             logger.info('Playing YouTube', { url: urlToPlay });
@@ -578,7 +645,7 @@ async function handleRequest(
           return;
         }
 
-        sendError(res, 'Missing filename, url, collectionId, content, or playlist');
+        sendError(res, 'Missing filename, url, collectionId, creationId, content, or playlist');
         return;
       }
 
@@ -624,11 +691,31 @@ async function handleRequest(
 
       case '/cache': {
         // Cache content without playing
-        // Accepts: url (auto-detects YouTube), OR collectionId for Eden
+        // Accepts: url (auto-detects YouTube/Eden), OR collectionId/creationId for Eden
         const cacheUrl = body?.url as string | undefined;
         const cacheName = body?.name as string | undefined;
         const collectionId = body?.collectionId as string | undefined;
+        const creationId = body?.creationId as string | undefined;
         const db = (body?.db as 'PROD' | 'STAGE') || 'PROD';
+
+        // Eden single creation by ID
+        if (creationId) {
+          logger.info('Cache Eden creation', { creationId, db });
+          try {
+            const result = await downloadCreation(creationId, { db, name: cacheName });
+            sendJson(res, {
+              success: true,
+              data: {
+                content: result.content,
+                alreadyCached: result.alreadyCached,
+              },
+            });
+          } catch (err) {
+            logger.error('Eden creation cache failed', err as Error);
+            sendError(res, `Eden creation cache failed: ${(err as Error).message}`, 500);
+          }
+          return;
+        }
 
         // Eden collection
         if (collectionId) {
@@ -658,27 +745,54 @@ async function handleRequest(
           return;
         }
 
-        // URL (YouTube auto-detected, or regular download)
+        // URL (auto-detects Eden/YouTube/media)
         if (!cacheUrl) {
-          sendError(res, 'Missing url or collectionId parameter');
+          sendError(res, 'Missing url, collectionId, or creationId parameter');
           return;
         }
 
         logger.info('Cache URL', { url: cacheUrl, name: cacheName });
         try {
           let result;
-          if (isYouTubeUrl(cacheUrl)) {
+          // Eden URL
+          if (isEdenUrl(cacheUrl)) {
+            const edenInfo = parseEdenUrl(cacheUrl);
+            if (edenInfo?.type === 'creation') {
+              result = await downloadCreation(edenInfo.id, { db: edenInfo.db, name: cacheName });
+            } else if (edenInfo?.type === 'collection') {
+              const syncResult = await syncCollection(edenInfo.id, { db: edenInfo.db });
+              sendJson(res, {
+                success: true,
+                data: {
+                  collectionId: syncResult.collectionId,
+                  db: syncResult.db,
+                  total: syncResult.total,
+                  downloaded: syncResult.downloaded,
+                  skipped: syncResult.skipped,
+                  failed: syncResult.failed,
+                  files: syncResult.files.map(f => ({
+                    filename: f.filename,
+                    status: f.status,
+                    error: f.error,
+                  })),
+                },
+              });
+              return;
+            }
+          } else if (isYouTubeUrl(cacheUrl)) {
             result = await downloadYouTube(cacheUrl, { name: cacheName });
           } else {
             result = await downloadAndCache(cacheUrl, { name: cacheName });
           }
-          sendJson(res, {
-            success: true,
-            data: {
-              content: result.content,
-              alreadyCached: result.alreadyCached,
-            },
-          });
+          if (result) {
+            sendJson(res, {
+              success: true,
+              data: {
+                content: result.content,
+                alreadyCached: result.alreadyCached,
+              },
+            });
+          }
         } catch (err) {
           logger.error('Cache failed', err as Error);
           sendError(res, `Cache failed: ${(err as Error).message}`, 500);

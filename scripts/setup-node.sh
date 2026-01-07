@@ -161,17 +161,26 @@ sudo apt install -y \
     alsa-utils
 
 echo "=== Installing Node.js 20 ==="
-# Install Node.js using NodeSource repository
-if ! command -v node &>/dev/null || [ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 18 ]; then
+# Install Node.js using NodeSource repository (requires Node >= 20)
+NODE_MAJOR=$(node -v 2>/dev/null | cut -d. -f1 | tr -d 'v' || echo "0")
+if ! command -v node &>/dev/null || [ "$NODE_MAJOR" -lt 20 ]; then
+    echo "Node.js $NODE_MAJOR found, upgrading to 20..."
     curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
     sudo apt install -y nodejs
+else
+    echo "Node.js $NODE_MAJOR already meets requirement (>=20)"
 fi
 echo "Node.js installed: $(node -v)"
 echo "npm installed: $(npm -v)"
 
-echo "=== Installing pnpm ==="
-if ! command -v pnpm &>/dev/null; then
-    sudo npm install -g pnpm
+echo "=== Installing pnpm 9 ==="
+# Install or upgrade pnpm (requires pnpm >= 9)
+PNPM_MAJOR=$(pnpm -v 2>/dev/null | cut -d. -f1 || echo "0")
+if ! command -v pnpm &>/dev/null || [ "$PNPM_MAJOR" -lt 9 ]; then
+    echo "pnpm $PNPM_MAJOR found, upgrading to 9..."
+    sudo npm install -g pnpm@9
+else
+    echo "pnpm $PNPM_MAJOR already meets requirement (>=9)"
 fi
 echo "pnpm installed: $(pnpm -v)"
 
