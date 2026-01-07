@@ -21,6 +21,8 @@ export type {
   UrlSource,
   YouTubeSource,
   EdenSource,
+  EdenCollectionSource,
+  EdenCreationSource,
   ContentSource,
   ContentType,
   ContentMetadata,

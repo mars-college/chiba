@@ -1031,28 +1031,44 @@ async function handleRequest(
       order: number;
     }>;
 
-    // Build play command with playlist items
+    // Build play command with proper PlaylistItem objects
     // The node will resolve/cache each item when playing
     const playBody: Record<string, unknown> = {
       playlist: {
         id: row.id,
         name: row.name,
-        items: items.map(item => {
-          // Convert stored format to playable format
+        items: items.map((item, idx) => {
+          // Build ContentSource based on source type
+          let content: Record<string, unknown>;
           if (item.sourceType === 'eden_creation') {
-            return { creationId: item.sourceData.id, db: item.sourceData.db, name: item.name };
+            content = { type: 'eden_creation', creationId: item.sourceData.id, db: item.sourceData.db };
           } else if (item.sourceType === 'eden_collection') {
-            return { collectionId: item.sourceData.id, db: item.sourceData.db };
-          } else if (item.sourceType === 'youtube' || item.sourceType === 'url') {
-            return { url: item.sourceData.url, name: item.name };
+            content = { type: 'eden_collection', collectionId: item.sourceData.id, db: item.sourceData.db };
+          } else if (item.sourceType === 'youtube') {
+            content = { type: 'youtube', url: item.sourceData.url };
+          } else if (item.sourceType === 'url') {
+            content = { type: 'url', url: item.sourceData.url };
           } else if (item.sourceType === 'file') {
-            return { filename: item.sourceData.filename };
+            content = { type: 'file', filename: item.sourceData.filename };
+          } else {
+            // Fallback - pass through as-is
+            content = { type: 'url', url: String(item.sourceData.url || '') };
           }
-          return item;
+
+          // Return proper PlaylistItem structure
+          return {
+            id: item.id,
+            content,
+            duration: item.duration,
+            order: item.order ?? idx,
+            metadata: item.name ? { title: item.name } : undefined,
+          };
         }),
         loop: Boolean(row.loop),
         showIntros: Boolean(row.show_intros),
         introDuration: row.intro_duration,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
       },
       startIndex: body.startIndex ?? 0,
     };

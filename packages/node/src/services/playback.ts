@@ -15,7 +15,9 @@ import type {
 } from '@chiba/shared';
 import { WebSocket } from 'ws';
 import { getVolume, setVolume } from './volume.js';
-import { markAsPlayed } from './content-cache.js';
+import { markAsPlayed, getContentByFilename, downloadAndCache } from './content-cache.js';
+import { isYouTubeUrl, downloadYouTube } from './youtube.js';
+import { downloadCreation as downloadEdenCreation, syncCollection as syncEdenCollection } from './eden.js';
 
 const logger = createLogger('node', 'playback');
 
@@ -189,13 +191,16 @@ class PlaybackManager {
     this.state.playlistIndex = startIndex;
     this.state.loop = playlist.loop;
 
-    this.playCurrentPlaylistItem();
+    this.playCurrentPlaylistItem().catch(err => {
+      logger.error('Failed to play playlist item', err as Error);
+    });
   }
 
   /**
    * Play the current item in the playlist.
+   * Resolves ContentSource items by downloading/caching them on-the-fly.
    */
-  private playCurrentPlaylistItem(): void {
+  private async playCurrentPlaylistItem(): Promise<void> {
     const playlist = this.state.playlist;
     if (!playlist) return;
 
@@ -209,18 +214,53 @@ class PlaybackManager {
     // Resolve content if it's a source reference
     let content: Content | null = null;
     if ('hash' in item.content) {
+      // Already resolved Content object
       content = item.content as Content;
     } else {
-      // It's a ContentSource - try to resolve from cache
+      // It's a ContentSource - need to download/resolve
       const source = item.content as ContentSource;
-      if (source.type === 'file') {
-        // Look up by filename - would need to search cache
-        logger.warn('File source resolution not implemented', { filename: source.filename });
+      logger.info('Resolving playlist item content', { index: this.state.playlistIndex, sourceType: source.type });
+
+      try {
+        if (source.type === 'file') {
+          // Look up by filename in cache
+          content = getContentByFilename(source.filename);
+          if (!content) {
+            logger.warn('File not found in cache', { filename: source.filename });
+          }
+        } else if (source.type === 'url') {
+          // Download URL content
+          if (isYouTubeUrl(source.url)) {
+            const result = await downloadYouTube(source.url, { name: item.metadata?.title });
+            content = result.content;
+          } else {
+            const result = await downloadAndCache(source.url, { name: item.metadata?.title });
+            content = result.content;
+          }
+        } else if (source.type === 'youtube') {
+          // Download YouTube content
+          const result = await downloadYouTube(source.url, { name: item.metadata?.title });
+          content = result.content;
+        } else if (source.type === 'eden_creation') {
+          // Download Eden creation
+          const result = await downloadEdenCreation(source.creationId, { db: source.db, name: item.metadata?.title });
+          content = result.content;
+        } else if (source.type === 'eden_collection') {
+          // Sync Eden collection and take first item
+          const result = await syncEdenCollection(source.collectionId, { db: source.db });
+          const firstItem = result.playlist?.items[0];
+          if (firstItem && 'hash' in firstItem.content) {
+            content = firstItem.content as Content;
+          }
+        }
+      } catch (err) {
+        logger.error('Failed to resolve playlist item', err as Error, { index: this.state.playlistIndex, source });
       }
     }
 
     if (!content) {
       logger.warn('Could not resolve playlist item content', { index: this.state.playlistIndex });
+      // Skip to next item
       this.next();
       return;
     }
@@ -317,7 +357,9 @@ class PlaybackManager {
     }
 
     logger.info('Next item', { index: this.state.playlistIndex });
-    this.playCurrentPlaylistItem();
+    this.playCurrentPlaylistItem().catch(err => {
+      logger.error('Failed to play next item', err as Error);
+    });
   }
 
   /**
@@ -344,7 +386,9 @@ class PlaybackManager {
     }
 
     logger.info('Previous item', { index: this.state.playlistIndex });
-    this.playCurrentPlaylistItem();
+    this.playCurrentPlaylistItem().catch(err => {
+      logger.error('Failed to play previous item', err as Error);
+    });
   }
 
   /**
@@ -353,7 +397,9 @@ class PlaybackManager {
   restart(): void {
     if (this.state.playlist) {
       this.state.playlistIndex = 0;
-      this.playCurrentPlaylistItem();
+      this.playCurrentPlaylistItem().catch(err => {
+        logger.error('Failed to restart playlist', err as Error);
+      });
     } else if (this.state.currentContent) {
       this.playContent(this.state.currentContent, { loop: this.state.loop });
     }

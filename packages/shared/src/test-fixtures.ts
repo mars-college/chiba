@@ -179,8 +179,8 @@ export const SAMPLE_CONTENT_SOURCES: ContentSource[] = [
   { type: 'file', filename: 'test.mp4' },
   { type: 'url', url: TEST_DATA.videos[0] ?? '' },
   { type: 'youtube', url: TEST_DATA.youtube[0] ?? '' },
-  { type: 'eden', collectionId: TEST_DATA.eden.prod[0] ?? '', db: 'PROD' },
-  { type: 'eden', collectionId: TEST_DATA.eden.stage[0] ?? '', db: 'STAGE' },
+  { type: 'eden_collection', collectionId: TEST_DATA.eden.prod[0] ?? '', db: 'PROD' },
+  { type: 'eden_collection', collectionId: TEST_DATA.eden.stage[0] ?? '', db: 'STAGE' },
 ];
 
 /**

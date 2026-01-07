@@ -6,7 +6,7 @@
 /**
  * Types of content sources supported by the system.
  */
-export type ContentSourceType = 'file' | 'url' | 'youtube' | 'eden';
+export type ContentSourceType = 'file' | 'url' | 'youtube' | 'eden_collection' | 'eden_creation';
 
 /**
  * A local file already cached on the node.
@@ -38,8 +38,8 @@ export interface YouTubeSource {
 /**
  * An Eden collection to sync.
  */
-export interface EdenSource {
-  type: 'eden';
+export interface EdenCollectionSource {
+  type: 'eden_collection';
   /** Eden collection ID */
   collectionId: string;
   /** Eden database: PROD or STAGE */
@@ -47,9 +47,25 @@ export interface EdenSource {
 }
 
 /**
+ * An Eden creation (single item) to download.
+ */
+export interface EdenCreationSource {
+  type: 'eden_creation';
+  /** Eden creation ID */
+  creationId: string;
+  /** Eden database: PROD or STAGE */
+  db?: 'PROD' | 'STAGE';
+}
+
+/**
+ * @deprecated Use EdenCollectionSource instead
+ */
+export type EdenSource = EdenCollectionSource;
+
+/**
  * Union type for all content sources.
  */
-export type ContentSource = FileSource | UrlSource | YouTubeSource | EdenSource;
+export type ContentSource = FileSource | UrlSource | YouTubeSource | EdenCollectionSource | EdenCreationSource;
 
 /**
  * Content types supported by the player.

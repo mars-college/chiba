@@ -198,15 +198,15 @@ async function testEdenEndpoints() {
 
   // GET /api/eden/creation/:id
   {
-    const res = await request<{ success: boolean; data: { _id: string; url: string; title?: string } }>(
+    const res = await request<{ success: boolean; data: { creation: { _id: string; url: string; name?: string } } }>(
       `/api/eden/creation/${CONFIG.eden.creationId}?db=PROD`
     );
-    if (res.status === 200 && res.data.success && res.data.data._id) {
+    if (res.status === 200 && res.data.success && res.data.data?.creation?._id) {
       pass(`GET /api/eden/creation/:id - fetched creation`);
-      log(`  Title: ${res.data.data.title || res.data.data.name || '(untitled)'}`);
-      log(`  Media URL: ${res.data.data.url?.substring(0, 60)}...`);
+      log(`  Name: ${res.data.data.creation.name || '(untitled)'}`);
+      log(`  Media URL: ${res.data.data.creation.url?.substring(0, 60)}...`);
     } else {
-      fail('GET /api/eden/creation/:id', res.error);
+      fail('GET /api/eden/creation/:id', res.error || 'Missing creation data');
     }
   }
 
