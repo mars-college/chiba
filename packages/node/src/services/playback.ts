@@ -3,7 +3,7 @@
  * Manages playback state transitions and broadcasts updates.
  */
 
-import { createLogger, DEFAULT_PLAYBACK_STATE, DEFAULT_INTRO_DURATION, DEFAULT_IMAGE_DURATION } from '@chiba/shared';
+import { createLogger, DEFAULT_PLAYBACK_STATE, DEFAULT_INTRO_DURATION } from '@chiba/shared';
 import type {
   PlaybackState,
   PlaybackMode,
@@ -167,7 +167,7 @@ class PlaybackManager {
 
     // For images, auto-advance after duration
     if (content.type === 'image' && !loop) {
-      const duration = content.metadata?.introDuration ?? DEFAULT_IMAGE_DURATION;
+      const duration = content.metadata?.introDuration ?? this.state.imageDuration;
       this.imageTimer = setTimeout(() => {
         this.handleContentEnded();
       }, duration);
@@ -390,6 +390,16 @@ class PlaybackManager {
   }
 
   /**
+   * Set image duration in milliseconds.
+   */
+  setImageDuration(duration: number): void {
+    const clampedDuration = Math.max(1000, Math.round(duration)); // Minimum 1 second
+    logger.info('Setting image duration', { duration: clampedDuration });
+    this.state.imageDuration = clampedDuration;
+    this.broadcast();
+  }
+
+  /**
    * Handle content ended event from player.
    */
   handleContentEnded(): void {
@@ -436,6 +446,7 @@ export const nextItem = () => playbackManager.next();
 export const previousItem = () => playbackManager.previous();
 export const restartPlayback = () => playbackManager.restart();
 export const setPlaybackVolume = (level: number) => playbackManager.setVolume(level);
+export const setImageDuration = (duration: number) => playbackManager.setImageDuration(duration);
 export const handleContentEnded = () => playbackManager.handleContentEnded();
 export const handleIntroComplete = () => playbackManager.handleIntroComplete();
 export const addPlayerClient = (ws: WebSocket) => playbackManager.addPlayerClient(ws);

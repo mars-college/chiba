@@ -20,6 +20,7 @@ import {
   DEFAULT_PORT,
   VERSION,
   NODE_TIMEOUT,
+  DEFAULT_PLAYBACK_STATE,
   type NodeStatus,
   type ControllerToNodeMessage,
   type NodeToControllerMessage,
@@ -1386,13 +1387,7 @@ function handleNodeMessage(
         node: info,
         connected: true,
         lastSeen: Date.now(),
-        playbackState: {
-          mode: 'off',
-          playlistIndex: 0,
-          loop: true,
-          paused: false,
-          volume: 100,
-        },
+        playbackState: { ...DEFAULT_PLAYBACK_STATE },
         cachedContent: [],
         diskUsage: {
           totalBytes: 0,

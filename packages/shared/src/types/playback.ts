@@ -4,6 +4,7 @@
  */
 
 import type { Content, ContentSource, Playlist, PlaylistItem, ContentMetadata } from './content.js';
+import { DEFAULT_IMAGE_DURATION } from '../constants.js';
 
 /**
  * Playback modes supported by the player.
@@ -30,6 +31,8 @@ export interface PlaybackState {
   paused: boolean;
   /** Volume level (0-100) */
   volume: number;
+  /** Image display duration in milliseconds */
+  imageDuration: number;
   /** Current playback position in seconds (for videos) */
   position?: number;
   /** Intro screen currently being shown */
@@ -45,6 +48,7 @@ export const DEFAULT_PLAYBACK_STATE: PlaybackState = {
   loop: true,
   paused: false,
   volume: 100,
+  imageDuration: DEFAULT_IMAGE_DURATION,
 };
 
 /**

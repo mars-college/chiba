@@ -58,6 +58,7 @@ import {
   nextItem,
   previousItem,
   setPlaybackVolume,
+  setImageDuration,
   handleContentEnded,
   handleIntroComplete,
 } from './services/playback.js';
@@ -686,6 +687,17 @@ async function handleRequest(
         const enabled = body?.enabled as boolean ?? !playbackManager.getState().loop;
         playbackManager.setLoop(enabled);
         sendJson(res, { success: true, data: { loop: playbackManager.getState().loop } });
+        return;
+      }
+
+      case '/image-duration': {
+        const duration = body?.duration as number | undefined;
+        if (duration === undefined || typeof duration !== 'number') {
+          sendError(res, 'Duration (in ms) is required', 400);
+          return;
+        }
+        setImageDuration(duration);
+        sendJson(res, { success: true, data: { imageDuration: playbackManager.getState().imageDuration } });
         return;
       }
 

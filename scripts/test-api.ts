@@ -18,8 +18,9 @@ import https from 'https';
 
 const CONFIG = {
   controllerUrl: process.env.CONTROLLER_URL || 'http://10.10.13.9:8080',
-  nodeId: process.env.NODE_ID || 'macbook',
-  apiKey: process.env.API_KEY || '',
+  nodeName: process.env.NODE_NAME || 'macbook',  // Friendly name to find
+  nodeId: '',  // Will be resolved from nodeName
+  apiKey: process.env.API_KEY || '3bcd5d271fd85aa1b982a0b3efa6abb0285d7d051a6d7f93',
 
   // Test data
   eden: {
@@ -27,6 +28,7 @@ const CONFIG = {
     collectionIdProd: '68538ccaf883914b6b8e09a1',
     collectionIdStage: '6955b5ec1dd4ee955af9f612',
   },
+  testVideoUrl: 'https://dtut5r9j4w7j4.cloudfront.net/1695eb3b9ccc8d1f7eb57ee54bfadfc4e7f564d526b1a0f4fa705ca11ced51af.mp4',
 };
 
 // =============================================================================
@@ -166,23 +168,24 @@ async function testDiscovery() {
 
   // GET /api/nodes
   {
-    const res = await request<{ success: boolean; data: { nodes: Array<{ node: { friendlyName: string } }> } }>('/api/nodes');
+    const res = await request<{ success: boolean; data: { nodes: Array<{ node: { id: string; friendlyName: string } }> } }>('/api/nodes');
     if (res.status === 200 && res.data.success) {
       const nodes = res.data.data.nodes;
       pass(`GET /api/nodes - found ${nodes.length} node(s)`);
 
-      // Check if our test node is connected
+      // Check if our test node is connected and resolve its UUID
       const testNode = nodes.find(n =>
-        n.node.friendlyName === CONFIG.nodeId ||
-        n.node.friendlyName.toLowerCase().includes(CONFIG.nodeId.toLowerCase())
+        n.node.friendlyName === CONFIG.nodeName ||
+        n.node.friendlyName.toLowerCase().includes(CONFIG.nodeName.toLowerCase())
       );
       if (testNode) {
-        pass(`Node "${CONFIG.nodeId}" is connected`);
-        // Store the actual node ID for later tests
-        (CONFIG as { resolvedNodeId?: string }).resolvedNodeId = testNode.node.friendlyName;
+        pass(`Node "${CONFIG.nodeName}" is connected`);
+        // Store the actual node UUID for later tests
+        CONFIG.nodeId = testNode.node.id;
+        log(`  Resolved node ID: ${CONFIG.nodeId}`);
       } else {
-        fail(`Node "${CONFIG.nodeId}" not found in connected nodes`);
-        log('Available nodes:', nodes.map(n => n.node.friendlyName).join(', '));
+        fail(`Node "${CONFIG.nodeName}" not found in connected nodes`);
+        log('Available nodes:', nodes.map(n => `${n.node.friendlyName} (${n.node.id})`).join(', '));
       }
     } else {
       fail('GET /api/nodes', res.error);
@@ -397,18 +400,18 @@ async function testPlaylistCrud() {
 }
 
 async function testPlaylistWithContent() {
-  section('Playlist with Eden Content');
+  section('Playlist with Video Content');
 
-  // Create playlist with Eden items
+  // Create playlist with video URL items
   {
     const res = await request<{ success: boolean; data: { id: string; items: unknown[] } }>(
       '/api/playlists',
       {
         method: 'POST',
         body: {
-          name: 'Eden Test Playlist',
+          name: 'Video Test Playlist',
           items: [
-            { creationId: CONFIG.eden.creationId, db: 'PROD', name: 'Creation 1' },
+            { url: CONFIG.testVideoUrl, name: 'Test Video' },
           ],
           loop: true,
           showIntros: false,
@@ -416,12 +419,12 @@ async function testPlaylistWithContent() {
       }
     );
     if (res.status === 200 && res.data.success) {
-      pass('Created playlist with Eden creation');
+      pass('Created playlist with video URL');
       testPlaylistId = res.data.data.id;
       log(`  Playlist ID: ${testPlaylistId}`);
       log(`  Items: ${res.data.data.items.length}`);
     } else {
-      fail('Create playlist with Eden content', res.error);
+      fail('Create playlist with video content', res.error);
     }
   }
 }
@@ -429,37 +432,37 @@ async function testPlaylistWithContent() {
 async function testNodeCaching() {
   section('Node Caching');
 
-  const nodeId = (CONFIG as { resolvedNodeId?: string }).resolvedNodeId || CONFIG.nodeId;
+  if (!CONFIG.nodeId) {
+    skip('Cache tests', 'No node ID resolved');
+    return;
+  }
 
   // First check node status
   {
-    const res = await request<{ success: boolean; data: { node: { friendlyName: string } } }>(
-      `/api/nodes/${nodeId}`
-    );
+    const res = await request<{ success: boolean }>(`/api/nodes/${CONFIG.nodeId}`);
     if (res.status !== 200 || !res.data.success) {
-      skip('Cache tests', `Node "${nodeId}" not available`);
+      skip('Cache tests', `Node "${CONFIG.nodeName}" not available`);
       return;
     }
   }
 
-  // Cache single Eden creation
+  // Cache test video URL
   {
-    log('Caching Eden creation (this may take a moment)...');
-    const res = await request<{ success: boolean; data: { content?: unknown; alreadyCached?: boolean } }>(
-      `/api/nodes/${nodeId}/cache`,
+    log('Caching test video URL...');
+    const res = await request<{ success: boolean; data: { data?: { content?: unknown; alreadyCached?: boolean } } }>(
+      `/api/nodes/${CONFIG.nodeId}/cache`,
       {
         method: 'POST',
         body: {
-          creationId: CONFIG.eden.creationId,
-          db: 'PROD',
+          url: CONFIG.testVideoUrl,
         },
       }
     );
     if (res.status === 200 && res.data.success) {
-      pass('POST /api/nodes/:id/cache - cached Eden creation');
-      log(`  Already cached: ${res.data.data?.alreadyCached || false}`);
+      pass('POST /api/nodes/:id/cache - cached video URL');
+      log(`  Already cached: ${res.data.data?.data?.alreadyCached || false}`);
     } else {
-      fail('POST /api/nodes/:id/cache (creation)', res.error);
+      fail('POST /api/nodes/:id/cache (URL)', res.error);
     }
   }
 }
@@ -467,34 +470,36 @@ async function testNodeCaching() {
 async function testNodePlayback() {
   section('Node Playback');
 
-  const nodeId = (CONFIG as { resolvedNodeId?: string }).resolvedNodeId || CONFIG.nodeId;
+  if (!CONFIG.nodeId) {
+    skip('Playback tests', 'No node ID resolved');
+    return;
+  }
 
   // Check node status first
   {
-    const res = await request<{ success: boolean }>(`/api/nodes/${nodeId}`);
+    const res = await request<{ success: boolean }>(`/api/nodes/${CONFIG.nodeId}`);
     if (res.status !== 200 || !res.data.success) {
-      skip('Playback tests', `Node "${nodeId}" not available`);
+      skip('Playback tests', `Node "${CONFIG.nodeName}" not available`);
       return;
     }
   }
 
-  // Play cached creation
+  // Play test video URL
   {
-    log('Starting playback of Eden creation...');
-    const res = await request<{ success: boolean; data: { state: { mode: string } } }>(
-      `/api/nodes/${nodeId}/play`,
+    log('Starting playback of test video...');
+    const res = await request<{ success: boolean; data: { data?: { state?: { mode: string } } } }>(
+      `/api/nodes/${CONFIG.nodeId}/play`,
       {
         method: 'POST',
         body: {
-          creationId: CONFIG.eden.creationId,
-          db: 'PROD',
+          url: CONFIG.testVideoUrl,
           loop: true,
         },
       }
     );
     if (res.status === 200 && res.data.success) {
       pass('POST /api/nodes/:id/play - started playback');
-      log(`  Mode: ${res.data.data?.state?.mode}`);
+      log(`  Mode: ${res.data.data?.data?.state?.mode || 'video'}`);
     } else {
       fail('POST /api/nodes/:id/play', res.error);
     }
@@ -504,8 +509,8 @@ async function testNodePlayback() {
 
   // Pause
   {
-    const res = await request<{ success: boolean; data: { state: { paused: boolean } } }>(
-      `/api/nodes/${nodeId}/pause`,
+    const res = await request<{ success: boolean }>(
+      `/api/nodes/${CONFIG.nodeId}/pause`,
       { method: 'POST' }
     );
     if (res.status === 200 && res.data.success) {
@@ -515,12 +520,12 @@ async function testNodePlayback() {
     }
   }
 
-  await sleep(500);
+  await sleep(1000);
 
   // Resume
   {
     const res = await request<{ success: boolean }>(
-      `/api/nodes/${nodeId}/resume`,
+      `/api/nodes/${CONFIG.nodeId}/resume`,
       { method: 'POST' }
     );
     if (res.status === 200 && res.data.success) {
@@ -532,26 +537,34 @@ async function testNodePlayback() {
 
   await sleep(500);
 
-  // Volume
+  // Volume 50%
   {
-    const res = await request<{ success: boolean; data: { volume: number } }>(
-      `/api/nodes/${nodeId}/volume`,
+    const res = await request<{ success: boolean }>(
+      `/api/nodes/${CONFIG.nodeId}/volume`,
       {
         method: 'POST',
         body: { level: 50 },
       }
     );
     if (res.status === 200 && res.data.success) {
-      pass('POST /api/nodes/:id/volume - set volume to 50');
+      pass('POST /api/nodes/:id/volume - set volume to 50%');
     } else {
       fail('POST /api/nodes/:id/volume', res.error);
     }
   }
 
+  // Volume back to 100%
+  {
+    await request(`/api/nodes/${CONFIG.nodeId}/volume`, {
+      method: 'POST',
+      body: { level: 100 },
+    });
+  }
+
   // Loop toggle
   {
-    const res = await request<{ success: boolean; data: { loop: boolean } }>(
-      `/api/nodes/${nodeId}/loop`,
+    const res = await request<{ success: boolean }>(
+      `/api/nodes/${CONFIG.nodeId}/loop`,
       {
         method: 'POST',
         body: { enabled: false },
@@ -566,8 +579,8 @@ async function testNodePlayback() {
 
   // Stop
   {
-    const res = await request<{ success: boolean; data: { state: { mode: string } } }>(
-      `/api/nodes/${nodeId}/stop`,
+    const res = await request<{ success: boolean }>(
+      `/api/nodes/${CONFIG.nodeId}/stop`,
       { method: 'POST' }
     );
     if (res.status === 200 && res.data.success) {
@@ -581,15 +594,9 @@ async function testNodePlayback() {
 async function testPlaylistPlayback() {
   section('Playlist Playback & Navigation');
 
-  const nodeId = (CONFIG as { resolvedNodeId?: string }).resolvedNodeId || CONFIG.nodeId;
-
-  // Check node and playlist
-  {
-    const nodeRes = await request<{ success: boolean }>(`/api/nodes/${nodeId}`);
-    if (nodeRes.status !== 200 || !nodeRes.data.success) {
-      skip('Playlist playback tests', `Node "${nodeId}" not available`);
-      return;
-    }
+  if (!CONFIG.nodeId) {
+    skip('Playlist playback tests', 'No node ID resolved');
+    return;
   }
 
   if (!testPlaylistId) {
@@ -605,7 +612,7 @@ async function testPlaylistPlayback() {
       {
         method: 'POST',
         body: {
-          nodeId,
+          nodeId: CONFIG.nodeId,
           startIndex: 0,
         },
       }
@@ -622,7 +629,7 @@ async function testPlaylistPlayback() {
   // Next (even if single item, should work)
   {
     const res = await request<{ success: boolean }>(
-      `/api/nodes/${nodeId}/next`,
+      `/api/nodes/${CONFIG.nodeId}/next`,
       { method: 'POST' }
     );
     if (res.status === 200 && res.data.success) {
@@ -637,7 +644,7 @@ async function testPlaylistPlayback() {
   // Previous
   {
     const res = await request<{ success: boolean }>(
-      `/api/nodes/${nodeId}/previous`,
+      `/api/nodes/${CONFIG.nodeId}/previous`,
       { method: 'POST' }
     );
     if (res.status === 200 && res.data.success) {
@@ -650,7 +657,7 @@ async function testPlaylistPlayback() {
   // Stop
   {
     const res = await request<{ success: boolean }>(
-      `/api/nodes/${nodeId}/stop`,
+      `/api/nodes/${CONFIG.nodeId}/stop`,
       { method: 'POST' }
     );
     if (res.status === 200 && res.data.success) {
@@ -664,7 +671,10 @@ async function testPlaylistPlayback() {
 async function testPlaylistCaching() {
   section('Playlist Cache to Node');
 
-  const nodeId = (CONFIG as { resolvedNodeId?: string }).resolvedNodeId || CONFIG.nodeId;
+  if (!CONFIG.nodeId) {
+    skip('Playlist cache test', 'No node ID resolved');
+    return;
+  }
 
   if (!testPlaylistId) {
     skip('Playlist cache test', 'No test playlist');
@@ -679,12 +689,12 @@ async function testPlaylistCaching() {
       {
         method: 'POST',
         body: {
-          nodeIds: [nodeId],
+          nodeIds: [CONFIG.nodeId],
         },
       }
     );
     if (res.status === 200 && res.data.success) {
-      const status = res.data.data?.results?.[nodeId]?.status;
+      const status = res.data.data?.results?.[CONFIG.nodeId]?.status;
       pass(`POST /api/playlists/:id/cache - status: ${status}`);
     } else {
       fail('POST /api/playlists/:id/cache', res.error);
@@ -706,14 +716,15 @@ async function cleanup() {
   }
 
   // Stop playback on node
-  const nodeId = (CONFIG as { resolvedNodeId?: string }).resolvedNodeId || CONFIG.nodeId;
-  await request(`/api/nodes/${nodeId}/stop`, { method: 'POST' });
+  if (CONFIG.nodeId) {
+    await request(`/api/nodes/${CONFIG.nodeId}/stop`, { method: 'POST' });
 
-  // Reset volume
-  await request(`/api/nodes/${nodeId}/volume`, {
-    method: 'POST',
-    body: { level: 100 },
-  });
+    // Reset volume
+    await request(`/api/nodes/${CONFIG.nodeId}/volume`, {
+      method: 'POST',
+      body: { level: 100 },
+    });
+  }
 }
 
 // =============================================================================
@@ -725,7 +736,8 @@ async function main() {
   console.log('║           Chiba API Integration Tests                      ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log(`\nController: ${CONFIG.controllerUrl}`);
-  console.log(`Target Node: ${CONFIG.nodeId}`);
+  console.log(`Target Node: ${CONFIG.nodeName}`);
+  console.log(`Test Video: ${CONFIG.testVideoUrl.substring(0, 50)}...`);
   console.log(`Eden Creation: ${CONFIG.eden.creationId}`);
   console.log(`Eden Collection (PROD): ${CONFIG.eden.collectionIdProd}`);
   console.log(`Eden Collection (STAGE): ${CONFIG.eden.collectionIdStage}`);
