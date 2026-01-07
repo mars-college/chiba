@@ -7,7 +7,7 @@ import https from 'https';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { createLogger, EDEN_API } from '@chiba/shared';
+import { createLogger, EDEN_API, getContentType } from '@chiba/shared';
 import type { Content, ContentMetadata, Playlist, PlaylistItem } from '@chiba/shared';
 import { getDatabase, generateId } from '../db/index.js';
 import { getMediaDir, getExistingContent } from './content-cache.js';
@@ -180,8 +180,8 @@ export async function getCreation(
             reject(new Error(`Eden API returned ${res.statusCode}: ${body}`));
             return;
           }
-          const data = JSON.parse(body) as EdenCreation;
-          resolve(data);
+          const response = JSON.parse(body) as { creation: EdenCreation };
+          resolve(response.creation);
         } catch (e) {
           reject(new Error(`Failed to parse creation response: ${body}`));
         }
@@ -456,7 +456,7 @@ export async function syncCollection(
         filename,
         originalUrl: creation.url,
         source: { type: 'eden_collection', collectionId, db },
-        type: 'video', // Assume video for Eden
+        type: getContentType(filename) ?? 'video',
         sizeBytes: stats.size,
         metadata,
         createdAt: Date.now(),
@@ -605,7 +605,7 @@ export async function downloadCreation(
     name: name || creation.title || creation.name,
     originalUrl: creation.url,
     source: { type: 'eden_creation', creationId, db },
-    type: 'video',
+    type: getContentType(filename) ?? 'video',
     sizeBytes: stats.size,
     metadata,
     createdAt: Date.now(),

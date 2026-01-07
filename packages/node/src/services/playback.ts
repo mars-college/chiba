@@ -3,7 +3,7 @@
  * Manages playback state transitions and broadcasts updates.
  */
 
-import { createLogger, DEFAULT_PLAYBACK_STATE, DEFAULT_INTRO_DURATION } from '@chiba/shared';
+import { createLogger, DEFAULT_PLAYBACK_STATE, DEFAULT_INTRO_DURATION, getContentType } from '@chiba/shared';
 import type {
   PlaybackState,
   PlaybackMode,
@@ -158,7 +158,9 @@ class PlaybackManager {
    * Start actual content playback (after intro if shown).
    */
   private startContentPlayback(content: Content, loop: boolean): void {
-    const mode: PlaybackMode = content.type === 'video' ? 'video' : 'image';
+    // Detect actual content type from filename extension (don't trust content.type which may be stale)
+    const actualType = getContentType(content.filename) ?? content.type;
+    const mode: PlaybackMode = actualType === 'video' ? 'video' : 'image';
 
     this.transition(mode, {
       currentContent: content,
@@ -168,7 +170,7 @@ class PlaybackManager {
     });
 
     // For images, auto-advance after duration
-    if (content.type === 'image' && !loop) {
+    if (actualType === 'image' && !loop) {
       const duration = content.metadata?.introDuration ?? this.state.imageDuration;
       this.imageTimer = setTimeout(() => {
         this.handleContentEnded();

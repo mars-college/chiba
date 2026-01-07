@@ -452,7 +452,16 @@ async function handleRequest(
     if (url.pathname.startsWith('/api/nodes/')) {
       const nodeId = url.pathname.split('/')[3];
       if (nodeId) {
-        const node = state.nodes.get(nodeId);
+        // Try to find node by ID first, then by friendly name
+        let node = state.nodes.get(nodeId);
+        if (!node) {
+          for (const [, n] of state.nodes.entries()) {
+            if (n.status.node.friendlyName === nodeId) {
+              node = n;
+              break;
+            }
+          }
+        }
         if (node) {
           sendJson(res, { success: true, data: { node: node.status } });
         } else {
@@ -1218,7 +1227,16 @@ async function handleRequest(
       return;
     }
 
-    const node = state.nodes.get(nodeId);
+    // Try to find node by ID first, then by friendly name
+    let node = state.nodes.get(nodeId);
+    if (!node) {
+      for (const [, n] of state.nodes.entries()) {
+        if (n.status.node.friendlyName === nodeId) {
+          node = n;
+          break;
+        }
+      }
+    }
     if (!node) {
       sendError(res, 'Node not found', 404);
       return;

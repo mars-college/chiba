@@ -111,7 +111,7 @@ off → playlist → video/image → (ended) → next item → ...
 off → url → (indefinite)
 ```
 
-States include: mode, currentContent, playlist, index, loop, paused, volume
+States include: mode, currentContent, playlist, index, loop, paused, volume, imageDuration
 
 ## Database Schemas
 
@@ -211,6 +211,7 @@ pnpm dev:dashboard   # Start dashboard dev server
 - `POST /previous` - Previous playlist item
 - `POST /volume` - Set volume (0-100)
 - `POST /loop` - Toggle loop mode
+- `POST /image-duration` - Set image display duration (ms)
 - `POST /cache` - Cache content (doesn't play)
 - `POST /clear-cache` - Delete all cached content
 

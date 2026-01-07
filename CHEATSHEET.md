@@ -75,6 +75,12 @@ curl -X POST $NODE/previous
 # Volume (0-100)
 curl -X POST $NODE/volume -d '{"level":75}'
 
+# Loop toggle
+curl -X POST $NODE/loop -d '{"enabled":true}'
+
+# Image duration (ms) - how long images display in playlists
+curl -X POST $NODE/image-duration -d '{"duration":5000}'
+
 # Clear all cached content
 curl -X POST $NODE/clear-cache
 ```
