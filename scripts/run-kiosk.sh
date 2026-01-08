@@ -17,8 +17,12 @@ xset s off
 xset -dpms
 xset s noblank
 
+# Find chromium binary (name varies by OS version)
+CHROMIUM_BIN="chromium"
+command -v chromium-browser &>/dev/null && CHROMIUM_BIN="chromium-browser"
+
 # Launch Chromium in kiosk mode
-chromium-browser \
+$CHROMIUM_BIN \
   --kiosk \
   --noerrdialogs \
   --disable-infobars \
