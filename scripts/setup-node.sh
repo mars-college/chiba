@@ -211,6 +211,8 @@ mkdir -p "$INSTALL_DIR/data"
 
 echo "=== Installing dependencies ==="
 cd "$INSTALL_DIR"
+# Unset NODE_ENV to ensure devDependencies are installed (needed for build)
+unset NODE_ENV
 pnpm install
 
 echo "=== Building packages ==="
