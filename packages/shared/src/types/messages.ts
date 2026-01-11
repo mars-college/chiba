@@ -89,19 +89,59 @@ export interface NodeStateMessage {
   requestId?: string;
 }
 
+/** Task status for async operations */
+export type TaskStatus = 'queued' | 'started' | 'downloading' | 'processing' | 'completed' | 'error';
+
+/** Task type for async operations */
+export type TaskType = 'cache' | 'youtube' | 'eden';
+
+/** Result data for completed tasks */
+export interface TaskResult {
+  filename?: string;
+  hash?: string;
+  sizeBytes?: number;
+  alreadyCached?: boolean;
+  /** For Eden collections */
+  itemsTotal?: number;
+  itemsDownloaded?: number;
+  itemsSkipped?: number;
+  itemsFailed?: number;
+}
+
+/** Error details for failed tasks */
+export interface TaskError {
+  code: string;
+  message: string;
+}
+
 /**
  * Download progress message from node to controller.
+ * Enhanced to support async task tracking with full progress reporting.
  */
 export interface NodeDownloadProgressMessage {
   type: 'download_progress';
-  /** Content hash being downloaded */
-  hash: string;
+  /** Unique task identifier */
+  taskId: string;
+  /** Node ID sending this progress */
+  nodeId: string;
+  /** Type of task being executed */
+  taskType: TaskType;
+  /** Current task status */
+  status: TaskStatus;
+  /** Content hash being downloaded (optional, may not be known until download starts) */
+  hash?: string;
   /** Download progress (0-100) */
   progress: number;
   /** Total size in bytes */
   totalBytes?: number;
   /** Downloaded bytes so far */
   downloadedBytes?: number;
+  /** Human-readable status message */
+  message?: string;
+  /** Result data on completion */
+  result?: TaskResult;
+  /** Error details if status is 'error' */
+  error?: TaskError;
 }
 
 /**
@@ -249,12 +289,25 @@ export interface DashboardNodeDisconnectedMessage {
 }
 
 /**
+ * Task progress message from controller to dashboard.
+ * Forwards download/cache progress from nodes to connected dashboards.
+ */
+export interface DashboardTaskProgressMessage {
+  type: 'task_progress';
+  /** Node ID where task is running */
+  nodeId: string;
+  /** Task progress details */
+  task: NodeDownloadProgressMessage;
+}
+
+/**
  * Union of all messages from controller to dashboard.
  */
 export type ControllerToDashboardMessage =
   | DashboardNodesMessage
   | DashboardNodeUpdateMessage
-  | DashboardNodeDisconnectedMessage;
+  | DashboardNodeDisconnectedMessage
+  | DashboardTaskProgressMessage;
 
 /**
  * Command message from dashboard to controller.

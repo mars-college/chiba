@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { createLogger } from '@chiba/shared';
+import type { Playlist, PlaylistItem } from '@chiba/shared';
 import { SCHEMA, DROP_ALL, DEFAULT_CONFIG } from './schema.js';
 
 const logger = createLogger('node', 'db');
@@ -79,6 +80,39 @@ function runMigrations(): void {
   if (!hasNameColumn) {
     logger.info('Running migration: adding name column to cached_content');
     db.exec('ALTER TABLE cached_content ADD COLUMN name TEXT');
+  }
+
+  // Check if download_queue.task_id column exists
+  const queueColumns = db.prepare("PRAGMA table_info(download_queue)").all() as Array<{ name: string }>;
+  const hasTaskIdColumn = queueColumns.some(col => col.name === 'task_id');
+
+  if (!hasTaskIdColumn) {
+    logger.info('Running migration: adding task_id and play_after columns to download_queue');
+    db.exec('ALTER TABLE download_queue ADD COLUMN task_id TEXT');
+    db.exec('ALTER TABLE download_queue ADD COLUMN play_after INTEGER DEFAULT 0');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_download_queue_task_id ON download_queue(task_id)');
+  }
+
+  // Check if playlists table exists
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='playlists'").get();
+  if (!tables) {
+    logger.info('Running migration: creating playlists table');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS playlists (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        items TEXT NOT NULL,
+        loop INTEGER DEFAULT 1,
+        show_intros INTEGER DEFAULT 1,
+        intro_duration INTEGER DEFAULT 3000,
+        source TEXT,
+        source_id TEXT,
+        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+        last_played_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_playlists_updated ON playlists(updated_at DESC);
+    `);
   }
 }
 
@@ -203,4 +237,110 @@ export function getAllConfig(): Record<string, string> {
  */
 export function generateId(): string {
   return crypto.randomUUID();
+}
+
+// ============================================================================
+// Playlist Functions
+// ============================================================================
+
+interface PlaylistRow {
+  id: string;
+  name: string;
+  items: string;
+  loop: number;
+  show_intros: number;
+  intro_duration: number;
+  source: string | null;
+  source_id: string | null;
+  created_at: number;
+  updated_at: number;
+  last_played_at: number | null;
+}
+
+function rowToPlaylist(row: PlaylistRow): Playlist {
+  return {
+    id: row.id,
+    name: row.name,
+    items: JSON.parse(row.items) as PlaylistItem[],
+    loop: row.loop === 1,
+    showIntros: row.show_intros === 1,
+    introDuration: row.intro_duration,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Save or update a playlist in the database.
+ */
+export function savePlaylist(
+  playlist: Playlist,
+  source?: { type: string; id?: string }
+): void {
+  const database = getDatabase();
+  database
+    .prepare(
+      `
+    INSERT OR REPLACE INTO playlists (
+      id, name, items, loop, show_intros, intro_duration,
+      source, source_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `
+    )
+    .run(
+      playlist.id,
+      playlist.name,
+      JSON.stringify(playlist.items),
+      playlist.loop ? 1 : 0,
+      playlist.showIntros ? 1 : 0,
+      playlist.introDuration,
+      source?.type ?? null,
+      source?.id ?? null,
+      playlist.createdAt,
+      playlist.updatedAt
+    );
+  logger.debug('Playlist saved', { id: playlist.id, name: playlist.name });
+}
+
+/**
+ * Get a playlist by ID.
+ */
+export function getPlaylist(id: string): Playlist | null {
+  const database = getDatabase();
+  const row = database
+    .prepare('SELECT * FROM playlists WHERE id = ?')
+    .get(id) as PlaylistRow | undefined;
+  return row ? rowToPlaylist(row) : null;
+}
+
+/**
+ * List all saved playlists.
+ */
+export function listPlaylists(): Playlist[] {
+  const database = getDatabase();
+  const rows = database
+    .prepare('SELECT * FROM playlists ORDER BY updated_at DESC')
+    .all() as PlaylistRow[];
+  return rows.map(rowToPlaylist);
+}
+
+/**
+ * Delete a playlist.
+ */
+export function deletePlaylist(id: string): boolean {
+  const database = getDatabase();
+  const result = database
+    .prepare('DELETE FROM playlists WHERE id = ?')
+    .run(id);
+  return result.changes > 0;
+}
+
+/**
+ * Update last_played_at timestamp for a playlist.
+ */
+export function markPlaylistPlayed(id: string): void {
+  const database = getDatabase();
+  database
+    .prepare('UPDATE playlists SET last_played_at = ? WHERE id = ?')
+    .run(Date.now(), id);
 }

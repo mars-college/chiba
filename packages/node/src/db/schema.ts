@@ -49,10 +49,12 @@ CREATE INDEX IF NOT EXISTS idx_playback_history_date ON playback_history(played_
 -- Download queue for background downloads
 CREATE TABLE IF NOT EXISTS download_queue (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  source_type TEXT NOT NULL,
-  source_data TEXT NOT NULL,     -- JSON
+  task_id TEXT NOT NULL,         -- Unique task ID (e.g., cache_abc123)
+  source_type TEXT NOT NULL,     -- cache, youtube, eden
+  source_data TEXT NOT NULL,     -- JSON with url, collectionId, etc.
   metadata TEXT,                 -- JSON
   priority INTEGER DEFAULT 0,
+  play_after INTEGER DEFAULT 0,  -- Whether to start playback after download
   status TEXT DEFAULT 'pending', -- pending, downloading, completed, failed
   error TEXT,
   created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
@@ -62,12 +64,33 @@ CREATE TABLE IF NOT EXISTS download_queue (
 
 -- Index for pending downloads
 CREATE INDEX IF NOT EXISTS idx_download_queue_status ON download_queue(status, priority DESC);
+-- Index for task ID lookups
+CREATE INDEX IF NOT EXISTS idx_download_queue_task_id ON download_queue(task_id);
+
+-- Saved playlists
+CREATE TABLE IF NOT EXISTS playlists (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  items TEXT NOT NULL,            -- JSON array of PlaylistItem
+  loop INTEGER DEFAULT 1,         -- Boolean as 0/1
+  show_intros INTEGER DEFAULT 1,  -- Boolean as 0/1
+  intro_duration INTEGER DEFAULT 3000,
+  source TEXT,                    -- Optional: 'eden_collection', 'manual', etc.
+  source_id TEXT,                 -- Optional: collection ID if from Eden
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  last_played_at INTEGER
+);
+
+-- Index for recent playlists
+CREATE INDEX IF NOT EXISTS idx_playlists_updated ON playlists(updated_at DESC);
 `;
 
 /**
  * SQL statements to drop all tables (for testing).
  */
 export const DROP_ALL = `
+DROP TABLE IF EXISTS playlists;
 DROP TABLE IF EXISTS download_queue;
 DROP TABLE IF EXISTS playback_history;
 DROP TABLE IF EXISTS config;

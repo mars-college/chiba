@@ -9,6 +9,7 @@ import type {
   PlaybackMode,
   Content,
   Playlist,
+  PlaylistItem,
   ContentSource,
   ContentMetadata,
   NodeToPlayerMessage,
@@ -18,6 +19,7 @@ import { getVolume, setVolume } from './volume.js';
 import { markAsPlayed, getContentByFilename, downloadAndCache } from './content-cache.js';
 import { isYouTubeUrl, downloadYouTube } from './youtube.js';
 import { downloadCreation as downloadEdenCreation, syncCollection as syncEdenCollection } from './eden.js';
+import { savePlaylist, markPlaylistPlayed } from '../db/index.js';
 
 const logger = createLogger('node', 'playback');
 
@@ -189,6 +191,14 @@ class PlaybackManager {
 
     logger.info('Playing playlist', { name: playlist.name, items: playlist.items.length, startIndex });
 
+    // Save playlist to database
+    try {
+      savePlaylist(playlist);
+      markPlaylistPlayed(playlist.id);
+    } catch (err) {
+      logger.warn('Failed to save playlist to database', { error: (err as Error).message });
+    }
+
     this.state.playlist = playlist;
     this.state.playlistIndex = startIndex;
     this.state.loop = playlist.loop;
@@ -196,6 +206,74 @@ class PlaybackManager {
     this.playCurrentPlaylistItem().catch(err => {
       logger.error('Failed to play playlist item', err as Error);
     });
+  }
+
+  /**
+   * Append items to the current playlist, or create a new one if none is active.
+   */
+  appendItems(
+    items: PlaylistItem[],
+    options: { name?: string; loop?: boolean; showIntros?: boolean } = {}
+  ): Playlist {
+    if (items.length === 0) {
+      throw new Error('Cannot append empty items array');
+    }
+
+    if (this.state.playlist) {
+      // Append to existing playlist
+      const existingMaxOrder = Math.max(
+        ...this.state.playlist.items.map(i => i.order),
+        -1
+      );
+      const itemsWithOrder = items.map((item, idx) => ({
+        ...item,
+        order: existingMaxOrder + 1 + idx,
+      }));
+
+      this.state.playlist = {
+        ...this.state.playlist,
+        items: [...this.state.playlist.items, ...itemsWithOrder],
+        updatedAt: Date.now(),
+      };
+
+      logger.info('Appended items to playlist', {
+        playlistId: this.state.playlist.id,
+        addedCount: items.length,
+        totalItems: this.state.playlist.items.length,
+      });
+
+      // Save updated playlist to database
+      try {
+        savePlaylist(this.state.playlist);
+      } catch (err) {
+        logger.warn('Failed to save playlist to database', { error: (err as Error).message });
+      }
+
+      this.broadcast();
+      return this.state.playlist;
+    } else {
+      // Create new playlist and start playing
+      const { name = 'Dynamic Playlist', loop = true, showIntros = true } = options;
+
+      const newPlaylist: Playlist = {
+        id: crypto.randomUUID(),
+        name,
+        items: items.map((item, idx) => ({ ...item, order: idx })),
+        loop,
+        showIntros,
+        introDuration: 3000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      logger.info('Created new playlist from append', {
+        playlistId: newPlaylist.id,
+        itemCount: items.length,
+      });
+
+      this.playPlaylist(newPlaylist, 0);
+      return this.state.playlist!;
+    }
   }
 
   /**
@@ -499,3 +577,7 @@ export const handleContentEnded = () => playbackManager.handleContentEnded();
 export const handleIntroComplete = () => playbackManager.handleIntroComplete();
 export const addPlayerClient = (ws: WebSocket) => playbackManager.addPlayerClient(ws);
 export const removePlayerClient = (ws: WebSocket) => playbackManager.removePlayerClient(ws);
+export const appendItems = (
+  items: PlaylistItem[],
+  options?: { name?: string; loop?: boolean; showIntros?: boolean }
+) => playbackManager.appendItems(items, options);

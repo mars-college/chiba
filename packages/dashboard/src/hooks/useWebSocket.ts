@@ -1,18 +1,38 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { NodeStatus } from '@chiba/shared';
+import type { NodeStatus, NodeDownloadProgressMessage } from '@chiba/shared';
 
 interface DashboardMessage {
-  type: 'nodes' | 'node_update' | 'node_disconnected' | 'error';
+  type: 'nodes' | 'node_update' | 'node_disconnected' | 'task_progress' | 'error';
   nodes?: NodeStatus[];
   status?: NodeStatus;  // For node_update
   nodeId?: string;
+  task?: NodeDownloadProgressMessage;  // For task_progress
   error?: string;
+}
+
+/** Task progress info with expiration for cleanup */
+export interface TaskProgress {
+  taskId: string;
+  nodeId: string;
+  taskType: string;
+  status: string;
+  progress: number;
+  message?: string;
+  error?: { code: string; message: string };
+  result?: {
+    filename?: string;
+    hash?: string;
+    sizeBytes?: number;
+    alreadyCached?: boolean;
+  };
+  receivedAt: number;
 }
 
 interface UseWebSocketResult {
   nodes: NodeStatus[];
   connected: boolean;
   error: string | null;
+  tasks: Map<string, TaskProgress>;
   sendCommand: (nodeId: string, command: string, data?: unknown) => void;
 }
 
@@ -20,8 +40,10 @@ export function useWebSocket(): UseWebSocketResult {
   const [nodes, setNodes] = useState<NodeStatus[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<Map<string, TaskProgress>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const taskCleanupRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -77,6 +99,29 @@ export function useWebSocket(): UseWebSocketResult {
               }
               break;
 
+            case 'task_progress':
+              // Task progress update
+              if (message.task) {
+                const task = message.task;
+                setTasks(prev => {
+                  const updated = new Map(prev);
+                  updated.set(task.taskId, {
+                    taskId: task.taskId,
+                    nodeId: task.nodeId,
+                    taskType: task.taskType,
+                    status: task.status,
+                    progress: task.progress,
+                    message: task.message,
+                    error: task.error,
+                    result: task.result,
+                    receivedAt: Date.now(),
+                  });
+                  return updated;
+                });
+                console.log('[WS] Task progress:', task.taskId, task.status, task.progress);
+              }
+              break;
+
             case 'error':
               console.error('[WS] Server error:', message.error);
               break;
@@ -111,9 +156,29 @@ export function useWebSocket(): UseWebSocketResult {
   useEffect(() => {
     connect();
 
+    // Clean up completed/errored tasks after 10 seconds
+    taskCleanupRef.current = setInterval(() => {
+      const now = Date.now();
+      setTasks(prev => {
+        const updated = new Map(prev);
+        for (const [taskId, task] of updated.entries()) {
+          if (
+            (task.status === 'completed' || task.status === 'error') &&
+            now - task.receivedAt > 10000
+          ) {
+            updated.delete(taskId);
+          }
+        }
+        return updated.size !== prev.size ? updated : prev;
+      });
+    }, 5000);
+
     return () => {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (taskCleanupRef.current) {
+        clearInterval(taskCleanupRef.current);
       }
       if (wsRef.current) {
         wsRef.current.close();
@@ -135,5 +200,5 @@ export function useWebSocket(): UseWebSocketResult {
     }));
   }, []);
 
-  return { nodes, connected, error, sendCommand };
+  return { nodes, connected, error, tasks, sendCommand };
 }

@@ -36,20 +36,16 @@ import {
   type DiskUsage,
   type HardwareMetrics,
   type ContentSummary,
+  type PlaylistItem,
   type NodeToControllerMessage,
   type ControllerToNodeMessage,
   type PlayerToNodeMessage,
 } from '@chiba/shared';
-import { initDatabase, closeDatabase, setConfig, getAllConfig } from './db/index.js';
-import { getMediaDir, listCachedContent, getCacheSize, getContentByFilename, downloadAndCache, clearAllCache } from './services/content-cache.js';
+import { initDatabase, closeDatabase, setConfig, getAllConfig, listPlaylists } from './db/index.js';
+import { getMediaDir, listCachedContent, getCacheSize, getContentByFilename, clearAllCache } from './services/content-cache.js';
 import { getDiskUsage as getDiskUsageActual, getHardwareMetrics as getHardwareMetricsActual } from './services/hardware.js';
-import { isYouTubeUrl, downloadYouTube } from './services/youtube.js';
-import {
-  syncCollection,
-  downloadCreation,
-  isEdenUrl,
-  parseEdenUrl,
-} from './services/eden.js';
+import { isYouTubeUrl } from './services/youtube.js';
+import { isEdenUrl, parseEdenUrl } from './services/eden.js';
 import {
   playbackManager,
   addPlayerClient,
@@ -66,7 +62,9 @@ import {
   setImageDuration,
   handleContentEnded,
   handleIntroComplete,
+  appendItems,
 } from './services/playback.js';
+import { getTaskQueue, type TaskSource } from './services/task-queue.js';
 
 const logger = createLogger('node', 'server');
 
@@ -331,18 +329,36 @@ async function handleRequest(
       case '/debug': {
         const cachedContent = getCachedContent();
         const totalCacheSize = getCacheSize();
+        const playlists = listPlaylists();
+        const currentState = playbackManager.getState();
+
         sendJson(res, {
           nodeName: state.config.friendlyName,
           nodeId: state.config.id,
           ipAddress: getIpAddress(),
           networkStatus: 'online',
           controllerStatus: state.controllerWs?.readyState === WebSocket.OPEN ? 'online' : 'offline',
-          cachedContent: cachedContent.map(c => ({
+          content: cachedContent.map(c => ({
             filename: c.filename,
             sizeBytes: c.sizeBytes,
             type: c.type,
+            name: c.name,
           })),
           totalCacheSize,
+          playlists: playlists.map(p => ({
+            id: p.id,
+            name: p.name,
+            itemCount: p.items.length,
+            loop: p.loop,
+            createdAt: p.createdAt,
+            updatedAt: p.updatedAt,
+          })),
+          currentPlaylist: currentState.playlist ? {
+            id: currentState.playlist.id,
+            name: currentState.playlist.name,
+            currentIndex: currentState.playlistIndex,
+            totalItems: currentState.playlist.items.length,
+          } : null,
         });
         return;
       }
@@ -485,6 +501,7 @@ async function handleRequest(
       case '/play': {
         // Play content - auto-detects source type
         // Accepts: filename, url (auto-detects YouTube/media/Eden), collectionId (Eden), creationId (Eden), content, playlist
+        // For content that needs downloading, returns immediately with taskId and plays when download completes
         logger.info('Play command received', body as Record<string, unknown>);
 
         const urlToPlay = body?.url as string | undefined;
@@ -493,62 +510,62 @@ async function handleRequest(
         const creationId = body?.creationId as string | undefined;
         const db = (body?.db as 'PROD' | 'STAGE') || 'PROD';
         const contentName = body?.name as string | undefined;
-        const playOptions = {
-          loop: body?.loop !== false,
-          showIntro: body?.showIntro === true,
-        };
 
-        // Eden single creation by ID
+        const taskQueue = getTaskQueue();
+
+        // Eden single creation by ID - async with playAfter
         if (creationId) {
-          logger.info('Playing Eden creation', { creationId, db });
-          try {
-            const result = await downloadCreation(creationId, { db, name: contentName });
-            playContent(result.content, playOptions);
-            sendJson(res, {
-              success: true,
-              data: {
-                state: playbackManager.getState(),
-                alreadyCached: result.alreadyCached,
-              },
-            });
-          } catch (err) {
-            logger.error('Eden creation play failed', err as Error);
-            sendError(res, `Eden creation play failed: ${(err as Error).message}`, 500);
-          }
+          logger.info('Queuing Eden creation for play', { creationId, db });
+          const taskId = taskQueue.enqueue({
+            type: 'eden',
+            source: { creationId, db },
+            metadata: contentName ? { name: contentName } : undefined,
+            playAfter: true,
+            priority: 10, // Higher priority than cache-only tasks
+          });
+          sendJson(res, {
+            success: true,
+            data: {
+              taskId,
+              status: 'queued',
+              message: 'Eden creation download queued, will play when complete',
+            },
+          });
           return;
         }
 
-        // Eden collection - sync and play as playlist
+        // Eden collection - async with playAfter
         if (collectionId) {
-          logger.info('Playing Eden collection', { collectionId, db });
-          try {
-            const result = await syncCollection(collectionId, { db });
-            if (!result.playlist || result.playlist.items.length === 0) {
-              sendError(res, 'No content found in Eden collection', 404);
-              return;
-            }
-            playPlaylist(result.playlist, 0);
-            sendJson(res, {
-              success: true,
-              data: {
-                state: playbackManager.getState(),
-                sync: { total: result.total, downloaded: result.downloaded, skipped: result.skipped, failed: result.failed },
-              },
-            });
-          } catch (err) {
-            logger.error('Eden play failed', err as Error);
-            sendError(res, `Eden play failed: ${(err as Error).message}`, 500);
-          }
+          logger.info('Queuing Eden collection for play', { collectionId, db });
+          const taskId = taskQueue.enqueue({
+            type: 'eden',
+            source: { collectionId, db },
+            metadata: contentName ? { name: contentName } : undefined,
+            playAfter: true,
+            priority: 10,
+          });
+          sendJson(res, {
+            success: true,
+            data: {
+              taskId,
+              status: 'queued',
+              message: 'Eden collection sync queued, will play when complete',
+            },
+          });
           return;
         }
 
-        // Cached file by filename
+        // Cached file by filename - play immediately (synchronous)
         if (filenameToPlay) {
           const content = getContentByFilename(filenameToPlay);
           if (!content) {
             sendError(res, `File not found in cache: ${filenameToPlay}`, 404);
             return;
           }
+          const playOptions = {
+            loop: body?.loop !== false,
+            showIntro: body?.showIntro === true,
+          };
           playContent(content, playOptions);
           sendJson(res, { success: true, data: { state: playbackManager.getState() } });
           return;
@@ -556,93 +573,112 @@ async function handleRequest(
 
         // URL - auto-detect type
         if (urlToPlay) {
-          // Eden URL (creation or collection)
+          // Eden URL (creation or collection) - async with playAfter
           if (isEdenUrl(urlToPlay)) {
             const edenInfo = parseEdenUrl(urlToPlay);
             if (edenInfo?.type === 'creation') {
-              logger.info('Playing Eden creation URL', { url: urlToPlay, id: edenInfo.id });
-              try {
-                const result = await downloadCreation(edenInfo.id, { db: edenInfo.db, name: contentName });
-                playContent(result.content, playOptions);
-                sendJson(res, {
-                  success: true,
-                  data: { state: playbackManager.getState(), alreadyCached: result.alreadyCached },
-                });
-              } catch (err) {
-                logger.error('Eden creation play failed', err as Error);
-                sendError(res, `Eden creation play failed: ${(err as Error).message}`, 500);
-              }
+              logger.info('Queuing Eden creation URL for play', { url: urlToPlay, id: edenInfo.id });
+              const taskId = taskQueue.enqueue({
+                type: 'eden',
+                source: { creationId: edenInfo.id, db: edenInfo.db },
+                metadata: contentName ? { name: contentName } : undefined,
+                playAfter: true,
+                priority: 10,
+              });
+              sendJson(res, {
+                success: true,
+                data: {
+                  taskId,
+                  status: 'queued',
+                  message: 'Eden creation download queued, will play when complete',
+                },
+              });
               return;
             } else if (edenInfo?.type === 'collection') {
-              logger.info('Playing Eden collection URL', { url: urlToPlay, id: edenInfo.id });
-              try {
-                const result = await syncCollection(edenInfo.id, { db: edenInfo.db });
-                if (!result.playlist || result.playlist.items.length === 0) {
-                  sendError(res, 'No content found in Eden collection', 404);
-                  return;
-                }
-                playPlaylist(result.playlist, 0);
-                sendJson(res, {
-                  success: true,
-                  data: {
-                    state: playbackManager.getState(),
-                    sync: { total: result.total, downloaded: result.downloaded, skipped: result.skipped, failed: result.failed },
-                  },
-                });
-              } catch (err) {
-                logger.error('Eden collection play failed', err as Error);
-                sendError(res, `Eden collection play failed: ${(err as Error).message}`, 500);
-              }
+              logger.info('Queuing Eden collection URL for play', { url: urlToPlay, id: edenInfo.id });
+              const taskId = taskQueue.enqueue({
+                type: 'eden',
+                source: { collectionId: edenInfo.id, db: edenInfo.db },
+                metadata: contentName ? { name: contentName } : undefined,
+                playAfter: true,
+                priority: 10,
+              });
+              sendJson(res, {
+                success: true,
+                data: {
+                  taskId,
+                  status: 'queued',
+                  message: 'Eden collection sync queued, will play when complete',
+                },
+              });
               return;
             }
           }
 
-          // YouTube
+          // YouTube - async with playAfter
           if (isYouTubeUrl(urlToPlay)) {
-            logger.info('Playing YouTube', { url: urlToPlay });
-            try {
-              const result = await downloadYouTube(urlToPlay, { name: contentName });
-              playContent(result.content, playOptions);
-              sendJson(res, { success: true, data: { state: playbackManager.getState() } });
-            } catch (err) {
-              logger.error('YouTube play failed', err as Error);
-              sendError(res, `YouTube play failed: ${(err as Error).message}`, 500);
-            }
+            logger.info('Queuing YouTube for play', { url: urlToPlay });
+            const taskId = taskQueue.enqueue({
+              type: 'youtube',
+              source: { url: urlToPlay },
+              metadata: contentName ? { name: contentName } : undefined,
+              playAfter: true,
+              priority: 10,
+            });
+            sendJson(res, {
+              success: true,
+              data: {
+                taskId,
+                status: 'queued',
+                message: 'YouTube download queued, will play when complete',
+              },
+            });
             return;
           }
 
-          // Media file URL - download and play
+          // Media file URL - async with playAfter
           const urlLower = urlToPlay.toLowerCase();
           const isMedia = /\.(mp4|webm|mov|mkv|jpg|jpeg|png|gif|webp)(\?|$)/i.test(urlLower);
 
           if (isMedia) {
-            logger.info('Playing media URL', { url: urlToPlay });
-            try {
-              const result = await downloadAndCache(urlToPlay, { name: contentName });
-              playContent(result.content, playOptions);
-              sendJson(res, { success: true, data: { state: playbackManager.getState() } });
-            } catch (err) {
-              logger.error('Media play failed', err as Error);
-              sendError(res, `Media play failed: ${(err as Error).message}`, 500);
-            }
+            logger.info('Queuing media URL for play', { url: urlToPlay });
+            const taskId = taskQueue.enqueue({
+              type: 'cache',
+              source: { url: urlToPlay },
+              metadata: contentName ? { name: contentName } : undefined,
+              playAfter: true,
+              priority: 10,
+            });
+            sendJson(res, {
+              success: true,
+              data: {
+                taskId,
+                status: 'queued',
+                message: 'Media download queued, will play when complete',
+              },
+            });
             return;
           }
 
-          // Non-media URL - iframe mode
+          // Non-media URL - iframe mode (synchronous, no download needed)
           playUrl(urlToPlay);
           sendJson(res, { success: true, data: { state: playbackManager.getState() } });
           return;
         }
 
-        // Direct content object
+        // Direct content object - play immediately (synchronous)
         if (body?.content) {
           const content = body.content as import('@chiba/shared').Content;
+          const playOptions = {
+            loop: body?.loop !== false,
+            showIntro: body?.showIntro === true,
+          };
           playContent(content, playOptions);
           sendJson(res, { success: true, data: { state: playbackManager.getState() } });
           return;
         }
 
-        // Playlist object
+        // Playlist object - play immediately (synchronous)
         if (body?.playlist) {
           const playlist = body.playlist as import('@chiba/shared').Playlist;
           const startIndex = (body.startIndex as number) ?? 0;
@@ -707,7 +743,7 @@ async function handleRequest(
       }
 
       case '/cache': {
-        // Cache content without playing
+        // Cache content without playing - async via task queue
         // Accepts: url (auto-detects YouTube/Eden), OR collectionId/creationId for Eden
         const cacheUrl = body?.url as string | undefined;
         const cacheName = body?.name as string | undefined;
@@ -715,50 +751,47 @@ async function handleRequest(
         const creationId = body?.creationId as string | undefined;
         const db = (body?.db as 'PROD' | 'STAGE') || 'PROD';
 
+        const taskQueue = getTaskQueue();
+
         // Eden single creation by ID
         if (creationId) {
-          logger.info('Cache Eden creation', { creationId, db });
-          try {
-            const result = await downloadCreation(creationId, { db, name: cacheName });
-            sendJson(res, {
-              success: true,
-              data: {
-                content: result.content,
-                alreadyCached: result.alreadyCached,
-              },
-            });
-          } catch (err) {
-            logger.error('Eden creation cache failed', err as Error);
-            sendError(res, `Eden creation cache failed: ${(err as Error).message}`, 500);
-          }
+          logger.info('Queuing Eden creation cache', { creationId, db });
+          const taskId = taskQueue.enqueue({
+            type: 'eden',
+            source: { creationId, db },
+            metadata: cacheName ? { name: cacheName } : undefined,
+            playAfter: false,
+            priority: 0,
+          });
+          sendJson(res, {
+            success: true,
+            data: {
+              taskId,
+              status: 'queued',
+              message: 'Eden creation download queued',
+            },
+          });
           return;
         }
 
         // Eden collection
         if (collectionId) {
-          logger.info('Cache Eden collection', { collectionId, db });
-          try {
-            const result = await syncCollection(collectionId, { db });
-            sendJson(res, {
-              success: true,
-              data: {
-                collectionId: result.collectionId,
-                db: result.db,
-                total: result.total,
-                downloaded: result.downloaded,
-                skipped: result.skipped,
-                failed: result.failed,
-                files: result.files.map(f => ({
-                  filename: f.filename,
-                  status: f.status,
-                  error: f.error,
-                })),
-              },
-            });
-          } catch (err) {
-            logger.error('Eden cache failed', err as Error);
-            sendError(res, `Eden cache failed: ${(err as Error).message}`, 500);
-          }
+          logger.info('Queuing Eden collection cache', { collectionId, db });
+          const taskId = taskQueue.enqueue({
+            type: 'eden',
+            source: { collectionId, db },
+            metadata: cacheName ? { name: cacheName } : undefined,
+            playAfter: false,
+            priority: 0,
+          });
+          sendJson(res, {
+            success: true,
+            data: {
+              taskId,
+              status: 'queued',
+              message: 'Eden collection sync queued',
+            },
+          });
           return;
         }
 
@@ -768,51 +801,82 @@ async function handleRequest(
           return;
         }
 
-        logger.info('Cache URL', { url: cacheUrl, name: cacheName });
+        logger.info('Queuing URL cache', { url: cacheUrl, name: cacheName });
+
+        // Determine task type based on URL
+        let taskType: 'youtube' | 'eden' | 'cache' = 'cache';
+        const source: TaskSource = { url: cacheUrl };
+
+        if (isEdenUrl(cacheUrl)) {
+          const edenInfo = parseEdenUrl(cacheUrl);
+          if (edenInfo?.type === 'creation') {
+            taskType = 'eden';
+            source.creationId = edenInfo.id;
+            source.db = edenInfo.db;
+            delete source.url;
+          } else if (edenInfo?.type === 'collection') {
+            taskType = 'eden';
+            source.collectionId = edenInfo.id;
+            source.db = edenInfo.db;
+            delete source.url;
+          }
+        } else if (isYouTubeUrl(cacheUrl)) {
+          taskType = 'youtube';
+        }
+
+        const taskId = taskQueue.enqueue({
+          type: taskType,
+          source,
+          metadata: cacheName ? { name: cacheName } : undefined,
+          playAfter: false,
+          priority: 0,
+        });
+
+        sendJson(res, {
+          success: true,
+          data: {
+            taskId,
+            status: 'queued',
+            message: 'Download queued',
+          },
+        });
+        return;
+      }
+
+      case '/append': {
+        // Append items to current playlist (or create new one)
+        logger.info('Append command received', body as Record<string, unknown>);
+
+        const items = body?.items as PlaylistItem[] | undefined;
+        const name = body?.name as string | undefined;
+        const loop = body?.loop as boolean | undefined;
+        const showIntros = body?.showIntros as boolean | undefined;
+
+        if (!items || !Array.isArray(items) || items.length === 0) {
+          sendError(res, 'Missing or empty items array', 400);
+          return;
+        }
+
+        // Validate items have required fields
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (!item || !item.id || !item.content) {
+            sendError(res, `Invalid item at index ${i}: missing id or content`, 400);
+            return;
+          }
+        }
+
         try {
-          let result;
-          // Eden URL
-          if (isEdenUrl(cacheUrl)) {
-            const edenInfo = parseEdenUrl(cacheUrl);
-            if (edenInfo?.type === 'creation') {
-              result = await downloadCreation(edenInfo.id, { db: edenInfo.db, name: cacheName });
-            } else if (edenInfo?.type === 'collection') {
-              const syncResult = await syncCollection(edenInfo.id, { db: edenInfo.db });
-              sendJson(res, {
-                success: true,
-                data: {
-                  collectionId: syncResult.collectionId,
-                  db: syncResult.db,
-                  total: syncResult.total,
-                  downloaded: syncResult.downloaded,
-                  skipped: syncResult.skipped,
-                  failed: syncResult.failed,
-                  files: syncResult.files.map(f => ({
-                    filename: f.filename,
-                    status: f.status,
-                    error: f.error,
-                  })),
-                },
-              });
-              return;
-            }
-          } else if (isYouTubeUrl(cacheUrl)) {
-            result = await downloadYouTube(cacheUrl, { name: cacheName });
-          } else {
-            result = await downloadAndCache(cacheUrl, { name: cacheName });
-          }
-          if (result) {
-            sendJson(res, {
-              success: true,
-              data: {
-                content: result.content,
-                alreadyCached: result.alreadyCached,
-              },
-            });
-          }
+          const playlist = appendItems(items, { name, loop, showIntros });
+          sendJson(res, {
+            success: true,
+            data: {
+              playlist,
+              state: playbackManager.getState(),
+            },
+          });
         } catch (err) {
-          logger.error('Cache failed', err as Error);
-          sendError(res, `Cache failed: ${(err as Error).message}`, 500);
+          sendError(res, (err as Error).message);
         }
         return;
       }
@@ -1122,6 +1186,26 @@ export function startServer(port = DEFAULT_PORT): http.Server {
 
   // Set up playback state change callback to notify controller
   playbackManager.onStateChange(sendStateToController);
+
+  // Initialize task queue with progress callback
+  const taskQueue = getTaskQueue();
+  taskQueue.setNodeId(state.config.id);
+  taskQueue.setProgressCallback((msg) => {
+    if (state.controllerWs?.readyState === WebSocket.OPEN) {
+      state.controllerWs.send(JSON.stringify(msg));
+      logger.debug('Task progress sent to controller', { taskId: msg.taskId, status: msg.status });
+    }
+  });
+  taskQueue.setPlayCallback((result) => {
+    // When a task with playAfter completes, start playback
+    if (result.filename) {
+      const content = getContentByFilename(result.filename);
+      if (content) {
+        playContent(content, { loop: true });
+        logger.info('Auto-playing content after download', { filename: result.filename });
+      }
+    }
+  });
 
   // Create HTTP server
   const server = http.createServer((req, res) => {

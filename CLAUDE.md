@@ -220,37 +220,80 @@ pnpm dev:dashboard   # Start dashboard dev server
 ### POST /play
 Play content - auto-detects source type. No `type` parameter needed.
 
+**Synchronous (immediate playback):**
 ```bash
-# Play cached file
+# Play cached file - plays immediately
 curl -X POST http://pi:8080/play -d '{"filename":"a1b2c3d4.mp4"}'
 
-# Play URL (auto-detects YouTube)
-curl -X POST http://pi:8080/play -d '{"url":"https://youtube.com/watch?v=..."}'
-curl -X POST http://pi:8080/play -d '{"url":"https://example.com/video.mp4"}'
-
-# Play Eden collection (syncs first, plays as playlist)
-curl -X POST http://pi:8080/play -d '{"collectionId":"6526f380...","db":"PROD"}'
-
-# Play non-media URL in iframe
+# Play non-media URL in iframe - plays immediately
 curl -X POST http://pi:8080/play -d '{"url":"https://example.com/page"}'
 ```
 
+**Async (returns taskId, plays when download completes):**
+```bash
+# Play YouTube - returns taskId, plays when downloaded
+curl -X POST http://pi:8080/play -d '{"url":"https://youtube.com/watch?v=..."}'
+# Response: {"success":true,"data":{"taskId":"youtube_abc...","status":"queued"}}
+
+# Play media URL - returns taskId, plays when downloaded
+curl -X POST http://pi:8080/play -d '{"url":"https://example.com/video.mp4"}'
+
+# Play Eden collection - returns taskId, plays when synced
+curl -X POST http://pi:8080/play -d '{"collectionId":"6526f380...","db":"PROD"}'
+```
+
 ### POST /cache
-Cache content without playing. Auto-detects source type.
+Cache content without playing. Always async - returns immediately with taskId.
 
 ```bash
-# Cache URL (auto-detects YouTube)
+# Cache YouTube video
 curl -X POST http://pi:8080/cache -d '{"url":"https://youtube.com/watch?v=..."}'
+# Response: {"success":true,"data":{"taskId":"youtube_abc...","status":"queued","message":"Download queued"}}
+
+# Cache media URL
 curl -X POST http://pi:8080/cache -d '{"url":"https://example.com/video.mp4"}'
+# Response: {"success":true,"data":{"taskId":"cache_abc...","status":"queued","message":"Download queued"}}
 
 # Cache Eden collection
 curl -X POST http://pi:8080/cache -d '{"collectionId":"6526f380...","db":"PROD"}'
+# Response: {"success":true,"data":{"taskId":"eden_abc...","status":"queued","message":"Eden collection sync queued"}}
 ```
+
+## Async Task System
+
+Long-running operations (downloads, YouTube, Eden sync) use an async task queue:
+
+1. **Request**: Client sends `/play` or `/cache` request
+2. **Response**: Server returns immediately with `taskId` and `status: "queued"`
+3. **Processing**: Node processes tasks sequentially in background
+4. **Progress**: Node sends `download_progress` messages via WebSocket to controller
+5. **Forwarding**: Controller forwards progress to dashboards as `task_progress`
+6. **Completion**: On success, sends final progress with `status: "completed"` and `result`
+
+### Task Progress Message (Node → Controller → Dashboard)
+```typescript
+{
+  type: 'download_progress',
+  taskId: 'youtube_abc123...',
+  nodeId: 'pi-living-room',
+  taskType: 'youtube' | 'cache' | 'eden',
+  status: 'queued' | 'started' | 'downloading' | 'processing' | 'completed' | 'error',
+  progress: 0-100,
+  message?: 'Downloading...',
+  result?: { filename, hash, sizeBytes, alreadyCached },
+  error?: { code: 'DOWNLOAD_FAILED', message: 'Connection timeout' }
+}
+```
+
+### Task Types
+- `cache`: Generic URL download
+- `youtube`: YouTube video via yt-dlp
+- `eden`: Eden collection sync or creation download
 
 ## WebSocket Protocols
 
 ### Controller ↔ Node (`/ws/nodes`)
-- Node → Controller: `register`, `heartbeat`, `state`
+- Node → Controller: `register`, `heartbeat`, `state`, `download_progress`
 - Controller → Node: `command`, `preload`, `ping`
 
 ### Node ↔ Player (`/ws`)
@@ -258,7 +301,7 @@ curl -X POST http://pi:8080/cache -d '{"collectionId":"6526f380...","db":"PROD"}
 - Player → Node: `ready`, `ended`, `error`
 
 ### Controller ↔ Dashboard (`/ws/dashboard`)
-- Controller → Dashboard: `nodes`, `node_update`, `node_disconnected`
+- Controller → Dashboard: `nodes`, `node_update`, `node_disconnected`, `task_progress`
 - Dashboard → Controller: `command`, `subscribe`
 
 ## Authentication

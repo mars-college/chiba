@@ -35,6 +35,18 @@ import {
   getCollectionCreations as getEdenCollectionCreations,
   parseEdenUrl,
 } from './services/eden.js';
+import {
+  controlLight,
+  getAllLights,
+  getLightById,
+} from './services/lights.js';
+import type {
+  LightWithState,
+  LightPreset,
+  LightControlRequest,
+  CreatePresetRequest,
+  PresetLightSetting,
+} from '@chiba/shared';
 
 // Load .env from project root
 const __filename = fileURLToPath(import.meta.url);
@@ -274,6 +286,14 @@ async function handleRequest(
             'GET /api/eden/creation/:id',
             'GET /api/eden/collection/:id',
             'GET /api/eden/parse?url=...',
+            // Lights
+            'GET /api/lights',
+            'POST /api/lights/:id/control',
+            'POST /api/lights/all/control',
+            'GET /api/presets',
+            'POST /api/presets',
+            'POST /api/presets/:id/apply',
+            'DELETE /api/presets/:id',
           ],
         });
         return;
@@ -370,6 +390,81 @@ async function handleRequest(
         }));
 
         sendJson(res, { success: true, data: playlists });
+        return;
+      }
+
+      case '/api/lights': {
+        // Get all lights with their states
+        const db = getDatabase();
+        const rows = db.prepare(`
+          SELECT l.*, ls.power, ls.hue, ls.saturation, ls.brightness, ls.updated_at as state_updated_at
+          FROM lights l
+          LEFT JOIN light_state ls ON l.id = ls.light_id
+          ORDER BY l.name
+        `).all() as Array<{
+          id: string;
+          name: string;
+          ip_address: string;
+          port: number;
+          device_type: string | null;
+          created_at: number;
+          updated_at: number;
+          power: number | null;
+          hue: number | null;
+          saturation: number | null;
+          brightness: number | null;
+          state_updated_at: number | null;
+        }>;
+
+        const lightsWithState: LightWithState[] = rows.map(row => ({
+          id: row.id,
+          name: row.name,
+          ipAddress: row.ip_address,
+          port: row.port,
+          deviceType: row.device_type ?? undefined,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          state: row.power !== null ? {
+            lightId: row.id,
+            power: Boolean(row.power),
+            hue: row.hue ?? 0,
+            saturation: row.saturation ?? 100,
+            brightness: row.brightness ?? 100,
+            updatedAt: row.state_updated_at ?? 0,
+          } : null,
+          reachable: true,
+        }));
+
+        sendJson(res, { success: true, data: lightsWithState });
+        return;
+      }
+
+      case '/api/presets': {
+        // Get all light presets
+        const db = getDatabase();
+        const rows = db.prepare(`
+          SELECT id, name, is_predefined, settings, created_at, updated_at
+          FROM light_presets
+          ORDER BY is_predefined DESC, name
+        `).all() as Array<{
+          id: string;
+          name: string;
+          is_predefined: number;
+          settings: string;
+          created_at: number;
+          updated_at: number;
+        }>;
+
+        const presets: LightPreset[] = rows.map(row => ({
+          id: row.id,
+          name: row.name,
+          isPredefined: Boolean(row.is_predefined),
+          settings: JSON.parse(row.settings),
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }));
+
+        sendJson(res, { success: true, data: presets });
         return;
       }
     }
@@ -1216,6 +1311,185 @@ async function handleRequest(
     return;
   }
 
+  // ============================================================================
+  // Light Control Endpoints
+  // ============================================================================
+
+  // Control a single light - POST /api/lights/:id/control
+  if (method === 'POST' && url.pathname.match(/^\/api\/lights\/[^/]+\/control$/)) {
+    const lightId = url.pathname.split('/')[3];
+    if (!lightId) {
+      sendError(res, 'Missing light ID');
+      return;
+    }
+
+    const light = getLightById(lightId);
+    if (!light) {
+      sendError(res, 'Light not found', 404);
+      return;
+    }
+
+    const body = await readJsonBody<LightControlRequest>(req);
+    if (!body) {
+      sendError(res, 'Invalid JSON body');
+      return;
+    }
+
+    logger.info('Light control request', { lightId, body });
+
+    try {
+      const state = await controlLight(light, body);
+      sendJson(res, { success: true, data: { lightId: light.id, state } });
+    } catch (err) {
+      logger.error('Failed to control light', err as Error, { lightId });
+      sendError(res, `Light control failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
+  // Control all lights - POST /api/lights/all/control
+  if (method === 'POST' && url.pathname === '/api/lights/all/control') {
+    const body = await readJsonBody<LightControlRequest>(req);
+    if (!body) {
+      sendError(res, 'Invalid JSON body');
+      return;
+    }
+
+    const lights = getAllLights();
+    const results: Array<{ lightId: string; success: boolean; error?: string }> = [];
+
+    logger.info('Control all lights', { body, count: lights.length });
+
+    for (const light of lights) {
+      try {
+        await controlLight(light, body);
+        results.push({ lightId: light.id, success: true });
+      } catch (err) {
+        results.push({ lightId: light.id, success: false, error: (err as Error).message });
+      }
+    }
+
+    sendJson(res, { success: true, data: { results } });
+    return;
+  }
+
+  // Create a new preset - POST /api/presets
+  if (method === 'POST' && url.pathname === '/api/presets') {
+    const body = await readJsonBody<CreatePresetRequest>(req);
+    if (!body?.name || !body?.settings) {
+      sendError(res, 'Name and settings are required');
+      return;
+    }
+
+    const db = getDatabase();
+    const id = generateId();
+    const now = Date.now();
+
+    try {
+      db.prepare(`
+        INSERT INTO light_presets (id, name, is_predefined, settings, created_at, updated_at)
+        VALUES (?, ?, 0, ?, ?, ?)
+      `).run(id, body.name.trim(), JSON.stringify(body.settings), now, now);
+
+      logger.info('Preset created', { id, name: body.name });
+
+      sendJson(res, {
+        success: true,
+        data: {
+          id,
+          name: body.name.trim(),
+          isPredefined: false,
+          settings: body.settings,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    } catch (err) {
+      if ((err as Error).message.includes('UNIQUE constraint failed')) {
+        sendError(res, 'A preset with that name already exists', 409);
+      } else {
+        throw err;
+      }
+    }
+    return;
+  }
+
+  // Apply a preset - POST /api/presets/:id/apply
+  if (method === 'POST' && url.pathname.match(/^\/api\/presets\/[^/]+\/apply$/)) {
+    const presetId = url.pathname.split('/')[3];
+    if (!presetId) {
+      sendError(res, 'Missing preset ID');
+      return;
+    }
+
+    const db = getDatabase();
+    const preset = db.prepare('SELECT settings FROM light_presets WHERE id = ?').get(presetId) as { settings: string } | undefined;
+
+    if (!preset) {
+      sendError(res, 'Preset not found', 404);
+      return;
+    }
+
+    const settings: PresetLightSetting[] = JSON.parse(preset.settings);
+    const lights = getAllLights();
+
+    logger.info('Applying preset', { presetId, settingsCount: settings.length });
+
+    const results: Array<{ lightId: string; success: boolean; error?: string }> = [];
+
+    for (const setting of settings) {
+      const targetLights = setting.lightId === '*'
+        ? lights
+        : lights.filter(l => l.id === setting.lightId);
+
+      for (const light of targetLights) {
+        const request: LightControlRequest = {
+          power: setting.power,
+          hue: setting.hue,
+          saturation: setting.saturation,
+          brightness: setting.brightness,
+        };
+
+        try {
+          await controlLight(light, request);
+          results.push({ lightId: light.id, success: true });
+        } catch (err) {
+          results.push({ lightId: light.id, success: false, error: (err as Error).message });
+        }
+      }
+    }
+
+    sendJson(res, { success: true, data: { presetId, results } });
+    return;
+  }
+
+  // Delete a user preset - DELETE /api/presets/:id
+  if (method === 'DELETE' && url.pathname.match(/^\/api\/presets\/[^/]+$/)) {
+    const presetId = url.pathname.split('/')[3];
+    if (!presetId) {
+      sendError(res, 'Missing preset ID');
+      return;
+    }
+
+    const db = getDatabase();
+    const preset = db.prepare('SELECT is_predefined FROM light_presets WHERE id = ?').get(presetId) as { is_predefined: number } | undefined;
+
+    if (!preset) {
+      sendError(res, 'Preset not found', 404);
+      return;
+    }
+
+    if (preset.is_predefined) {
+      sendError(res, 'Cannot delete predefined presets', 403);
+      return;
+    }
+
+    db.prepare('DELETE FROM light_presets WHERE id = ?').run(presetId);
+    logger.info('Preset deleted', { id: presetId });
+    sendJson(res, { success: true, message: 'Preset deleted' });
+    return;
+  }
+
   // Node commands: /api/nodes/:id/:action
   if (method === 'POST' && url.pathname.startsWith('/api/nodes/')) {
     const parts = url.pathname.split('/');
@@ -1490,9 +1764,35 @@ function handleNodeMessage(
       // Handled by heartbeat monitoring
       break;
 
+    case 'download_progress': {
+      // Forward task progress to all connected dashboards
+      const nodeId = findNodeIdByWebSocket(ws);
+      if (nodeId) {
+        broadcastToDashboards({
+          type: 'task_progress',
+          nodeId,
+          task: message,
+        });
+        logger.debug('Forwarded task progress', { nodeId, taskId: message.taskId, status: message.status });
+      }
+      break;
+    }
+
     default:
       logger.warn('Unknown message type', { type: (message as { type: string }).type });
   }
+}
+
+/**
+ * Find node ID by its WebSocket connection.
+ */
+function findNodeIdByWebSocket(ws: WebSocket): string | null {
+  for (const [nodeId, conn] of state.nodes.entries()) {
+    if (conn.ws === ws) {
+      return nodeId;
+    }
+  }
+  return null;
 }
 
 /**

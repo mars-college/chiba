@@ -78,6 +78,40 @@ CREATE TABLE IF NOT EXISTS node_content (
 
 -- Index for looking up nodes by content
 CREATE INDEX IF NOT EXISTS idx_node_content_hash ON node_content(content_hash);
+
+-- Govee lights configuration
+CREATE TABLE IF NOT EXISTS lights (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  ip_address TEXT NOT NULL UNIQUE,
+  port INTEGER DEFAULT 4003,
+  device_type TEXT,
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+-- Current light state (ephemeral)
+CREATE TABLE IF NOT EXISTS light_state (
+  light_id TEXT PRIMARY KEY REFERENCES lights(id) ON DELETE CASCADE,
+  power INTEGER DEFAULT 0,
+  hue INTEGER DEFAULT 0,
+  saturation INTEGER DEFAULT 100,
+  brightness INTEGER DEFAULT 100,
+  updated_at INTEGER
+);
+
+-- Light presets (scenes)
+CREATE TABLE IF NOT EXISTS light_presets (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  is_predefined INTEGER DEFAULT 0,
+  settings TEXT NOT NULL,
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+-- Index for fast preset lookups
+CREATE INDEX IF NOT EXISTS idx_light_presets_name ON light_presets(name);
 `;
 
 /**
@@ -97,6 +131,9 @@ DROP TABLE IF EXISTS playlists;
 DROP TABLE IF EXISTS content;
 DROP TABLE IF EXISTS node_status;
 DROP TABLE IF EXISTS nodes;
+DROP TABLE IF EXISTS light_state;
+DROP TABLE IF EXISTS light_presets;
+DROP TABLE IF EXISTS lights;
 `;
 
 /**
@@ -106,4 +143,17 @@ DROP TABLE IF EXISTS nodes;
 export const MIGRATIONS = [
   // Add name column to content table
   `ALTER TABLE content ADD COLUMN name TEXT;`,
+
+  // Seed default lights
+  `INSERT OR IGNORE INTO lights (id, name, ip_address) VALUES
+    ('light-gallery-west', 'gallery west', '100.124.3.230'),
+    ('light-gallery-east', 'gallery east', '100.124.3.207'),
+    ('light-auditorium', 'auditorium', '100.124.3.206');`,
+
+  // Seed predefined presets
+  `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
+    ('preset-all-off', 'All Off', 1, '[{"lightId":"*","power":false}]'),
+    ('preset-all-on', 'All On', 1, '[{"lightId":"*","power":true,"brightness":100}]'),
+    ('preset-warm-dim', 'Warm Dim', 1, '[{"lightId":"*","power":true,"hue":30,"saturation":80,"brightness":30}]'),
+    ('preset-cool-bright', 'Cool Bright', 1, '[{"lightId":"*","power":true,"hue":200,"saturation":50,"brightness":100}]');`,
 ];

@@ -57,6 +57,11 @@ export { DEFAULT_PLAYBACK_STATE } from './playback.js';
 
 // Message types
 export type {
+  // Task types for async operations
+  TaskStatus,
+  TaskType,
+  TaskResult,
+  TaskError,
   // Controller -> Node
   ControllerCommandMessage,
   ControllerPreloadMessage,
@@ -86,6 +91,7 @@ export type {
   DashboardNodesMessage,
   DashboardNodeUpdateMessage,
   DashboardNodeDisconnectedMessage,
+  DashboardTaskProgressMessage,
   ControllerToDashboardMessage,
   // Dashboard -> Controller
   DashboardCommandMessage,
@@ -118,3 +124,14 @@ export type {
   PlayContentRequest,
   SetVolumeRequest,
 } from './api.js';
+
+// Light types
+export type {
+  Light,
+  LightState,
+  LightWithState,
+  PresetLightSetting,
+  LightPreset,
+  LightControlRequest,
+  CreatePresetRequest,
+} from './lights.js';
