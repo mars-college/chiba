@@ -26,6 +26,8 @@ CONTROLLER_URL=""
 NODE_NAME=""
 API_KEY=""
 EDEN_API_KEY=""
+WIFI_SSID=""
+WIFI_PASSWORD=""
 INSTALL_DIR="/home/pi/chiba"
 REPO_URL="https://github.com/mars-college/chiba.git"
 
@@ -63,6 +65,22 @@ while [ $# -gt 0 ]; do
             EDEN_API_KEY="$2"
             shift 2
             ;;
+        --wifi-ssid=*)
+            WIFI_SSID="${1#*=}"
+            shift
+            ;;
+        --wifi-ssid)
+            WIFI_SSID="$2"
+            shift 2
+            ;;
+        --wifi-password=*)
+            WIFI_PASSWORD="${1#*=}"
+            shift
+            ;;
+        --wifi-password)
+            WIFI_PASSWORD="$2"
+            shift 2
+            ;;
         --install-dir=*)
             INSTALL_DIR="${1#*=}"
             shift
@@ -81,6 +99,8 @@ while [ $# -gt 0 ]; do
             echo "Optional:"
             echo "  --api-key          API key for authenticating requests (auto-generated if not provided)"
             echo "  --eden-key         Eden API key for collection sync"
+            echo "  --wifi-ssid        WiFi network name (ensures WiFi stays configured after upgrades)"
+            echo "  --wifi-password    WiFi network password"
             echo "  --install-dir      Installation directory (default: /home/pi/chiba)"
             exit 0
             ;;
@@ -349,6 +369,12 @@ cat > "$INSTALL_DIR/scripts/run-kiosk.sh" << 'EOF'
 #!/bin/bash
 # Chiba Kiosk Launcher
 # Runs Chromium in kiosk mode connecting to the local node server
+# Exit kiosk by pressing Ctrl+Alt+Q in the player UI or clicking the exit button
+
+EXIT_SIGNAL="/tmp/chiba-exit-kiosk"
+
+# Clean up any stale exit signal
+rm -f "$EXIT_SIGNAL"
 
 # Required environment for Wayland
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
@@ -390,8 +416,38 @@ CHROMIUM_FLAGS=(
     --no-sandbox
 )
 
+# Function to watch for exit signal
+watch_exit_signal() {
+    while true; do
+        if [ -f "$EXIT_SIGNAL" ]; then
+            echo "Exit signal detected, stopping kiosk..."
+            rm -f "$EXIT_SIGNAL"
+            # Kill cage (which will kill chromium too)
+            pkill -f "cage.*chromium" 2>/dev/null
+            pkill cage 2>/dev/null
+            exit 0
+        fi
+        sleep 1
+    done
+}
+
+# Start exit watcher in background
+watch_exit_signal &
+WATCHER_PID=$!
+
+# Cleanup on script exit
+cleanup() {
+    kill $WATCHER_PID 2>/dev/null
+    rm -f "$EXIT_SIGNAL"
+}
+trap cleanup EXIT
+
 # Run Chromium in cage (Wayland compositor)
-exec cage -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
+cage -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
+
+# If cage exits normally, clean up
+cleanup
+echo "Kiosk exited. You are now at a terminal."
 EOF
 chmod +x "$INSTALL_DIR/scripts/run-kiosk.sh"
 
@@ -403,6 +459,30 @@ if [ "\$(tty)" = "/dev/tty1" ]; then
     cd $INSTALL_DIR && ./scripts/run-kiosk.sh
 fi
 EOF
+
+# Configure WiFi if credentials provided (ensures WiFi works after package upgrades)
+if [ -n "$WIFI_SSID" ] && [ -n "$WIFI_PASSWORD" ]; then
+    echo "=== Configuring WiFi ==="
+    # Use nmcli if NetworkManager is available (newer Pi OS)
+    if command -v nmcli &>/dev/null; then
+        nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASSWORD" 2>/dev/null || \
+        nmcli connection modify "$WIFI_SSID" connection.autoconnect yes 2>/dev/null || true
+        echo "WiFi configured via NetworkManager: $WIFI_SSID"
+    # Fall back to wpa_supplicant (older Pi OS)
+    elif [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
+        if ! grep -q "ssid=\"$WIFI_SSID\"" /etc/wpa_supplicant/wpa_supplicant.conf; then
+            sudo tee -a /etc/wpa_supplicant/wpa_supplicant.conf > /dev/null << WPAEOF
+
+network={
+    ssid="$WIFI_SSID"
+    psk="$WIFI_PASSWORD"
+}
+WPAEOF
+            sudo wpa_cli -i wlan0 reconfigure 2>/dev/null || true
+            echo "WiFi configured via wpa_supplicant: $WIFI_SSID"
+        fi
+    fi
+fi
 
 echo "=== Enabling services ==="
 sudo systemctl daemon-reload
@@ -426,6 +506,9 @@ systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ Screen blanking
 systemctl is-enabled chiba-node &>/dev/null && echo "  ✓ Chiba node service enabled" || echo "  ✗ Chiba node service NOT enabled"
 grep -q "run-kiosk.sh" "$HOME_DIR/.bash_profile" && echo "  ✓ Kiosk auto-start configured" || echo "  ✗ Kiosk auto-start NOT configured"
 [ -f "$HOME_DIR/.asoundrc" ] && echo "  ✓ Audio configured ($AUDIO_DEVICE)" || echo "  ✗ Audio NOT configured"
+if [ -n "$WIFI_SSID" ]; then
+    nmcli connection show "$WIFI_SSID" &>/dev/null && echo "  ✓ WiFi configured ($WIFI_SSID)" || echo "  ✗ WiFi NOT configured"
+fi
 
 PI_IP=$(hostname -I | awk '{print $1}')
 

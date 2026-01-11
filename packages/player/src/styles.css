@@ -270,3 +270,30 @@ html, body, #root {
   color: #888;
   max-width: 400px;
 }
+
+/* Exit Kiosk Button */
+.debug-exit-section {
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.debug-exit-button {
+  padding: 12px 24px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #ff4444;
+  background: transparent;
+  border: 2px solid #ff4444;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.debug-exit-button:hover:not(:disabled) {
+  background: rgba(255, 68, 68, 0.1);
+}
+
+.debug-exit-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

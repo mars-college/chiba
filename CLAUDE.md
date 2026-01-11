@@ -214,6 +214,7 @@ pnpm dev:dashboard   # Start dashboard dev server
 - `POST /image-duration` - Set image display duration (ms)
 - `POST /cache` - Cache content (doesn't play)
 - `POST /clear-cache` - Delete all cached content
+- `POST /exit-kiosk` - Exit kiosk mode (writes signal file for run-kiosk.sh)
 
 ## Node API Details
 

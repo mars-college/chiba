@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { VERSION } from '@chiba/shared';
 
 interface DebugInfo {
@@ -39,10 +39,40 @@ function getNodeBaseUrl(): string {
 export function DebugScreen({ connected }: DebugScreenProps) {
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exitPending, setExitPending] = useState(false);
+
+  const baseUrl = getNodeBaseUrl();
+
+  // Handle Ctrl+Alt+Q to exit kiosk
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'q') {
+        e.preventDefault();
+        handleExitKiosk();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleExitKiosk = useCallback(async () => {
+    if (exitPending) return;
+    setExitPending(true);
+    try {
+      const response = await fetch(`${baseUrl}/exit-kiosk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        console.error('Failed to exit kiosk:', await response.text());
+      }
+    } catch (err) {
+      console.error('Failed to exit kiosk:', err);
+    }
+    // Keep pending state - the kiosk should exit soon
+  }, [baseUrl, exitPending]);
 
   useEffect(() => {
-    const baseUrl = getNodeBaseUrl();
-
     const fetchDebugInfo = async () => {
       try {
         const response = await fetch(`${baseUrl}/debug`);
@@ -135,6 +165,16 @@ export function DebugScreen({ connected }: DebugScreenProps) {
       <div className="debug-section">
         <div className="debug-section-title">Status</div>
         <div className="debug-value">Ready</div>
+      </div>
+
+      <div className="debug-section debug-exit-section">
+        <button
+          className="debug-exit-button"
+          onClick={handleExitKiosk}
+          disabled={exitPending}
+        >
+          {exitPending ? 'Exiting...' : 'Exit Kiosk (Ctrl+Alt+Q)'}
+        </button>
       </div>
     </div>
   );

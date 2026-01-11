@@ -331,13 +331,17 @@ async function handleRequest(
         const totalCacheSize = getCacheSize();
         const playlists = listPlaylists();
         const currentState = playbackManager.getState();
+        const ipAddress = getIpAddress();
+        // Network is only truly online if we have a real IP (not loopback)
+        const hasRealIp = ipAddress !== '127.0.0.1' && ipAddress !== '::1';
+        const isControllerConnected = state.controllerWs?.readyState === WebSocket.OPEN;
 
         sendJson(res, {
           nodeName: state.config.friendlyName,
           nodeId: state.config.id,
-          ipAddress: getIpAddress(),
-          networkStatus: 'online',
-          controllerStatus: state.controllerWs?.readyState === WebSocket.OPEN ? 'online' : 'offline',
+          ipAddress,
+          networkStatus: hasRealIp ? 'online' : 'offline',
+          controllerStatus: hasRealIp && isControllerConnected ? 'online' : 'offline',
           content: cachedContent.map(c => ({
             filename: c.filename,
             sizeBytes: c.sizeBytes,
@@ -896,6 +900,24 @@ async function handleRequest(
             freedBytes: result.freedBytes,
           },
         });
+        return;
+      }
+
+      case '/exit-kiosk': {
+        // Exit kiosk mode by writing a signal file that run-kiosk.sh watches for
+        logger.info('Exit kiosk command received');
+        const signalPath = '/tmp/chiba-exit-kiosk';
+        try {
+          fs.writeFileSync(signalPath, Date.now().toString());
+          logger.info('Exit signal written', { path: signalPath });
+          sendJson(res, {
+            success: true,
+            message: 'Exit signal sent - kiosk will exit shortly',
+          });
+        } catch (err) {
+          logger.error('Failed to write exit signal', err as Error);
+          sendError(res, 'Failed to write exit signal', 500);
+        }
         return;
       }
     }
