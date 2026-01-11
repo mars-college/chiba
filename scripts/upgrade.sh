@@ -117,11 +117,14 @@ upgrade_local() {
     fi
 
     # Pull latest code
-    log "Pulling latest code from git..."
+    log "Fetching latest code from git..."
     git fetch origin
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    git pull origin "$CURRENT_BRANCH"
-    success "Code updated"
+
+    # Reset to latest commit on remote to ensure all changes are applied
+    log "Resetting to origin/$CURRENT_BRANCH..."
+    git reset --hard "origin/$CURRENT_BRANCH"
+    success "Code updated to $(git rev-parse --short HEAD)"
 
     # Clean if requested
     if [ "$CLEAN" = true ]; then
@@ -151,17 +154,30 @@ upgrade_local() {
     if [ "$NO_RESTART" = false ]; then
         log "Checking for running services..."
 
+        # Reload systemd daemon to pick up any service file changes
+        sudo systemctl daemon-reload 2>/dev/null || true
+
+        RESTARTED=false
+
         # Check if controller is running via systemd
         if systemctl is-active --quiet chiba-controller 2>/dev/null; then
             log "Restarting chiba-controller service..."
             sudo systemctl restart chiba-controller
             success "Controller service restarted"
-        elif systemctl is-active --quiet chiba-node 2>/dev/null; then
+            RESTARTED=true
+        fi
+
+        # Also check for node service (both may be running on same machine)
+        if systemctl is-active --quiet chiba-node 2>/dev/null; then
             log "Restarting chiba-node service..."
             sudo systemctl restart chiba-node
             success "Node service restarted"
-        else
+            RESTARTED=true
+        fi
+
+        if [ "$RESTARTED" = false ]; then
             warn "No systemd service found. You may need to manually restart the server."
+            warn "Try: sudo systemctl restart chiba-controller"
         fi
     fi
 
