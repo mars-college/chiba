@@ -21,6 +21,12 @@
 
 set -e
 
+# Log all output to a file in the same directory as this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="$SCRIPT_DIR/setup-node-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "Logging to: $LOG_FILE"
+
 # Parse arguments
 CONTROLLER_URL=""
 NODE_NAME=""
@@ -136,6 +142,10 @@ echo "==========================================="
 echo ""
 echo "Node name:       $NODE_NAME"
 echo "Controller URL:  $CONTROLLER_URL"
+if [ -n "$WIFI_SSID" ]; then
+    echo "WiFi SSID:       $WIFI_SSID"
+    echo "WiFi Password:   ${WIFI_PASSWORD:0:3}***${WIFI_PASSWORD: -3} (length: ${#WIFI_PASSWORD})"
+fi
 echo "Install dir:     $INSTALL_DIR"
 echo ""
 
