@@ -32,6 +32,21 @@ NC='\033[0m'
 MODE="${1:-soft}"
 INSTALL_DIR="/home/pi/chiba"
 REPO_URL="https://github.com/mars-college/chiba.git"
+SCRIPT_URL="https://raw.githubusercontent.com/mars-college/chiba/main/scripts/upgrade-node.sh"
+
+# Self-update check: fetch latest version of this script before doing anything destructive
+# Skip if we're already running the fetched version (indicated by __UPGRADED__ env var)
+if [ -z "$__UPGRADED__" ] && [ "$MODE" = "hard" ]; then
+    echo -e "${BLUE}[$(date +%H:%M:%S)]${NC} Fetching latest upgrade script..."
+    TEMP_SCRIPT="/tmp/upgrade-node-$$.sh"
+    if curl -fsSL "$SCRIPT_URL" -o "$TEMP_SCRIPT" 2>/dev/null; then
+        chmod +x "$TEMP_SCRIPT"
+        echo -e "${GREEN}✓${NC} Got latest upgrade script, re-executing..."
+        __UPGRADED__=1 exec "$TEMP_SCRIPT" "$@"
+    else
+        echo -e "${YELLOW}⚠${NC} Could not fetch latest script, continuing with local version..."
+    fi
+fi
 
 log() { echo -e "${BLUE}[$(date +%H:%M:%S)]${NC} $1"; }
 success() { echo -e "${GREEN}✓${NC} $1"; }
@@ -100,6 +115,36 @@ if [ "$MODE" = "soft" ]; then
     NODE_ENV=development pnpm build
     success "Build complete"
 
+    # Update scripts permissions
+    chmod +x "$INSTALL_DIR/scripts/"*.sh 2>/dev/null || true
+
+    # Setup network watchdog if not already present
+    if ! systemctl is-enabled chiba-network-watchdog 2>/dev/null; then
+        log "Setting up network watchdog..."
+        sudo tee /etc/systemd/system/chiba-network-watchdog.service > /dev/null << WATCHDOG_EOF
+[Unit]
+Description=Chiba Network Watchdog
+After=network.target NetworkManager.service
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/scripts/network-watchdog.sh
+Restart=always
+RestartSec=30
+Environment=CHECK_INTERVAL=30
+Environment=FAILURE_THRESHOLD=3
+
+[Install]
+WantedBy=multi-user.target
+WATCHDOG_EOF
+        sudo systemctl daemon-reload
+        sudo systemctl enable chiba-network-watchdog
+        sudo systemctl start chiba-network-watchdog
+        sudo systemctl enable getty@tty2.service 2>/dev/null || true
+        success "Network watchdog configured"
+    fi
+
     # Restart service
     log "Restarting chiba-node service..."
     sudo systemctl daemon-reload
@@ -154,6 +199,8 @@ else
 
     # Remove old installation
     log "Removing old installation..."
+    # IMPORTANT: cd to safe location first - git clone fails if cwd was deleted
+    cd "$HOME" || cd /tmp
     rm -rf "$INSTALL_DIR"
     success "Old installation removed"
 
@@ -224,10 +271,37 @@ else
     NODE_ENV=development pnpm build
     success "Build complete"
 
-    # Recreate run-kiosk.sh (in case it changed)
-    log "Updating kiosk script..."
-    chmod +x "$INSTALL_DIR/scripts/run-kiosk.sh" 2>/dev/null || true
-    chmod +x "$INSTALL_DIR/scripts/rotate-display.sh" 2>/dev/null || true
+    # Update scripts permissions
+    log "Updating scripts..."
+    chmod +x "$INSTALL_DIR/scripts/"*.sh 2>/dev/null || true
+    success "Scripts updated"
+
+    # Setup/update network watchdog service
+    log "Setting up network watchdog..."
+    sudo tee /etc/systemd/system/chiba-network-watchdog.service > /dev/null << WATCHDOG_EOF
+[Unit]
+Description=Chiba Network Watchdog
+After=network.target NetworkManager.service
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/scripts/network-watchdog.sh
+Restart=always
+RestartSec=30
+Environment=CHECK_INTERVAL=30
+Environment=FAILURE_THRESHOLD=3
+
+[Install]
+WantedBy=multi-user.target
+WATCHDOG_EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable chiba-network-watchdog 2>/dev/null || true
+    sudo systemctl restart chiba-network-watchdog 2>/dev/null || true
+    success "Network watchdog configured"
+
+    # Enable TTY2 for emergency access
+    sudo systemctl enable getty@tty2.service 2>/dev/null || true
 
     # Reload and restart service
     log "Restarting services..."

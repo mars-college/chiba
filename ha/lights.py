@@ -6,6 +6,8 @@ import time
 
 # ====== CONFIG ======
 GOVEE_IP = "100.124.3.230"
+GOVEE_IP2 = "100.124.3.207"
+GOVEE_IP3 = "100.124.3.206"
 GOVEE_PORT = 4003
 DURATION_SECONDS = 100          # total rotation time
 STEPS = DURATION_SECONDS * 4       # number of updates
@@ -61,4 +63,4 @@ def govee_set_brightness(value):
 # print("Done.")
 
 
-govee_set_color(255, 255, 255)
+govee_set_color(255, 9)
