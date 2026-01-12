@@ -134,6 +134,10 @@ export function NodeDetailPage() {
 
   const [rotationLoading, setRotationLoading] = useState(false);
   const [clearCacheLoading, setClearCacheLoading] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const handleClearCache = async () => {
     if (!id) return;
@@ -161,6 +165,31 @@ export function NodeDetailPage() {
       console.error('Rotation change failed:', err);
     } finally {
       setRotationLoading(false);
+    }
+  };
+
+  const openRenameModal = () => {
+    if (node) {
+      setRenameValue(node.node.friendlyName);
+      setRenameError(null);
+      setShowRenameModal(true);
+    }
+  };
+
+  const handleRename = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || !renameValue.trim()) return;
+
+    setRenameLoading(true);
+    setRenameError(null);
+    try {
+      await apiPost(`/nodes/${id}/rename`, { name: renameValue.trim() });
+      setShowRenameModal(false);
+      fetchNode();
+    } catch (err) {
+      setRenameError(err instanceof Error ? err.message : 'Rename failed');
+    } finally {
+      setRenameLoading(false);
     }
   };
 
@@ -197,6 +226,16 @@ export function NodeDetailPage() {
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <h1 className="page-title" style={{ margin: 0 }}>{node.node.friendlyName}</h1>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={openRenameModal}
+            style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center' }}
+            title="Rename node"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+            </svg>
+          </button>
           <a
             href={`http://${node.node.ip}:${node.node.port}/player?kiosk`}
             target="_blank"
@@ -306,6 +345,57 @@ export function NodeDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Rename Modal */}
+      {showRenameModal && (
+        <div className="modal-overlay" onClick={() => setShowRenameModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title">Rename Node</h3>
+              <button className="modal-close" onClick={() => setShowRenameModal(false)}>
+                &times;
+              </button>
+            </div>
+            <form onSubmit={handleRename}>
+              <div className="modal-body">
+                {renameError && (
+                  <div className="alert alert-error" style={{ marginBottom: '16px' }}>
+                    {renameError}
+                  </div>
+                )}
+                <div className="form-group">
+                  <label className="form-label">Node Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    placeholder="Enter node name"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowRenameModal(false)}
+                  disabled={renameLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={renameLoading || !renameValue.trim()}
+                >
+                  {renameLoading ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

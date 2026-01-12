@@ -14,10 +14,12 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHIBA_DIR="$(dirname "$SCRIPT_DIR")"
 EXIT_SIGNAL="/tmp/chiba-exit-kiosk"
+ROTATE_SIGNAL="/tmp/chiba-rotate-signal"
 ROTATE_CONFIG="$CHIBA_DIR/.display-rotate"
 
-# Clean up any stale exit signal
+# Clean up any stale signals
 rm -f "$EXIT_SIGNAL"
+rm -f "$ROTATE_SIGNAL"
 
 # Required environment for Wayland
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
@@ -100,17 +102,45 @@ watch_exit_signal() {
     done
 }
 
+# Function to watch for rotation signal (triggered by node server API)
+watch_rotation_signal() {
+    while true; do
+        if [ -f "$ROTATE_SIGNAL" ]; then
+            NEW_ROTATION=$(cat "$ROTATE_SIGNAL")
+            rm -f "$ROTATE_SIGNAL"
+            if [ -n "$NEW_ROTATION" ]; then
+                echo "Rotation signal detected: $NEW_ROTATION degrees"
+                OUTPUT=$(wlr-randr 2>/dev/null | grep -E "^[A-Z]+-[A-Z]?-?[0-9]+" | head -1 | awk '{print $1}')
+                if [ -n "$OUTPUT" ]; then
+                    wlr-randr --output "$OUTPUT" --transform "$NEW_ROTATION" && \
+                        echo "Display rotated to $NEW_ROTATION degrees" || \
+                        echo "Failed to rotate display"
+                else
+                    echo "No display output detected for rotation"
+                fi
+            fi
+        fi
+        sleep 0.5
+    done
+}
+
 # Start exit watcher in background
 watch_exit_signal &
-WATCHER_PID=$!
+EXIT_WATCHER_PID=$!
+
+# Start rotation signal watcher in background
+watch_rotation_signal &
+ROTATE_WATCHER_PID=$!
 
 # Apply display rotation in background (after cage starts)
 apply_display_rotation &
 
 # Cleanup on script exit
 cleanup() {
-    kill $WATCHER_PID 2>/dev/null
+    kill $EXIT_WATCHER_PID 2>/dev/null
+    kill $ROTATE_WATCHER_PID 2>/dev/null
     rm -f "$EXIT_SIGNAL"
+    rm -f "$ROTATE_SIGNAL"
 }
 trap cleanup EXIT
 

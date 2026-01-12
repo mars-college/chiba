@@ -113,6 +113,7 @@ const state: ServerState = {
 // Display rotation config file path (must match rotate-display.sh)
 const CHIBA_DIR = process.env.CHIBA_DIR || '/home/pi/chiba';
 const ROTATION_CONFIG_FILE = path.join(CHIBA_DIR, '.display-rotate');
+const ROTATION_SIGNAL_FILE = '/tmp/chiba-rotate-signal';
 
 /**
  * Get the current display rotation from config file.
@@ -133,8 +134,8 @@ function getDisplayRotation(): DisplayRotation {
 }
 
 /**
- * Set display rotation - applies immediately and persists for reboot.
- * Returns true on success, false on failure.
+ * Set display rotation - applies immediately via signal file and persists for reboot.
+ * The run-kiosk.sh script watches for the signal file and applies rotation via wlr-randr.
  */
 function setDisplayRotation(rotation: DisplayRotation): { success: boolean; error?: string } {
   try {
@@ -143,26 +144,17 @@ function setDisplayRotation(rotation: DisplayRotation): { success: boolean; erro
     fs.writeFileSync(ROTATION_CONFIG_FILE, String(rotation));
     logger.info('Saved rotation config', { rotation, file: ROTATION_CONFIG_FILE });
 
-    // Try to apply immediately using wlr-randr (only works if Wayland is running)
+    // Write signal file for immediate rotation (run-kiosk.sh will apply via wlr-randr)
+    // This is needed because the node server runs as a systemd service and doesn't
+    // have access to the Wayland compositor socket - only the kiosk process does.
     try {
-      // Detect the output name
-      const wlrOutput = execSync('wlr-randr 2>/dev/null | grep -E "^[A-Z]+-[A-Z]?-?[0-9]+" | head -1 | awk \'{print $1}\'', {
-        encoding: 'utf-8',
-        timeout: 5000,
-      }).trim();
-
-      if (wlrOutput) {
-        execSync(`wlr-randr --output "${wlrOutput}" --transform ${rotation}`, {
-          encoding: 'utf-8',
-          timeout: 5000,
-        });
-        logger.info('Applied rotation immediately', { output: wlrOutput, rotation });
-      } else {
-        logger.info('No Wayland display detected, rotation will apply on next boot');
-      }
-    } catch {
-      // wlr-randr not available or failed - that's OK, rotation will apply on reboot
-      logger.info('Could not apply rotation immediately (Wayland not running?), will apply on next boot');
+      fs.writeFileSync(ROTATION_SIGNAL_FILE, String(rotation));
+      logger.info('Wrote rotation signal', { rotation, file: ROTATION_SIGNAL_FILE });
+    } catch (signalErr) {
+      // Signal file write failed - rotation will still apply on next boot
+      logger.warn('Could not write rotation signal file, rotation will apply on next boot', {
+        error: (signalErr as Error).message,
+      });
     }
 
     return { success: true };
