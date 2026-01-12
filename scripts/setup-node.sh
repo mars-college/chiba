@@ -20,6 +20,7 @@
 #   ./setup-node.sh --controller-url http://192.168.1.100:8080 --node-name living-room
 
 set -e
+set -x
 
 # Log all output to a file in the same directory as this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
