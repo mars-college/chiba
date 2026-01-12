@@ -153,8 +153,11 @@ States include: mode, currentContent, playlist, index, loop, paused, volume, ima
 | `scripts/init-chiba.sh` | Generate API key, create .env, show deploy commands |
 | `scripts/setup-node.sh` | Full Pi setup (packages, audio, kiosk, systemd) |
 | `scripts/find-pis.sh` | Discover Pis by mDNS hostname |
+| `scripts/upgrade-controller.sh` | Run ON controller to upgrade it |
+| `scripts/upgrade-node.sh` | Run ON a Pi node to upgrade it (soft/hard modes) |
 | `scripts/rename.sh` | Rename a node via API (usage: `./rename.sh <host> <name>`) |
 | `scripts/rotate.sh` | Rotate display via API (usage: `./rotate.sh <host> <0\|90\|180\|270>`) |
+| `scripts/rotate-display.sh` | Run ON a Pi to rotate its own display locally |
 
 ## Development
 
