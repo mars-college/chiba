@@ -13,6 +13,7 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 import os from 'os';
 
@@ -904,19 +905,21 @@ async function handleRequest(
       }
 
       case '/exit-kiosk': {
-        // Exit kiosk mode by writing a signal file that run-kiosk.sh watches for
+        // Exit kiosk mode by killing cage directly
         logger.info('Exit kiosk command received');
-        const signalPath = '/tmp/chiba-exit-kiosk';
         try {
-          fs.writeFileSync(signalPath, Date.now().toString());
-          logger.info('Exit signal written', { path: signalPath });
+          // Kill cage (Wayland compositor) which will exit the kiosk
+          execSync('pkill -9 cage 2>/dev/null || true', { encoding: 'utf-8' });
+          // Also write signal file for newer run-kiosk.sh versions
+          fs.writeFileSync('/tmp/chiba-exit-kiosk', Date.now().toString());
+          logger.info('Cage killed, kiosk should exit');
           sendJson(res, {
             success: true,
-            message: 'Exit signal sent - kiosk will exit shortly',
+            message: 'Kiosk killed',
           });
         } catch (err) {
-          logger.error('Failed to write exit signal', err as Error);
-          sendError(res, 'Failed to write exit signal', 500);
+          logger.error('Failed to kill kiosk', err as Error);
+          sendError(res, 'Failed to kill kiosk', 500);
         }
         return;
       }

@@ -35,6 +35,7 @@ API_KEY=""
 EDEN_API_KEY=""
 WIFI_SSID=""
 WIFI_PASSWORD=""
+DISPLAY_ROTATE="0"
 INSTALL_DIR="/home/pi/chiba"
 REPO_URL="https://github.com/mars-college/chiba.git"
 
@@ -88,6 +89,14 @@ while [ $# -gt 0 ]; do
             WIFI_PASSWORD="$2"
             shift 2
             ;;
+        --display-rotate=*)
+            DISPLAY_ROTATE="${1#*=}"
+            shift
+            ;;
+        --display-rotate)
+            DISPLAY_ROTATE="$2"
+            shift 2
+            ;;
         --install-dir=*)
             INSTALL_DIR="${1#*=}"
             shift
@@ -108,6 +117,7 @@ while [ $# -gt 0 ]; do
             echo "  --eden-key         Eden API key for collection sync"
             echo "  --wifi-ssid        WiFi network name (ensures WiFi stays configured after upgrades)"
             echo "  --wifi-password    WiFi network password"
+            echo "  --display-rotate   Display rotation: 0, 90, 180, 270 (default: 0)"
             echo "  --install-dir      Installation directory (default: /home/pi/chiba)"
             exit 0
             ;;
@@ -137,6 +147,15 @@ if [ -z "$API_KEY" ]; then
     echo "Generated API key: $API_KEY"
 fi
 
+# Validate display rotation
+case "$DISPLAY_ROTATE" in
+    0|90|180|270) ;;
+    *)
+        echo "Error: --display-rotate must be 0, 90, 180, or 270"
+        exit 1
+        ;;
+esac
+
 echo "==========================================="
 echo "  Chiba Node Setup"
 echo "==========================================="
@@ -147,6 +166,7 @@ if [ -n "$WIFI_SSID" ]; then
     echo "WiFi SSID:       $WIFI_SSID"
     echo "WiFi Password:   ${WIFI_PASSWORD:0:3}***${WIFI_PASSWORD: -3} (length: ${#WIFI_PASSWORD})"
 fi
+echo "Display rotate:  $DISPLAY_ROTATE degrees"
 echo "Install dir:     $INSTALL_DIR"
 echo ""
 
@@ -260,6 +280,10 @@ PORT=8080
 LOG_LEVEL=info
 EOF
 chmod 600 "$INSTALL_DIR/.env"
+
+# Save display rotation setting
+echo "$DISPLAY_ROTATE" > "$INSTALL_DIR/.display-rotate"
+echo "Display rotation saved: $DISPLAY_ROTATE degrees"
 
 echo "=== Configuring audio output ==="
 # Find USB audio device (exclude HDMI and built-in headphones)
@@ -382,7 +406,10 @@ cat > "$INSTALL_DIR/scripts/run-kiosk.sh" << 'EOF'
 # Runs Chromium in kiosk mode connecting to the local node server
 # Exit kiosk by pressing Ctrl+Alt+Q in the player UI or clicking the exit button
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHIBA_DIR="$(dirname "$SCRIPT_DIR")"
 EXIT_SIGNAL="/tmp/chiba-exit-kiosk"
+ROTATE_CONFIG="$CHIBA_DIR/.display-rotate"
 
 # Clean up any stale exit signal
 rm -f "$EXIT_SIGNAL"
@@ -427,6 +454,23 @@ CHROMIUM_FLAGS=(
     --no-sandbox
 )
 
+# Function to apply display rotation after cage starts
+apply_display_rotation() {
+    if [ -f "$ROTATE_CONFIG" ]; then
+        ROTATION=$(cat "$ROTATE_CONFIG")
+        if [ "$ROTATION" != "0" ] && [ -n "$ROTATION" ]; then
+            echo "Applying display rotation: $ROTATION degrees..."
+            sleep 2  # Wait for cage to initialize
+            OUTPUT=$(wlr-randr 2>/dev/null | grep -E "^[A-Z]+-[A-Z]?-?[0-9]+" | head -1 | awk '{print $1}')
+            if [ -n "$OUTPUT" ]; then
+                wlr-randr --output "$OUTPUT" --transform "$ROTATION" && \
+                    echo "Display rotated to $ROTATION degrees" || \
+                    echo "Failed to rotate display"
+            fi
+        fi
+    fi
+}
+
 # Function to watch for exit signal
 watch_exit_signal() {
     while true; do
@@ -445,6 +489,9 @@ watch_exit_signal() {
 # Start exit watcher in background
 watch_exit_signal &
 WATCHER_PID=$!
+
+# Apply display rotation in background (after cage starts)
+apply_display_rotation &
 
 # Cleanup on script exit
 cleanup() {
@@ -517,6 +564,7 @@ systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ Screen blanking
 systemctl is-enabled chiba-node &>/dev/null && echo "  ✓ Chiba node service enabled" || echo "  ✗ Chiba node service NOT enabled"
 grep -q "run-kiosk.sh" "$HOME_DIR/.bash_profile" && echo "  ✓ Kiosk auto-start configured" || echo "  ✗ Kiosk auto-start NOT configured"
 [ -f "$HOME_DIR/.asoundrc" ] && echo "  ✓ Audio configured ($AUDIO_DEVICE)" || echo "  ✗ Audio NOT configured"
+[ -f "$INSTALL_DIR/.display-rotate" ] && echo "  ✓ Display rotation ($(cat "$INSTALL_DIR/.display-rotate") degrees)" || echo "  ✗ Display rotation NOT configured"
 if [ -n "$WIFI_SSID" ]; then
     nmcli connection show "$WIFI_SSID" &>/dev/null && echo "  ✓ WiFi configured ($WIFI_SSID)" || echo "  ✗ WiFi NOT configured"
 fi
@@ -554,6 +602,11 @@ echo "  sudo systemctl start chiba-node    # Start node server"
 echo "  sudo systemctl stop chiba-node     # Stop node server"
 echo "  sudo systemctl status chiba-node   # Check status"
 echo "  journalctl -u chiba-node -f        # View logs"
+echo ""
+echo "To change display rotation:"
+echo "  $INSTALL_DIR/scripts/rotate-display.sh 90   # Portrait (90 degrees)"
+echo "  $INSTALL_DIR/scripts/rotate-display.sh 270  # Portrait (270 degrees)"
+echo "  $INSTALL_DIR/scripts/rotate-display.sh 0    # Landscape (default)"
 echo ""
 
 read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r </dev/tty
