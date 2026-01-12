@@ -63,18 +63,34 @@ CHROMIUM_FLAGS=(
     --no-sandbox
 )
 
+# Convert rotation degrees to wlr-randr transform value
+# wlr-randr expects: normal, 90, 180, 270 (not 0)
+rotation_to_transform() {
+    case "$1" in
+        0) echo "normal" ;;
+        90) echo "90" ;;
+        180) echo "180" ;;
+        270) echo "270" ;;
+        *) echo "normal" ;;
+    esac
+}
+
 # Function to apply display rotation after cage starts
 apply_display_rotation() {
     if [ -f "$ROTATE_CONFIG" ]; then
         ROTATION=$(cat "$ROTATE_CONFIG")
-        if [ "$ROTATION" != "0" ] && [ -n "$ROTATION" ]; then
-            echo "Applying display rotation: $ROTATION degrees..."
-            sleep 2  # Wait for cage to initialize
-            OUTPUT=$(wlr-randr 2>/dev/null | grep -E "^[A-Z]+-[A-Z]?-?[0-9]+" | head -1 | awk '{print $1}')
-            if [ -n "$OUTPUT" ]; then
-                wlr-randr --output "$OUTPUT" --transform "$ROTATION" && \
-                    echo "Display rotated to $ROTATION degrees" || \
-                    echo "Failed to rotate display"
+        if [ -n "$ROTATION" ]; then
+            TRANSFORM=$(rotation_to_transform "$ROTATION")
+            # Skip if already at normal (no rotation needed)
+            if [ "$TRANSFORM" != "normal" ]; then
+                echo "Applying display rotation: $ROTATION degrees (transform: $TRANSFORM)..."
+                sleep 2  # Wait for cage to initialize
+                OUTPUT=$(wlr-randr 2>/dev/null | grep -E "^[A-Z]+-[A-Z]?-?[0-9]+" | head -1 | awk '{print $1}')
+                if [ -n "$OUTPUT" ]; then
+                    wlr-randr --output "$OUTPUT" --transform "$TRANSFORM" && \
+                        echo "Display rotated to $ROTATION degrees" || \
+                        echo "Failed to rotate display"
+                fi
             fi
         fi
     fi
@@ -109,10 +125,11 @@ watch_rotation_signal() {
             NEW_ROTATION=$(cat "$ROTATE_SIGNAL")
             rm -f "$ROTATE_SIGNAL"
             if [ -n "$NEW_ROTATION" ]; then
-                echo "Rotation signal detected: $NEW_ROTATION degrees"
+                TRANSFORM=$(rotation_to_transform "$NEW_ROTATION")
+                echo "Rotation signal detected: $NEW_ROTATION degrees (transform: $TRANSFORM)"
                 OUTPUT=$(wlr-randr 2>/dev/null | grep -E "^[A-Z]+-[A-Z]?-?[0-9]+" | head -1 | awk '{print $1}')
                 if [ -n "$OUTPUT" ]; then
-                    wlr-randr --output "$OUTPUT" --transform "$NEW_ROTATION" && \
+                    wlr-randr --output "$OUTPUT" --transform "$TRANSFORM" && \
                         echo "Display rotated to $NEW_ROTATION degrees" || \
                         echo "Failed to rotate display"
                 else

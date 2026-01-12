@@ -36,6 +36,16 @@ case "$ROTATION" in
         ;;
 esac
 
+# Convert rotation degrees to wlr-randr transform value
+# wlr-randr expects: normal, 90, 180, 270 (not 0)
+case "$ROTATION" in
+    0) TRANSFORM="normal" ;;
+    90) TRANSFORM="90" ;;
+    180) TRANSFORM="180" ;;
+    270) TRANSFORM="270" ;;
+    *) TRANSFORM="normal" ;;
+esac
+
 # Detect the output name
 OUTPUT=$(wlr-randr 2>/dev/null | grep -E "^[A-Z]+-[A-Z]?-?[0-9]+" | head -1 | awk '{print $1}')
 
@@ -43,8 +53,8 @@ if [ -z "$OUTPUT" ]; then
     echo "Warning: Could not detect display output (Wayland not running?)"
     echo "Saving setting for next boot..."
 else
-    echo "Rotating $OUTPUT to $ROTATION degrees..."
-    wlr-randr --output "$OUTPUT" --transform "$ROTATION"
+    echo "Rotating $OUTPUT to $ROTATION degrees (transform: $TRANSFORM)..."
+    wlr-randr --output "$OUTPUT" --transform "$TRANSFORM"
 
     if [ $? -eq 0 ]; then
         echo "Display rotated successfully"
