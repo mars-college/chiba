@@ -41,6 +41,7 @@ import {
   type NodeToControllerMessage,
   type ControllerToNodeMessage,
   type PlayerToNodeMessage,
+  type DisplayRotation,
 } from '@chiba/shared';
 import { initDatabase, closeDatabase, setConfig, getAllConfig, listPlaylists } from './db/index.js';
 import { getMediaDir, listCachedContent, getCacheSize, getContentByFilename, clearAllCache } from './services/content-cache.js';
@@ -108,6 +109,69 @@ const state: ServerState = {
 // Node Information
 // ============================================================================
 
+// Display rotation config file path (must match rotate-display.sh)
+const CHIBA_DIR = process.env.CHIBA_DIR || '/home/pi/chiba';
+const ROTATION_CONFIG_FILE = path.join(CHIBA_DIR, '.display-rotate');
+
+/**
+ * Get the current display rotation from config file.
+ */
+function getDisplayRotation(): DisplayRotation {
+  try {
+    if (fs.existsSync(ROTATION_CONFIG_FILE)) {
+      const value = fs.readFileSync(ROTATION_CONFIG_FILE, 'utf-8').trim();
+      const rotation = parseInt(value, 10);
+      if (rotation === 0 || rotation === 90 || rotation === 180 || rotation === 270) {
+        return rotation;
+      }
+    }
+  } catch {
+    // Ignore errors, return default
+  }
+  return 0;
+}
+
+/**
+ * Set display rotation - applies immediately and persists for reboot.
+ * Returns true on success, false on failure.
+ */
+function setDisplayRotation(rotation: DisplayRotation): { success: boolean; error?: string } {
+  try {
+    // Save to config file for persistence across reboots
+    fs.mkdirSync(path.dirname(ROTATION_CONFIG_FILE), { recursive: true });
+    fs.writeFileSync(ROTATION_CONFIG_FILE, String(rotation));
+    logger.info('Saved rotation config', { rotation, file: ROTATION_CONFIG_FILE });
+
+    // Try to apply immediately using wlr-randr (only works if Wayland is running)
+    try {
+      // Detect the output name
+      const wlrOutput = execSync('wlr-randr 2>/dev/null | grep -E "^[A-Z]+-[A-Z]?-?[0-9]+" | head -1 | awk \'{print $1}\'', {
+        encoding: 'utf-8',
+        timeout: 5000,
+      }).trim();
+
+      if (wlrOutput) {
+        execSync(`wlr-randr --output "${wlrOutput}" --transform ${rotation}`, {
+          encoding: 'utf-8',
+          timeout: 5000,
+        });
+        logger.info('Applied rotation immediately', { output: wlrOutput, rotation });
+      } else {
+        logger.info('No Wayland display detected, rotation will apply on next boot');
+      }
+    } catch {
+      // wlr-randr not available or failed - that's OK, rotation will apply on reboot
+      logger.info('Could not apply rotation immediately (Wayland not running?), will apply on next boot');
+    }
+
+    return { success: true };
+  } catch (err) {
+    const error = (err as Error).message;
+    logger.error('Failed to set rotation', err as Error);
+    return { success: false, error };
+  }
+}
+
 /**
  * Get the node's IP address.
  */
@@ -138,6 +202,7 @@ function getNodeInfo(): NodeInfo {
     port: parseInt(process.env.PORT ?? String(DEFAULT_PORT), 10),
     version: VERSION,
     uptime: Math.floor((Date.now() - state.startTime) / 1000),
+    displayRotation: getDisplayRotation(),
   };
 }
 
@@ -960,6 +1025,50 @@ async function handleRequest(
           data: {
             oldName,
             newName: trimmedName,
+          },
+        });
+        return;
+      }
+
+      case '/rotate': {
+        // Rotate the display (0, 90, 180, 270 degrees)
+        const rotation = body?.rotation as number | undefined;
+        if (rotation === undefined || typeof rotation !== 'number') {
+          sendError(res, 'Missing rotation parameter (0, 90, 180, or 270)', 400);
+          return;
+        }
+
+        // Validate rotation value
+        if (rotation !== 0 && rotation !== 90 && rotation !== 180 && rotation !== 270) {
+          sendError(res, 'Invalid rotation value. Must be 0, 90, 180, or 270', 400);
+          return;
+        }
+
+        const oldRotation = getDisplayRotation();
+        logger.info('Rotate command received', { oldRotation, newRotation: rotation });
+
+        const result = setDisplayRotation(rotation as DisplayRotation);
+        if (!result.success) {
+          sendError(res, result.error || 'Failed to set rotation', 500);
+          return;
+        }
+
+        // Send a heartbeat with the new rotation so dashboard updates
+        if (state.controllerWs?.readyState === WebSocket.OPEN) {
+          const heartbeatMessage: NodeToControllerMessage = {
+            type: 'heartbeat',
+            status: getNodeStatus(),
+          };
+          state.controllerWs.send(JSON.stringify(heartbeatMessage));
+        }
+
+        logger.info('Display rotated', { oldRotation, newRotation: rotation });
+        sendJson(res, {
+          success: true,
+          data: {
+            oldRotation,
+            newRotation: rotation,
+            appliedImmediately: true, // Best effort - may have been saved for reboot
           },
         });
         return;

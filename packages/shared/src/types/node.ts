@@ -19,6 +19,11 @@ export interface NodeConfig {
 }
 
 /**
+ * Display rotation values in degrees.
+ */
+export type DisplayRotation = 0 | 90 | 180 | 270;
+
+/**
  * Basic information about a node, sent during registration.
  */
 export interface NodeInfo {
@@ -36,6 +41,8 @@ export interface NodeInfo {
   version: string;
   /** Uptime in seconds */
   uptime: number;
+  /** Display rotation in degrees (0, 90, 180, 270) */
+  displayRotation?: DisplayRotation;
 }
 
 /**

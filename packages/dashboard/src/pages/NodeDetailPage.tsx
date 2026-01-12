@@ -1,11 +1,12 @@
 import { useParams, Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import type { NodeStatus } from '@chiba/shared';
+import type { NodeStatus, DisplayRotation } from '@chiba/shared';
 import { apiGet, apiPost } from '../hooks/useApi';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { VolumeControl } from '../components/VolumeControl';
 import { CachedContentList } from '../components/CachedContentList';
 import { HardwareMetrics } from '../components/HardwareMetrics';
+import { RotationControl } from '../components/RotationControl';
 
 export function NodeDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -104,6 +105,21 @@ export function NodeDetailPage() {
     }
   };
 
+  const [rotationLoading, setRotationLoading] = useState(false);
+
+  const handleRotationChange = async (rotation: DisplayRotation) => {
+    if (!id) return;
+    setRotationLoading(true);
+    try {
+      await apiPost(`/nodes/${id}/rotate`, { rotation });
+      setTimeout(fetchNode, 500);
+    } catch (err) {
+      console.error('Rotation change failed:', err);
+    } finally {
+      setRotationLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="loading-container">
@@ -177,6 +193,21 @@ export function NodeDetailPage() {
               volume={node.playbackState?.volume ?? 100}
               disabled={!node.connected}
               onChange={handleVolumeChange}
+            />
+          </div>
+        </div>
+
+        {/* Display Rotation */}
+        <div className="card">
+          <div className="card-header">
+            <h3 className="card-title">Display Rotation</h3>
+            {rotationLoading && <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Applying...</span>}
+          </div>
+          <div className="card-body">
+            <RotationControl
+              rotation={node.node.displayRotation ?? 0}
+              disabled={!node.connected || rotationLoading}
+              onChange={handleRotationChange}
             />
           </div>
         </div>

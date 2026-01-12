@@ -154,6 +154,7 @@ States include: mode, currentContent, playlist, index, loop, paused, volume, ima
 | `scripts/setup-node.sh` | Full Pi setup (packages, audio, kiosk, systemd) |
 | `scripts/find-pis.sh` | Discover Pis by mDNS hostname |
 | `scripts/rename.sh` | Rename a node via API (usage: `./rename.sh <host> <name>`) |
+| `scripts/rotate.sh` | Rotate display via API (usage: `./rotate.sh <host> <0\|90\|180\|270>`) |
 
 ## Development
 
@@ -217,6 +218,7 @@ pnpm dev:dashboard   # Start dashboard dev server
 - `POST /clear-cache` - Delete all cached content
 - `POST /exit-kiosk` - Exit kiosk mode (writes signal file for run-kiosk.sh)
 - `POST /rename` - Rename node's friendly name (auto-updates dashboard via WebSocket)
+- `POST /rotate` - Rotate display (0, 90, 180, 270 degrees; persists after reboot)
 
 ## Node API Details
 

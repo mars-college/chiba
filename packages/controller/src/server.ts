@@ -267,7 +267,7 @@ async function handleRequest(
             'GET /api/nodes',
             'GET /api/nodes/:id',
             'POST /api/nodes/register',
-            'POST /api/nodes/:id/:action (play, stop, pause, resume, next, previous, volume, loop, cache, clear-cache)',
+            'POST /api/nodes/:id/:action (play, stop, pause, resume, next, previous, volume, loop, cache, clear-cache, rename, rotate)',
             // Content
             'GET /api/content',
             'POST /api/content',

@@ -12,6 +12,7 @@ export type {
   ContentSummary,
   RegisterNodeRequest,
   RegisterNodeResponse,
+  DisplayRotation,
 } from './node.js';
 
 // Content types
