@@ -133,14 +133,14 @@ upgrade_local() {
         success "Clean complete"
     fi
 
-    # Install dependencies
+    # Install dependencies (force dev deps even if NODE_ENV=production)
     log "Installing dependencies..."
-    pnpm install
+    NODE_ENV=development pnpm install
     success "Dependencies installed"
 
     # Build packages
     log "Building packages..."
-    pnpm build
+    NODE_ENV=development pnpm build
     success "Build complete"
 
     # Handle database migrations (future-proofing)
@@ -204,10 +204,10 @@ upgrade_remote_node() {
     git reset --hard origin/main
 
     echo "[Upgrade] Installing dependencies..."
-    pnpm install
+    NODE_ENV=development pnpm install
 
     echo "[Upgrade] Building..."
-    pnpm build
+    NODE_ENV=development pnpm build
 
     echo "[Upgrade] Restarting service..."
     sudo systemctl restart chiba-node || true

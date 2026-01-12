@@ -90,14 +90,14 @@ if [ "$MODE" = "soft" ]; then
     git reset --hard "origin/$CURRENT_BRANCH"
     success "Code updated to $(git rev-parse --short HEAD)"
 
-    # Install dependencies
+    # Install dependencies (force dev deps even if NODE_ENV=production)
     log "Installing dependencies..."
-    pnpm install
+    NODE_ENV=development pnpm install
     success "Dependencies installed"
 
     # Build packages
     log "Building packages..."
-    pnpm build
+    NODE_ENV=development pnpm build
     success "Build complete"
 
     # Restart service
@@ -214,14 +214,14 @@ else
         sudo pip3 install --upgrade yt-dlp || true
     success "yt-dlp updated"
 
-    # Install dependencies
+    # Install dependencies (force dev deps even if NODE_ENV=production)
     log "Installing dependencies..."
-    pnpm install
+    NODE_ENV=development pnpm install
     success "Dependencies installed"
 
     # Build packages
     log "Building packages..."
-    pnpm build
+    NODE_ENV=development pnpm build
     success "Build complete"
 
     # Recreate run-kiosk.sh (in case it changed)
