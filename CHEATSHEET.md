@@ -118,12 +118,53 @@ The Pi will reboot and auto-start as a kiosk.
 ./scripts/find-pis.sh chiba 10     # finds chiba01.local - chiba10.local
 ```
 
-### Update all Pis
+### Rename a node
 
 ```bash
-for PI in 192.168.1.101 192.168.1.102 192.168.1.103; do
-  ssh pi@$PI "cd ~/chiba && git pull && pnpm build && sudo systemctl restart chiba-node"
-done
+./scripts/rename.sh mars01.local "Living Room"
+./scripts/rename.sh 192.168.1.50 "Kitchen Display"
+./scripts/rename.sh mars03 "Bedroom"   # .local added automatically
+```
+
+### Rotate display
+
+```bash
+# Run on the Pi, or via SSH
+./scripts/rotate-display.sh 0      # normal (landscape)
+./scripts/rotate-display.sh 90     # 90° clockwise (portrait)
+./scripts/rotate-display.sh 180    # upside down
+./scripts/rotate-display.sh 270    # 270° clockwise (portrait)
+
+# Also accepts names
+./scripts/rotate-display.sh normal
+./scripts/rotate-display.sh right
+./scripts/rotate-display.sh inverted
+./scripts/rotate-display.sh left
+
+# Via SSH
+ssh pi@mars01.local "~/chiba/scripts/rotate-display.sh 90"
+```
+
+### Upgrade nodes and controller
+
+```bash
+# Upgrade controller (local)
+./scripts/upgrade-controller.sh
+
+# Upgrade a specific node (via SSH)
+./scripts/upgrade-controller.sh --node pi@mars01.local
+
+# Upgrade all connected nodes
+./scripts/upgrade-controller.sh --all-nodes
+
+# Options
+./scripts/upgrade-controller.sh --backup       # backup data first
+./scripts/upgrade-controller.sh --clean        # clean node_modules
+./scripts/upgrade-controller.sh --no-restart   # don't restart services
+
+# Upgrade node directly (run on Pi)
+./scripts/upgrade-node.sh          # soft upgrade: git pull + rebuild
+./scripts/upgrade-node.sh hard     # full reinstall (preserves config)
 ```
 
 ### Check node status
@@ -195,3 +236,7 @@ LOG_LEVEL=info
 | `scripts/init-chiba.sh` | Generate secrets, create .env, show deploy command |
 | `scripts/setup-node.sh` | Full Pi setup (run on Pi) |
 | `scripts/find-pis.sh` | Discover Pis by mDNS |
+| `scripts/rename.sh` | Rename a node's friendly name |
+| `scripts/rotate-display.sh` | Rotate display (run on Pi) |
+| `scripts/upgrade-controller.sh` | Upgrade controller or nodes |
+| `scripts/upgrade-node.sh` | Upgrade node directly (run on Pi) |

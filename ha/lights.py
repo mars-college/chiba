@@ -37,25 +37,28 @@ def govee_set_brightness(value):
     govee_send("brightness", {"value": value})
 
 # Turn on first
-print("Turning on Govee light...")
-govee_turn_on()
-time.sleep(0.5)
+# print("Turning on Govee light...")
+# govee_turn_on()
+# time.sleep(0.5)
 
-for step in range(STEPS):
-    hue = step / STEPS
-    r, g, b = colorsys.hsv_to_rgb(hue, SATURATION / 100, 1.0)
-    r, g, b = int(r * 255), int(g * 255), int(b * 255)
+# for step in range(STEPS):
+#     hue = step / STEPS
+#     r, g, b = colorsys.hsv_to_rgb(hue, SATURATION / 100, 1.0)
+#     r, g, b = int(r * 255), int(g * 255), int(b * 255)
 
-    # Oscillate brightness using sine wave
-    brightness_wave = (math.sin(2 * math.pi * BRIGHTNESS_CYCLES * step / STEPS) + 1) / 2
-    brightness = int(BRIGHTNESS_MIN + brightness_wave * (BRIGHTNESS_MAX - BRIGHTNESS_MIN))
+#     # Oscillate brightness using sine wave
+#     brightness_wave = (math.sin(2 * math.pi * BRIGHTNESS_CYCLES * step / STEPS) + 1) / 2
+#     brightness = int(BRIGHTNESS_MIN + brightness_wave * (BRIGHTNESS_MAX - BRIGHTNESS_MIN))
 
-    print(f"Step {step + 1}/{STEPS} - Hue: {int(hue * 360)}° - Brightness: {brightness}% - RGB: ({r}, {g}, {b})")
+#     print(f"Step {step + 1}/{STEPS} - Hue: {int(hue * 360)}° - Brightness: {brightness}% - RGB: ({r}, {g}, {b})")
 
     
-    # govee_set_color(r, g, b)
-    govee_set_brightness(brightness)
+#     # govee_set_color(r, g, b)
+#     govee_set_brightness(brightness)
 
-    time.sleep(DURATION_SECONDS / STEPS)
+#     time.sleep(DURATION_SECONDS / STEPS)
 
-print("Done.")
+# print("Done.")
+
+
+govee_set_color(255, 255, 255)
