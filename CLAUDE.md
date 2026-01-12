@@ -111,7 +111,7 @@ off → playlist → video/image → (ended) → next item → ...
 off → url → (indefinite)
 ```
 
-States include: mode, currentContent, playlist, index, loop, paused, volume, imageDuration
+States include: mode, currentContent, playlist, index, loop, shuffle, paused, volume, imageDuration
 
 ## Database Schemas
 
@@ -127,6 +127,7 @@ States include: mode, currentContent, playlist, index, loop, paused, volume, ima
 - `config`: Key-value configuration
 - `playback_history`: Analytics
 - `download_queue`: Background download queue
+- `playlists`: Locally saved playlists (auto-saved when played)
 
 ## Environment Variables
 
@@ -216,7 +217,9 @@ pnpm dev:dashboard   # Start dashboard dev server
 - `POST /previous` - Previous playlist item
 - `POST /volume` - Set volume (0-100)
 - `POST /loop` - Toggle loop mode
+- `POST /shuffle` - Toggle shuffle mode for playlists
 - `POST /image-duration` - Set image display duration (ms)
+- `POST /append` - Append items to current playlist (or create new one)
 - `POST /cache` - Cache content (doesn't play)
 - `POST /clear-cache` - Delete all cached content
 - `POST /exit-kiosk` - Exit kiosk mode (writes signal file for run-kiosk.sh)
@@ -267,6 +270,35 @@ curl -X POST http://pi:8080/cache -d '{"collectionId":"6526f380...","db":"PROD"}
 # Response: {"success":true,"data":{"taskId":"eden_abc...","status":"queued","message":"Eden collection sync queued"}}
 ```
 
+### POST /append
+Append items to the currently playing playlist, or create a new playlist if none is active.
+
+```bash
+# Append items to current playlist
+curl -X POST http://pi:8080/append -d '{
+  "items": [
+    {"id": "item-1", "content": {"type": "file", "filename": "abc123.mp4"}, "order": 0}
+  ]
+}'
+# Response: {"success":true,"data":{"playlist":{...},"state":{...}}}
+
+# Create new playlist if none playing
+curl -X POST http://pi:8080/append -d '{
+  "items": [...],
+  "name": "My Playlist",
+  "loop": true,
+  "showIntros": false
+}'
+```
+
+### POST /shuffle
+Toggle shuffle mode for playlist playback.
+
+```bash
+curl -X POST http://pi:8080/shuffle -d '{"enabled":true}'
+# Response: {"success":true,"data":{"shuffle":true}}
+```
+
 ## Async Task System
 
 Long-running operations (downloads, YouTube, Eden sync) use an async task queue:
@@ -301,11 +333,11 @@ Long-running operations (downloads, YouTube, Eden sync) use an async task queue:
 ## WebSocket Protocols
 
 ### Controller ↔ Node (`/ws/nodes`)
-- Node → Controller: `register`, `heartbeat`, `state`, `download_progress`
+- Node → Controller: `register`, `heartbeat`, `state`, `download_progress`, `content_cached`
 - Controller → Node: `command`, `preload`, `ping`
 
 ### Node ↔ Player (`/ws`)
-- Node → Player: `state`, `preload`
+- Node → Player: `state`, `preload`, `download_progress`
 - Player → Node: `ready`, `ended`, `error`
 
 ### Controller ↔ Dashboard (`/ws/dashboard`)

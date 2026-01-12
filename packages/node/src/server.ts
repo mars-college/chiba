@@ -1359,8 +1359,8 @@ function loadConfig(): void {
   state.config = {
     id: process.env.NODE_ID || dbConfig['node.id'] || crypto.randomUUID(),
     friendlyName:
-      process.env.NODE_NAME ||
       dbConfig['node.friendly_name'] ||
+      process.env.NODE_NAME ||
       'unnamed-node',
     controllerUrl:
       process.env.CONTROLLER_URL || dbConfig['controller.url'] || '',

@@ -62,6 +62,7 @@ Full node status including playback state, cache info, and hardware metrics.
       "mode": "video",
       "playlistIndex": 0,
       "loop": true,
+      "shuffle": false,
       "paused": false,
       "volume": 100,
       "imageDuration": 10000,
@@ -112,8 +113,19 @@ Debug screen data for the player overlay.
   "ipAddress": "192.168.1.101",
   "networkStatus": "online",
   "controllerStatus": "online",
-  "cachedContent": [...],
-  "totalCacheSize": 1073741824
+  "content": [
+    { "filename": "abc123.mp4", "sizeBytes": 52428800, "type": "video", "name": "My Video" }
+  ],
+  "totalCacheSize": 1073741824,
+  "playlists": [
+    { "id": "uuid", "name": "My Playlist", "itemCount": 5, "loop": true, "createdAt": 1704067200000, "updatedAt": 1704067200000 }
+  ],
+  "currentPlaylist": {
+    "id": "uuid",
+    "name": "My Playlist",
+    "currentIndex": 2,
+    "totalItems": 5
+  }
 }
 ```
 
@@ -273,6 +285,25 @@ curl -X POST http://node:8080/loop \
 { "success": true, "data": { "loop": true } }
 ```
 
+#### POST /shuffle
+Set shuffle mode for playlist playback.
+
+```bash
+curl -X POST http://node:8080/shuffle \
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{"enabled": true}'
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `enabled` | boolean | Enable/disable shuffle (omit to toggle) |
+
+**Response:**
+```json
+{ "success": true, "data": { "shuffle": true } }
+```
+
 #### POST /image-duration
 Set how long images display in playlists before auto-advancing.
 
@@ -332,6 +363,49 @@ curl -X POST http://node:8080/cache \
 }
 ```
 
+#### POST /append
+Append items to the current playlist, or create a new playlist if none is active.
+
+```bash
+# Append to current playlist
+curl -X POST http://node:8080/append \
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{
+    "items": [
+      {"id": "item-1", "content": {"type": "file", "filename": "abc123.mp4"}, "order": 0}
+    ]
+  }'
+
+# Create new playlist (when none is playing)
+curl -X POST http://node:8080/append \
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{
+    "items": [...],
+    "name": "My Playlist",
+    "loop": true,
+    "showIntros": false
+  }'
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `items` | array | Array of PlaylistItem objects (required) |
+| `name` | string | Playlist name (only used when creating new) |
+| `loop` | boolean | Loop setting (only used when creating new) |
+| `showIntros` | boolean | Show intro screens (only used when creating new) |
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "playlist": { ... },
+    "state": { ... }
+  }
+}
+```
+
 #### POST /clear-cache
 Delete all cached content.
 
@@ -343,6 +417,52 @@ curl -X POST http://node:8080/clear-cache \
 **Response:**
 ```json
 { "success": true, "data": { "deletedCount": 15, "freedBytes": 1073741824 } }
+```
+
+#### POST /exit-kiosk
+Exit kiosk mode on the Pi.
+
+```bash
+curl -X POST http://node:8080/exit-kiosk \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+**Response:**
+```json
+{ "success": true, "message": "Kiosk killed" }
+```
+
+#### POST /rename
+Rename the node's friendly name.
+
+```bash
+curl -X POST http://node:8080/rename \
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{"name": "Living Room"}'
+```
+
+**Response:**
+```json
+{ "success": true, "data": { "oldName": "unnamed-node", "newName": "Living Room" } }
+```
+
+#### POST /rotate
+Rotate the display. Applies immediately and persists across reboots.
+
+```bash
+curl -X POST http://node:8080/rotate \
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{"rotation": 90}'
+```
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `rotation` | number | Rotation in degrees: 0, 90, 180, or 270 |
+
+**Response:**
+```json
+{ "success": true, "data": { "oldRotation": 0, "newRotation": 90, "appliedImmediately": true } }
 ```
 
 ---
@@ -683,6 +803,8 @@ interface PlaybackState {
   playlist?: Playlist;
   playlistIndex: number;
   loop: boolean;
+  shuffle: boolean;
+  shuffledOrder?: number[]; // Shuffle order indices
   paused: boolean;
   volume: number;           // 0-100
   imageDuration: number;    // milliseconds (default: 10000)

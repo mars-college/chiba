@@ -37,6 +37,7 @@ export type YouTubeProgressCallback = (progress: YouTubeProgress) => void;
 
 /**
  * Get video metadata from yt-dlp.
+ * Times out after 30 seconds to prevent indefinite hanging.
  */
 export async function getVideoMetadata(url: string): Promise<{
   title?: string;
@@ -51,9 +52,23 @@ export async function getVideoMetadata(url: string): Promise<{
       url
     ];
 
+    logger.debug('Fetching YouTube metadata', { url, args });
     const ytdlp = spawn('yt-dlp', args);
+    logger.debug('yt-dlp metadata process spawned', { pid: ytdlp.pid });
+
     let stdout = '';
     let stderr = '';
+    let resolved = false;
+
+    // Timeout after 30 seconds
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        logger.warn('yt-dlp metadata timed out after 30s', { url, pid: ytdlp.pid });
+        ytdlp.kill();
+        resolve({});
+      }
+    }, 30000);
 
     ytdlp.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -61,9 +76,15 @@ export async function getVideoMetadata(url: string): Promise<{
 
     ytdlp.stderr.on('data', (data) => {
       stderr += data.toString();
+      logger.debug('yt-dlp metadata stderr', { data: data.toString().slice(0, 200) });
     });
 
     ytdlp.on('close', (code) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+
+      logger.debug('yt-dlp metadata process closed', { code, stdoutLen: stdout.length, stderrLen: stderr.length });
       if (code !== 0) {
         logger.debug('Failed to get YouTube metadata', { stderr });
         resolve({});
@@ -82,7 +103,11 @@ export async function getVideoMetadata(url: string): Promise<{
       }
     });
 
-    ytdlp.on('error', () => {
+    ytdlp.on('error', (err) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      logger.error('yt-dlp metadata process error', err);
       resolve({});
     });
   });
@@ -187,7 +212,9 @@ export async function downloadYouTube(
     // Fetch metadata if not provided
     let finalMetadata = metadata;
     if (!metadata?.title || !metadata?.author) {
+      logger.info('Fetching video metadata', { url, hash: urlHash });
       const videoMeta = await getVideoMetadata(url);
+      logger.info('Metadata fetched', { url, hash: urlHash, title: videoMeta.title, author: videoMeta.author });
       finalMetadata = {
         ...metadata,
         title: metadata?.title ?? videoMeta.title,
@@ -210,15 +237,28 @@ export async function downloadYouTube(
       '--no-playlist',
       '--no-warnings',
       '--progress',
+      '--newline',  // Output progress on new lines for easier parsing
       url
     ];
 
+    logger.info('Spawning yt-dlp', { args: args.join(' '), outputTemplate });
     const ytdlp = spawn('yt-dlp', args);
+    logger.info('yt-dlp process spawned', { pid: ytdlp.pid, hash: urlHash });
+
     let stderr = '';
     let lastProgress = 0;
+    let lastLogTime = Date.now();
 
     ytdlp.stdout.on('data', (data) => {
       const output = data.toString();
+      const now = Date.now();
+
+      // Log raw output periodically (every 5 seconds) or if it's not progress
+      if (now - lastLogTime > 5000 || !output.includes('%')) {
+        logger.debug('yt-dlp stdout', { hash: urlHash, output: output.slice(0, 300) });
+        lastLogTime = now;
+      }
+
       // Parse progress updates
       if (output.includes('%')) {
         const match = output.match(/(\d+\.?\d*)%/);
@@ -239,10 +279,13 @@ export async function downloadYouTube(
     });
 
     ytdlp.stderr.on('data', (data) => {
-      stderr += data.toString();
+      const chunk = data.toString();
+      stderr += chunk;
+      logger.debug('yt-dlp stderr', { hash: urlHash, data: chunk.slice(0, 300) });
     });
 
     ytdlp.on('close', (code) => {
+      logger.info('yt-dlp process closed', { pid: ytdlp.pid, code, hash: urlHash, stderrLen: stderr.length });
       if (code !== 0) {
         logger.error('yt-dlp failed', new Error(stderr || 'Unknown error'), { url });
         onProgress?.({

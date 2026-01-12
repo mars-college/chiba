@@ -78,8 +78,23 @@ curl -X POST $NODE/volume -d '{"level":75}'
 # Loop toggle
 curl -X POST $NODE/loop -d '{"enabled":true}'
 
+# Shuffle toggle
+curl -X POST $NODE/shuffle -d '{"enabled":true}'
+
 # Image duration (ms) - how long images display in playlists
 curl -X POST $NODE/image-duration -d '{"duration":5000}'
+
+# Append items to current playlist (or create new one)
+curl -X POST $NODE/append -d '{"items":[{"id":"1","content":{"type":"file","filename":"abc.mp4"},"order":0}]}'
+
+# Rename node
+curl -X POST $NODE/rename -d '{"name":"Living Room"}'
+
+# Rotate display (0, 90, 180, 270)
+curl -X POST $NODE/rotate -d '{"rotation":90}'
+
+# Exit kiosk mode
+curl -X POST $NODE/exit-kiosk
 
 # Clear all cached content
 curl -X POST $NODE/clear-cache
@@ -129,7 +144,14 @@ The Pi will reboot and auto-start as a kiosk.
 ### Rotate display
 
 ```bash
-# Run on the Pi, or via SSH
+# Via API (remote, any machine)
+./scripts/rotate.sh mars01.local 90    # rotate to 90°
+./scripts/rotate.sh 192.168.1.50 0     # rotate to normal
+
+# Or directly via curl
+curl -X POST http://mars01.local:8080/rotate -d '{"rotation":90}'
+
+# Run on the Pi locally
 ./scripts/rotate-display.sh 0      # normal (landscape)
 ./scripts/rotate-display.sh 90     # 90° clockwise (portrait)
 ./scripts/rotate-display.sh 180    # upside down
@@ -236,7 +258,8 @@ LOG_LEVEL=info
 | `scripts/init-chiba.sh` | Generate secrets, create .env, show deploy command |
 | `scripts/setup-node.sh` | Full Pi setup (run on Pi) |
 | `scripts/find-pis.sh` | Discover Pis by mDNS |
-| `scripts/rename.sh` | Rename a node's friendly name |
-| `scripts/rotate-display.sh` | Rotate display (run on Pi) |
+| `scripts/rename.sh` | Rename a node's friendly name (via API) |
+| `scripts/rotate.sh` | Rotate display via API (remote) |
+| `scripts/rotate-display.sh` | Rotate display locally (run on Pi) |
 | `scripts/upgrade-controller.sh` | Upgrade controller or nodes |
 | `scripts/upgrade-node.sh` | Upgrade node directly (run on Pi) |
