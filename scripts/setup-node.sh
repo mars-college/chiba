@@ -476,7 +476,7 @@ if [ -n "$WIFI_SSID" ] && [ -n "$WIFI_PASSWORD" ]; then
     echo "=== Configuring WiFi ==="
     # Use nmcli if NetworkManager is available (newer Pi OS)
     if command -v nmcli &>/dev/null; then
-        nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASSWORD" 2>/dev/null || \
+        nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASSWORD" wifi-sec.key-mgmt wpa-psk 2>/dev/null || \
         nmcli connection modify "$WIFI_SSID" connection.autoconnect yes 2>/dev/null || true
         echo "WiFi configured via NetworkManager: $WIFI_SSID"
     # Fall back to wpa_supplicant (older Pi OS)
