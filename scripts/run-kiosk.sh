@@ -1,34 +1,105 @@
 #!/bin/bash
 # Chiba Kiosk Launcher
-# Run this after the node server is up
+# Runs Chromium in kiosk mode connecting to the local node server
+# Exit kiosk by pressing Ctrl+Alt+Q in the player UI or clicking the exit button
 
-PORT=${PORT:-8080}
-URL="http://localhost:${PORT}/player"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHIBA_DIR="$(dirname "$SCRIPT_DIR")"
+EXIT_SIGNAL="/tmp/chiba-exit-kiosk"
+ROTATE_CONFIG="$CHIBA_DIR/.display-rotate"
 
-# Wait for server
-echo "Waiting for node server on port $PORT..."
-while ! curl -s "http://localhost:${PORT}/status" > /dev/null; do
-  sleep 1
+# Clean up any stale exit signal
+rm -f "$EXIT_SIGNAL"
+
+# Required environment for Wayland
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export WLR_NO_HARDWARE_CURSORS=1
+
+# Wait for node server to be ready
+echo "Waiting for node server on port 8080..."
+for i in {1..30}; do
+    if curl -s http://localhost:8080/health > /dev/null 2>&1; then
+        echo "Server ready, launching kiosk..."
+        break
+    fi
+    sleep 1
 done
-echo "Server ready, launching kiosk..."
-
-# Disable screen blanking
-xset s off
-xset -dpms
-xset s noblank
 
 # Find chromium binary (name varies by OS version)
-CHROMIUM_BIN="chromium"
-command -v chromium-browser &>/dev/null && CHROMIUM_BIN="chromium-browser"
+CHROMIUM_BIN="/usr/bin/chromium"
+[ -x "/usr/bin/chromium-browser" ] && CHROMIUM_BIN="/usr/bin/chromium-browser"
 
-# Launch Chromium in kiosk mode
-$CHROMIUM_BIN \
-  --kiosk \
-  --noerrdialogs \
-  --disable-infobars \
-  --disable-session-crashed-bubble \
-  --disable-restore-session-state \
-  --disable-features=TranslateUI \
-  --check-for-update-interval=31536000 \
-  --autoplay-policy=no-user-gesture-required \
-  --app="$URL"
+# Chromium kiosk flags
+CHROMIUM_FLAGS=(
+    --kiosk
+    --start-fullscreen
+    --noerrdialogs
+    --disable-infobars
+    --disable-session-crashed-bubble
+    --disable-restore-session-state
+    --no-first-run
+    --autoplay-policy=no-user-gesture-required
+    --check-for-update-interval=31536000
+    --disable-features=TranslateUI
+    --disable-pinch
+    --overscroll-history-navigation=0
+    --disable-background-networking
+    --disable-sync
+    --password-store=basic
+    --disable-breakpad
+    --disable-dev-shm-usage
+    --no-sandbox
+)
+
+# Function to apply display rotation after cage starts
+apply_display_rotation() {
+    if [ -f "$ROTATE_CONFIG" ]; then
+        ROTATION=$(cat "$ROTATE_CONFIG")
+        if [ "$ROTATION" != "0" ] && [ -n "$ROTATION" ]; then
+            echo "Applying display rotation: $ROTATION degrees..."
+            sleep 2  # Wait for cage to initialize
+            OUTPUT=$(wlr-randr 2>/dev/null | grep -E "^[A-Z]+-[A-Z]?-?[0-9]+" | head -1 | awk '{print $1}')
+            if [ -n "$OUTPUT" ]; then
+                wlr-randr --output "$OUTPUT" --transform "$ROTATION" && \
+                    echo "Display rotated to $ROTATION degrees" || \
+                    echo "Failed to rotate display"
+            fi
+        fi
+    fi
+}
+
+# Function to watch for exit signal
+watch_exit_signal() {
+    while true; do
+        if [ -f "$EXIT_SIGNAL" ]; then
+            echo "Exit signal detected, stopping kiosk..."
+            rm -f "$EXIT_SIGNAL"
+            # Kill cage (which will kill chromium too)
+            pkill -f "cage.*chromium" 2>/dev/null
+            pkill cage 2>/dev/null
+            exit 0
+        fi
+        sleep 1
+    done
+}
+
+# Start exit watcher in background
+watch_exit_signal &
+WATCHER_PID=$!
+
+# Apply display rotation in background (after cage starts)
+apply_display_rotation &
+
+# Cleanup on script exit
+cleanup() {
+    kill $WATCHER_PID 2>/dev/null
+    rm -f "$EXIT_SIGNAL"
+}
+trap cleanup EXIT
+
+# Run Chromium in cage (Wayland compositor)
+cage -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
+
+# If cage exits normally, clean up
+cleanup
+echo "Kiosk exited. You are now at a terminal."
