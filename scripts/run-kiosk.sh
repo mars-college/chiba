@@ -1,7 +1,15 @@
 #!/bin/bash
 # Chiba Kiosk Launcher
 # Runs Chromium in kiosk mode connecting to the local node server
-# Exit kiosk by pressing Ctrl+Alt+Q in the player UI or clicking the exit button
+#
+# EXIT KIOSK OPTIONS:
+#   1. Press Ctrl+Alt+F2 to switch to TTY2 terminal (login as pi)
+#   2. Click "Exit Kiosk" button in player UI
+#   3. SSH in and run: sudo systemctl stop chiba-kiosk
+#   4. SSH in and run: touch /tmp/chiba-exit-kiosk
+#
+# RETURN TO KIOSK:
+#   Press Ctrl+Alt+F1 to switch back to kiosk TTY
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHIBA_DIR="$(dirname "$SCRIPT_DIR")"
@@ -14,6 +22,8 @@ rm -f "$EXIT_SIGNAL"
 # Required environment for Wayland
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export WLR_NO_HARDWARE_CURSORS=1
+# Allow VT switching with Ctrl+Alt+Fn keys
+export WLR_LIBINPUT_NO_DEVICES=1
 
 # Wait for node server to be ready
 echo "Waiting for node server on port 8080..."
@@ -74,9 +84,16 @@ watch_exit_signal() {
         if [ -f "$EXIT_SIGNAL" ]; then
             echo "Exit signal detected, stopping kiosk..."
             rm -f "$EXIT_SIGNAL"
-            # Kill cage (which will kill chromium too)
-            pkill -f "cage.*chromium" 2>/dev/null
-            pkill cage 2>/dev/null
+            # Kill cage using multiple methods for reliability
+            # Method 1: Kill by process name
+            pkill -9 cage 2>/dev/null
+            # Method 2: Kill by pattern match
+            pkill -9 -f "cage.*chromium" 2>/dev/null
+            # Method 3: Kill all chromium under cage
+            pkill -9 chromium 2>/dev/null
+            pkill -9 chromium-browser 2>/dev/null
+            # Method 4: Use killall as fallback
+            killall -9 cage 2>/dev/null
             exit 0
         fi
         sleep 1
@@ -98,7 +115,8 @@ cleanup() {
 trap cleanup EXIT
 
 # Run Chromium in cage (Wayland compositor)
-cage -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
+# -s flag enables VT switching (Ctrl+Alt+F1-F12)
+cage -s -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
 
 # If cage exits normally, clean up
 cleanup

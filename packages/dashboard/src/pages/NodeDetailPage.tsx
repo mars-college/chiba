@@ -2,10 +2,9 @@ import { useParams, Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import type { NodeStatus, DisplayRotation } from '@chiba/shared';
 import { apiGet, apiPost } from '../hooks/useApi';
-import { PlaybackControls } from '../components/PlaybackControls';
-import { VolumeControl } from '../components/VolumeControl';
+import { PlaybackPanel } from '../components/PlaybackPanel';
 import { CachedContentList } from '../components/CachedContentList';
-import { HardwareMetrics } from '../components/HardwareMetrics';
+import { HardwareMetricsBar } from '../components/HardwareMetricsBar';
 import { RotationControl } from '../components/RotationControl';
 
 export function NodeDetailPage() {
@@ -38,13 +37,12 @@ export function NodeDetailPage() {
   const [playError, setPlayError] = useState<string | null>(null);
   const [playLoading, setPlayLoading] = useState(false);
 
-  const handlePlay = async (source: { type: string; url?: string; filename?: string; loop?: boolean }) => {
+  const handlePlay = async (source: { type: string; url?: string; filename?: string }) => {
     if (!id) return;
     setPlayError(null);
     setPlayLoading(true);
     try {
       await apiPost(`/nodes/${id}/play`, source);
-      // Fetch updated state after a short delay
       setTimeout(fetchNode, 500);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Play failed';
@@ -85,11 +83,30 @@ export function NodeDetailPage() {
     }
   };
 
+  const handleNext = async () => {
+    if (!id) return;
+    try {
+      await apiPost(`/nodes/${id}/next`);
+      setTimeout(fetchNode, 200);
+    } catch (err) {
+      console.error('Next failed:', err);
+    }
+  };
+
+  const handlePrevious = async () => {
+    if (!id) return;
+    try {
+      await apiPost(`/nodes/${id}/previous`);
+      setTimeout(fetchNode, 200);
+    } catch (err) {
+      console.error('Previous failed:', err);
+    }
+  };
+
   const handleVolumeChange = async (volume: number) => {
     if (!id) return;
     try {
       await apiPost(`/nodes/${id}/volume`, { volume });
-      // No need to refresh for volume - it's handled optimistically in UI
     } catch (err) {
       console.error('Volume change failed:', err);
     }
@@ -105,7 +122,34 @@ export function NodeDetailPage() {
     }
   };
 
+  const handleShuffleChange = async (enabled: boolean) => {
+    if (!id) return;
+    try {
+      await apiPost(`/nodes/${id}/shuffle`, { enabled });
+      setTimeout(fetchNode, 200);
+    } catch (err) {
+      console.error('Shuffle change failed:', err);
+    }
+  };
+
   const [rotationLoading, setRotationLoading] = useState(false);
+  const [clearCacheLoading, setClearCacheLoading] = useState(false);
+
+  const handleClearCache = async () => {
+    if (!id) return;
+    if (!window.confirm('Are you sure you want to clear all cached content on this node? This cannot be undone.')) {
+      return;
+    }
+    setClearCacheLoading(true);
+    try {
+      await apiPost(`/nodes/${id}/clear-cache`);
+      setTimeout(fetchNode, 500);
+    } catch (err) {
+      console.error('Clear cache failed:', err);
+    } finally {
+      setClearCacheLoading(false);
+    }
+  };
 
   const handleRotationChange = async (rotation: DisplayRotation) => {
     if (!id) return;
@@ -146,15 +190,24 @@ export function NodeDetailPage() {
 
   return (
     <div>
-      <div className="page-header">
+      {/* Header Section */}
+      <div className="page-header" style={{ marginBottom: '24px' }}>
         <Link to="/" className="btn btn-secondary btn-sm" style={{ marginBottom: '16px' }}>
           Back to Nodes
         </Link>
         <h1 className="page-title">{node.node.friendlyName}</h1>
-        <p className="page-subtitle">
-          <span className={`status-dot ${node.connected ? 'online' : 'offline'}`} style={{ display: 'inline-block', marginRight: '8px' }} />
-          {node.connected ? 'Online' : 'Offline'} &middot; {node.node.ip}
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '8px', flexWrap: 'wrap' }}>
+          <p className="page-subtitle" style={{ margin: 0 }}>
+            <span className={`status-dot ${node.connected ? 'online' : 'offline'}`} style={{ display: 'inline-block', marginRight: '8px' }} />
+            {node.connected ? 'Online' : 'Offline'} &middot; {node.node.ip}
+          </p>
+          {node.hardware && (
+            <>
+              <span style={{ color: 'var(--border-light)' }}>|</span>
+              <HardwareMetricsBar metrics={node.hardware} />
+            </>
+          )}
+        </div>
       </div>
 
       {playError && (
@@ -163,36 +216,27 @@ export function NodeDetailPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px' }}>
-        {/* Playback Controls */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(400px, 1fr) minmax(300px, 400px)', gap: '20px' }}>
+        {/* Playback Panel (combined with volume) */}
         <div className="card">
           <div className="card-header">
             <h3 className="card-title">Playback</h3>
             {playLoading && <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Loading...</span>}
           </div>
           <div className="card-body">
-            <PlaybackControls
+            <PlaybackPanel
               playbackState={node.playbackState}
-              disabled={!node.connected || playLoading}
+              disabled={!node.connected}
+              loading={playLoading}
               onPlay={handlePlay}
               onStop={handleStop}
               onPause={handlePause}
               onResume={handleResume}
+              onNext={handleNext}
+              onPrevious={handlePrevious}
               onLoopChange={handleLoopChange}
-            />
-          </div>
-        </div>
-
-        {/* Volume Control */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">Volume</h3>
-          </div>
-          <div className="card-body">
-            <VolumeControl
-              volume={node.playbackState?.volume ?? 100}
-              disabled={!node.connected}
-              onChange={handleVolumeChange}
+              onShuffleChange={handleShuffleChange}
+              onVolumeChange={handleVolumeChange}
             />
           </div>
         </div>
@@ -212,25 +256,30 @@ export function NodeDetailPage() {
           </div>
         </div>
 
-        {/* Hardware Metrics */}
-        {node.hardware && (
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">Hardware</h3>
-            </div>
-            <div className="card-body">
-              <HardwareMetrics metrics={node.hardware} />
-            </div>
-          </div>
-        )}
-
         {/* Cached Content */}
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <div className="card-header">
             <h3 className="card-title">Cached Content</h3>
-            <span className="badge badge-info">
-              {node.cachedContent?.length || 0} files
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span className="badge badge-info">
+                {node.cachedContent?.length || 0} files
+              </span>
+              {(node.cachedContent?.length ?? 0) > 0 && (
+                <button
+                  className="btn btn-sm"
+                  style={{
+                    backgroundColor: 'var(--error)',
+                    color: 'white',
+                    padding: '4px 10px',
+                    fontSize: '0.75rem',
+                  }}
+                  onClick={handleClearCache}
+                  disabled={!node.connected || clearCacheLoading}
+                >
+                  {clearCacheLoading ? 'Clearing...' : 'Clear All'}
+                </button>
+              )}
+            </div>
           </div>
           <div className="card-body">
             <CachedContentList

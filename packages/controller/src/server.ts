@@ -34,6 +34,7 @@ import {
   getCollection as getEdenCollection,
   getCollectionCreations as getEdenCollectionCreations,
   parseEdenUrl,
+  sanitizeCreationName,
 } from './services/eden.js';
 import {
   controlLight,
@@ -267,7 +268,7 @@ async function handleRequest(
             'GET /api/nodes',
             'GET /api/nodes/:id',
             'POST /api/nodes/register',
-            'POST /api/nodes/:id/:action (play, stop, pause, resume, next, previous, volume, loop, cache, clear-cache, rename, rotate)',
+            'POST /api/nodes/:id/:action (play, stop, pause, resume, next, previous, volume, loop, shuffle, cache, clear-cache, rename, rotate)',
             // Content
             'GET /api/content',
             'POST /api/content',
@@ -582,44 +583,261 @@ async function handleRequest(
 
   // Add content to library
   if (method === 'POST' && url.pathname === '/api/content') {
-    const body = await readJsonBody<{ type: string; url?: string; collectionId?: string; name?: string }>(req);
+    const body = await readJsonBody<{
+      url?: string;
+      name?: string;
+      description?: string;
+      author?: string;
+    }>(req);
     if (!body) {
       sendError(res, 'Invalid JSON body');
       return;
     }
-    logger.info('Add content request', body);
 
+    // URL is required
+    if (!body.url) {
+      sendError(res, 'URL is required');
+      return;
+    }
+
+    const inputUrl = body.url.trim();
     const db = getDatabase();
+
+    // Check if this is an Eden URL
+    const edenInfo = parseEdenUrl(inputUrl);
+
+    // Handle Eden collection URLs - fetch all creations and create playlist
+    if (edenInfo?.type === 'collection') {
+      logger.info('Adding Eden collection', { collectionId: edenInfo.id, db: edenInfo.db });
+
+      try {
+        // Fetch collection metadata
+        const collection = await getEdenCollection(edenInfo.id, edenInfo.db);
+        if (!collection) {
+          sendError(res, 'Eden collection not found', 404);
+          return;
+        }
+
+        // Fetch all creations in the collection
+        const creations = await getEdenCollectionCreations(edenInfo.id, edenInfo.db);
+        if (creations.length === 0) {
+          sendError(res, 'Eden collection has no creations', 400);
+          return;
+        }
+
+        logger.info('Fetched Eden collection', {
+          name: collection.name,
+          creationCount: creations.length
+        });
+
+        // Add each creation as a content item
+        const contentIds: string[] = [];
+        const now = Date.now();
+
+        for (const creation of creations) {
+          const contentId = generateId();
+          const hash = crypto.randomUUID().replace(/-/g, '').substring(0, 32);
+
+          // Determine content type from URL or mimeType
+          let contentType: 'video' | 'image' = 'video';
+          const mimeType = creation.mediaAttributes?.mimeType || '';
+          const urlLower = creation.url?.toLowerCase() || '';
+          if (mimeType.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(urlLower)) {
+            contentType = 'image';
+          }
+
+          // Get filename from creation
+          const filename = creation.filename || `${hash}.${contentType === 'video' ? 'mp4' : 'jpg'}`;
+
+          // Build name from creation metadata (sanitized: max 40 chars, no line breaks)
+          const creationName = sanitizeCreationName(creation.name) || sanitizeCreationName(creation.title) || `Creation ${creation._id.slice(0, 8)}`;
+
+          // Build metadata
+          const creationMetadata = JSON.stringify({
+            author: creation.user?.username || undefined,
+            edenCreationId: creation._id,
+          });
+
+          const sourceData = JSON.stringify({
+            type: 'eden_creation',
+            url: creation.url,
+            creationId: creation._id,
+            db: edenInfo.db,
+          });
+
+          db.prepare(`
+            INSERT INTO content (id, hash, filename, name, original_url, source_type, source_data, content_type, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(contentId, hash, filename, creationName, creation.url, 'eden', sourceData, contentType, creationMetadata, now);
+
+          contentIds.push(contentId);
+        }
+
+        // Create a playlist for the collection
+        const playlistId = generateId();
+        const playlistName = body.name?.trim() || collection.name || `Eden Collection ${edenInfo.id}`;
+
+        // Build playlist items from the content we just added
+        const playlistItems = contentIds.map((_contentId, index) => {
+          const creation = creations[index]!;
+          return {
+            sourceType: 'eden_creation',
+            sourceData: {
+              url: creation.url,
+              creationId: creation._id,
+              db: edenInfo.db,
+            },
+            name: creation.name || creation.title || creation.filename || creation._id,
+            duration: null,
+          };
+        });
+
+        db.prepare(`
+          INSERT INTO playlists (id, name, items, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          playlistId,
+          playlistName,
+          JSON.stringify(playlistItems),
+          now,
+          now
+        );
+
+        logger.info('Eden collection added', {
+          collectionId: edenInfo.id,
+          playlistId,
+          playlistName,
+          contentCount: contentIds.length,
+        });
+
+        sendJson(res, {
+          success: true,
+          data: {
+            type: 'collection',
+            collectionId: edenInfo.id,
+            collectionName: collection.name,
+            playlistId,
+            playlistName,
+            contentCount: contentIds.length,
+            contentIds,
+          },
+        });
+        return;
+      } catch (err) {
+        logger.error('Failed to add Eden collection', err as Error);
+        sendError(res, `Eden API error: ${(err as Error).message}`, 500);
+        return;
+      }
+    }
+
+    // Handle Eden creation URLs - fetch metadata and add single item
+    if (edenInfo?.type === 'creation') {
+      logger.info('Adding Eden creation', { creationId: edenInfo.id, db: edenInfo.db });
+
+      try {
+        const creation = await getEdenCreation(edenInfo.id, edenInfo.db);
+        if (!creation) {
+          sendError(res, 'Eden creation not found', 404);
+          return;
+        }
+
+        const id = generateId();
+        const hash = crypto.randomUUID().replace(/-/g, '').substring(0, 32);
+
+        // Determine content type
+        let contentType: 'video' | 'image' = 'video';
+        const mimeType = creation.mediaAttributes?.mimeType || '';
+        const urlLower = creation.url?.toLowerCase() || '';
+        if (mimeType.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(urlLower)) {
+          contentType = 'image';
+        }
+
+        const filename = creation.filename || `${hash}.${contentType === 'video' ? 'mp4' : 'jpg'}`;
+        // Build name from creation metadata (sanitized: max 40 chars, no line breaks)
+        const creationName = body.name?.trim() || sanitizeCreationName(creation.name) || sanitizeCreationName(creation.title) || `Creation ${creation._id.slice(0, 8)}`;
+
+        const metadata = JSON.stringify({
+          description: body.description?.trim() || undefined,
+          author: body.author?.trim() || creation.user?.username || undefined,
+          edenCreationId: creation._id,
+        });
+
+        const sourceData = JSON.stringify({
+          type: 'eden_creation',
+          url: creation.url,
+          creationId: creation._id,
+          db: edenInfo.db,
+        });
+
+        db.prepare(`
+          INSERT INTO content (id, hash, filename, name, original_url, source_type, source_data, content_type, metadata, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, hash, filename, creationName, creation.url, 'eden', sourceData, contentType, metadata, Date.now());
+
+        logger.info('Eden creation added', { id, name: creationName, creationId: creation._id });
+
+        sendJson(res, {
+          success: true,
+          data: {
+            type: 'creation',
+            id,
+            hash,
+            filename,
+            name: creationName,
+            sourceType: 'eden',
+            originalUrl: creation.url,
+            metadata: JSON.parse(metadata),
+          },
+        });
+        return;
+      } catch (err) {
+        logger.error('Failed to add Eden creation', err as Error);
+        sendError(res, `Eden API error: ${(err as Error).message}`, 500);
+        return;
+      }
+    }
+
+    // Handle other URL types (YouTube, direct URLs)
+    let sourceType = 'url';
+    if (inputUrl.includes('youtube.com') || inputUrl.includes('youtu.be')) {
+      sourceType = 'youtube';
+    }
+
+    logger.info('Add content request', { url: inputUrl, sourceType, name: body.name });
+
     const id = generateId();
-    const hash = crypto.randomUUID().replace(/-/g, '').substring(0, 32); // Placeholder hash
-    const sourceType = body.type;
-    const sourceData = JSON.stringify(body);
-    const contentType = sourceType === 'youtube' ? 'video' : 'video'; // Default to video
+    const hash = crypto.randomUUID().replace(/-/g, '').substring(0, 32);
+    const sourceData = JSON.stringify({ type: sourceType, url: inputUrl });
+    const contentType = 'video'; // Default to video
 
     // Generate a filename from the URL or type
     let filename = `${hash}.mp4`;
-    if (body.url) {
-      try {
-        const urlObj = new URL(body.url);
-        const pathParts = urlObj.pathname.split('/');
-        const lastPart = pathParts[pathParts.length - 1];
-        if (lastPart && lastPart.includes('.')) {
-          filename = lastPart;
-        }
-      } catch {
-        // Keep default filename
+    try {
+      const urlObj = new URL(inputUrl);
+      const pathParts = urlObj.pathname.split('/');
+      const lastPart = pathParts[pathParts.length - 1];
+      if (lastPart && lastPart.includes('.')) {
+        filename = lastPart;
       }
+    } catch {
+      // Keep default filename
     }
+
+    // Build metadata object if description or author provided
+    const metadata = (body.description || body.author) ? JSON.stringify({
+      description: body.description?.trim() || undefined,
+      author: body.author?.trim() || undefined,
+    }) : null;
 
     // Use provided name or null
     const name = body.name?.trim() || null;
 
     db.prepare(`
-      INSERT INTO content (id, hash, filename, name, original_url, source_type, source_data, content_type, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, hash, filename, name, body.url ?? null, sourceType, sourceData, contentType, Date.now());
+      INSERT INTO content (id, hash, filename, name, original_url, source_type, source_data, content_type, metadata, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, hash, filename, name, inputUrl, sourceType, sourceData, contentType, metadata, Date.now());
 
-    logger.info('Content added to library', { id, name, type: sourceType, url: body.url });
+    logger.info('Content added to library', { id, name, type: sourceType, url: inputUrl });
 
     sendJson(res, {
       success: true,
@@ -629,7 +847,8 @@ async function handleRequest(
         filename,
         name,
         sourceType,
-        originalUrl: body.url,
+        originalUrl: inputUrl,
+        metadata: metadata ? JSON.parse(metadata) : undefined,
       },
     });
     return;
@@ -1774,6 +1993,52 @@ function handleNodeMessage(
           task: message,
         });
         logger.debug('Forwarded task progress', { nodeId, taskId: message.taskId, status: message.status });
+      }
+      break;
+    }
+
+    case 'content_cached': {
+      // Add content to global library if not already present
+      const nodeId = findNodeIdByWebSocket(ws);
+      const { content } = message;
+
+      try {
+        const db = getDatabase();
+
+        // Check if content already exists
+        const existing = db.prepare('SELECT id FROM content WHERE hash = ?').get(content.hash) as { id: string } | undefined;
+
+        if (!existing) {
+          // Add to global content library
+          const id = generateId();
+          db.prepare(`
+            INSERT INTO content (id, hash, filename, name, original_url, source_type, source_data, content_type, size_bytes, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            id,
+            content.hash,
+            content.filename,
+            content.name ?? null,
+            content.originalUrl ?? null,
+            content.sourceType,
+            content.sourceData,
+            content.contentType,
+            content.sizeBytes ?? null,
+            content.metadata ?? null,
+            Date.now()
+          );
+          logger.info('Added content to library from node', { hash: content.hash, nodeId });
+        }
+
+        // Track which node has this content
+        if (nodeId) {
+          db.prepare(`
+            INSERT OR REPLACE INTO node_content (node_id, content_hash, cached_at)
+            VALUES (?, ?, ?)
+          `).run(nodeId, content.hash, Date.now());
+        }
+      } catch (err) {
+        logger.error('Failed to process content_cached message', err as Error);
       }
       break;
     }

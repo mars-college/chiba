@@ -103,7 +103,9 @@ export async function getCreation(
 ): Promise<EdenCreation | null> {
   logger.info('Fetching Eden creation', { creationId, db });
   try {
-    return await edenRequest<EdenCreation>(`/v2/creations/${creationId}`, db);
+    // API wraps response in {creation: {...}}
+    const response = await edenRequest<{ creation: EdenCreation }>(`/v2/creations/${creationId}`, db);
+    return response.creation;
   } catch (err) {
     if ((err as Error).message === 'Not found') {
       return null;
@@ -131,7 +133,20 @@ export async function getCollection(
 }
 
 /**
- * Get all creations in a collection.
+ * Sanitize a creation name: max 40 chars, no line breaks.
+ */
+export function sanitizeCreationName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  // Remove line breaks and extra whitespace
+  const cleaned = name.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // Truncate to 40 chars
+  if (cleaned.length <= 40) return cleaned;
+  return cleaned.slice(0, 37) + '...';
+}
+
+/**
+ * Get all creations in a collection with full details.
+ * Fetches each creation individually to get name and other metadata.
  */
 export async function getCollectionCreations(
   collectionId: string,
@@ -139,25 +154,41 @@ export async function getCollectionCreations(
 ): Promise<EdenCreation[]> {
   logger.info('Fetching Eden collection creations', { collectionId, db });
 
-  const creations: EdenCreation[] = [];
+  // First, get the list of creation IDs from the collection
+  const creationIds: string[] = [];
   let page = 1;
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const response = await edenRequest<{ docs?: EdenCreation[]; hasNextPage?: boolean }>(
+    const response = await edenRequest<{ docs?: Array<{ _id: string }>; hasNextPage?: boolean }>(
       `/v2/collections/${collectionId}/creations?page=${page}&limit=100`,
       db
     );
 
     if (response.docs) {
-      creations.push(...response.docs);
+      creationIds.push(...response.docs.map(d => d._id));
     }
 
     hasNextPage = response.hasNextPage ?? false;
     page++;
   }
 
-  logger.info('Fetched collection creations', { collectionId, count: creations.length });
+  logger.info('Found creation IDs in collection', { collectionId, count: creationIds.length });
+
+  // Fetch full details for each creation
+  const creations: EdenCreation[] = [];
+  for (const creationId of creationIds) {
+    try {
+      const creation = await getCreation(creationId, db);
+      if (creation) {
+        creations.push(creation);
+      }
+    } catch (err) {
+      logger.warn('Failed to fetch creation details', { creationId, error: (err as Error).message });
+    }
+  }
+
+  logger.info('Fetched collection creations with details', { collectionId, count: creations.length });
   return creations;
 }
 

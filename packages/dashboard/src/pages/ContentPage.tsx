@@ -8,7 +8,9 @@ export function ContentPage() {
   const [loading, setLoading] = useState(true);
   const [urlInput, setUrlInput] = useState('');
   const [nameInput, setNameInput] = useState('');
-  const [sourceType, setSourceType] = useState<'url' | 'youtube' | 'eden'>('url');
+  const [descriptionInput, setDescriptionInput] = useState('');
+  const [authorInput, setAuthorInput] = useState('');
+  const [showDescription, setShowDescription] = useState(false);
   const [adding, setAdding] = useState(false);
   const [sendingTo, setSendingTo] = useState<{ contentId: string; nodeId: string } | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -101,22 +103,48 @@ export function ContentPage() {
     setMessage(null);
 
     try {
-      // Auto-detect YouTube
-      const isYoutube = urlInput.includes('youtube.com') || urlInput.includes('youtu.be');
-      const type = isYoutube ? 'youtube' : sourceType;
+      const input = urlInput.trim();
 
-      await apiPost('/content', {
-        type,
-        url: urlInput.trim(),
+      interface ContentResponse {
+        success: boolean;
+        data: {
+          type?: 'collection' | 'creation';
+          collectionName?: string;
+          playlistName?: string;
+          contentCount?: number;
+          name?: string;
+        };
+      }
+
+      const response = await apiPost<ContentResponse>('/content', {
+        url: input,
         name: nameInput.trim() || undefined,
+        description: descriptionInput.trim() || undefined,
+        author: authorInput.trim() || undefined,
       });
+
+      // Reset form
       setUrlInput('');
       setNameInput('');
-      setMessage({ type: 'success', text: `Content added successfully${isYoutube ? ' (YouTube will be downloaded when played on a node)' : ''}` });
-      fetchContent();
+      setDescriptionInput('');
+      setAuthorInput('');
+      setShowDescription(false);
 
-      // Clear success message after 5 seconds
-      setTimeout(() => setMessage(null), 5000);
+      // Generate success message based on response
+      let successMessage = 'Content added successfully';
+      const data = response.data;
+
+      if (data.type === 'collection') {
+        successMessage = `Added Eden collection "${data.collectionName || data.playlistName}": ${data.contentCount} items added to library and playlist "${data.playlistName}" created.`;
+      } else if (data.type === 'creation') {
+        successMessage = `Eden creation "${data.name}" added to library.`;
+      } else if (input.includes('youtube.com') || input.includes('youtu.be')) {
+        successMessage = 'YouTube video added. It will be downloaded when played on a node.';
+      }
+
+      setMessage({ type: 'success', text: successMessage });
+      fetchContent();
+      setTimeout(() => setMessage(null), 8000); // Longer timeout for collection messages
     } catch (err) {
       console.error('Failed to add content:', err);
       setMessage({ type: 'error', text: `Failed to add content: ${(err as Error).message}` });
@@ -186,48 +214,16 @@ export function ContentPage() {
           <h3 className="card-title">Add Content</h3>
         </div>
         <div className="card-body">
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Source Type</label>
-              <select
-                className="form-select"
-                value={sourceType}
-                onChange={(e) => setSourceType(e.target.value as 'url' | 'youtube' | 'eden')}
-                style={{ width: '150px' }}
-              >
-                <option value="url">URL</option>
-                <option value="youtube">YouTube</option>
-                <option value="eden">Eden Collection</option>
-              </select>
-            </div>
-            <div className="form-group" style={{ marginBottom: 0, flex: 2, minWidth: '200px' }}>
-              <label className="form-label">
-                {sourceType === 'eden' ? 'Collection ID' : 'URL'}
-              </label>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+            <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
+              <label className="form-label">URL</label>
               <input
                 type="text"
                 className="form-input"
-                placeholder={
-                  sourceType === 'eden'
-                    ? 'Enter Eden collection ID...'
-                    : sourceType === 'youtube'
-                    ? 'Enter YouTube URL...'
-                    : 'Enter media URL...'
-                }
+                placeholder="YouTube, Eden, or direct media URL"
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddContent()}
-              />
-            </div>
-            <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: '150px' }}>
-              <label className="form-label">Name (optional)</label>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Friendly name..."
-                value={nameInput}
-                onChange={(e) => setNameInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddContent()}
+                onKeyDown={(e) => e.key === 'Enter' && !showDescription && handleAddContent()}
               />
             </div>
             <button
@@ -238,6 +234,76 @@ export function ContentPage() {
               {adding ? 'Adding...' : 'Add'}
             </button>
           </div>
+
+          {/* Collapsible metadata section */}
+          <div style={{ marginTop: '12px' }}>
+            <button
+              type="button"
+              onClick={() => setShowDescription(!showDescription)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: '0.875rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                style={{
+                  transform: showDescription ? 'rotate(90deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.2s',
+                }}
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              Add name, description
+            </button>
+
+            {showDescription && (
+              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Description</label>
+                  <textarea
+                    className="form-input"
+                    rows={2}
+                    value={descriptionInput}
+                    onChange={(e) => setDescriptionInput(e.target.value)}
+                    style={{ resize: 'vertical' }}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Author</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={authorInput}
+                    onChange={(e) => setAuthorInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddContent()}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           {message && (
             <div style={{
               marginTop: '12px',
@@ -393,6 +459,20 @@ export function ContentPage() {
                 <span className="detail-label">Source</span>
                 <span className="detail-value">{selectedContent.source.type}</span>
               </div>
+              {selectedContent.metadata?.author && (
+                <div className="detail-row">
+                  <span className="detail-label">Author</span>
+                  <span className="detail-value">{selectedContent.metadata.author}</span>
+                </div>
+              )}
+              {selectedContent.metadata?.description && (
+                <div className="detail-row">
+                  <span className="detail-label">Description</span>
+                  <span className="detail-value" style={{ whiteSpace: 'pre-wrap' }}>
+                    {selectedContent.metadata.description}
+                  </span>
+                </div>
+              )}
               {selectedContent.originalUrl && (
                 <div className="detail-row">
                   <span className="detail-label">Original URL</span>

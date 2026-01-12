@@ -13,6 +13,7 @@ import type {
   ContentSource,
   ContentMetadata,
   NodeToPlayerMessage,
+  NodeToPlayerDownloadProgressMessage,
 } from '@chiba/shared';
 import { WebSocket } from 'ws';
 import { getVolume, setVolume } from './volume.js';
@@ -98,6 +99,19 @@ class PlaybackManager {
   }
 
   /**
+   * Send download progress to all players.
+   */
+  private sendDownloadProgress(progress: Omit<NodeToPlayerDownloadProgressMessage, 'type'>): void {
+    const message: NodeToPlayerDownloadProgressMessage = {
+      type: 'download_progress',
+      ...progress,
+    };
+    for (const client of this.playerClients) {
+      this.sendToPlayer(client, message);
+    }
+  }
+
+  /**
    * Clear any pending timers.
    */
   private clearTimers(): void {
@@ -132,7 +146,8 @@ class PlaybackManager {
    * Play a single content item.
    */
   playContent(content: Content, options: { loop?: boolean; showIntro?: boolean } = {}): void {
-    const { loop = true, showIntro = false } = options;
+    // Preserve current loop setting if not explicitly provided
+    const { loop = this.state.loop, showIntro = false } = options;
 
     logger.info('Playing content', { filename: content.filename, type: content.type, loop });
     markAsPlayed(content.hash);
@@ -201,7 +216,12 @@ class PlaybackManager {
 
     this.state.playlist = playlist;
     this.state.playlistIndex = startIndex;
-    this.state.loop = playlist.loop;
+    // Preserve user's loop/shuffle preferences (don't override from playlist)
+
+    // Regenerate shuffle order for new playlist if shuffle is enabled
+    if (this.state.shuffle && playlist.items.length > 1) {
+      this.generateShuffledOrder();
+    }
 
     this.playCurrentPlaylistItem().catch(err => {
       logger.error('Failed to play playlist item', err as Error);
@@ -284,7 +304,9 @@ class PlaybackManager {
     const playlist = this.state.playlist;
     if (!playlist) return;
 
-    const item = playlist.items[this.state.playlistIndex];
+    // Get actual item index (respects shuffle if enabled)
+    const actualIndex = this.getActualIndex(this.state.playlistIndex);
+    const item = playlist.items[actualIndex];
     if (!item) {
       logger.warn('Playlist item not found', { index: this.state.playlistIndex });
       this.stop();
@@ -299,7 +321,18 @@ class PlaybackManager {
     } else {
       // It's a ContentSource - need to download/resolve
       const source = item.content as ContentSource;
+      const itemName = item.metadata?.title || (source.type === 'file' ? source.filename : undefined);
       logger.info('Resolving playlist item content', { index: this.state.playlistIndex, sourceType: source.type });
+
+      // Send download progress start (except for file lookups which are instant)
+      if (source.type !== 'file') {
+        this.sendDownloadProgress({
+          progress: 0,
+          status: 'downloading',
+          name: itemName,
+          message: 'Downloading...',
+        });
+      }
 
       try {
         if (source.type === 'file') {
@@ -333,8 +366,26 @@ class PlaybackManager {
             content = firstItem.content as Content;
           }
         }
+
+        // Send download complete
+        if (source.type !== 'file') {
+          this.sendDownloadProgress({
+            progress: 100,
+            status: 'completed',
+            name: itemName,
+          });
+        }
       } catch (err) {
         logger.error('Failed to resolve playlist item', err as Error, { index: this.state.playlistIndex, source });
+        // Send download error
+        if (source.type !== 'file') {
+          this.sendDownloadProgress({
+            progress: 0,
+            status: 'error',
+            name: itemName,
+            message: (err as Error).message,
+          });
+        }
       }
     }
 
@@ -526,6 +577,62 @@ class PlaybackManager {
   }
 
   /**
+   * Set shuffle state and generate shuffled order if enabling.
+   */
+  setShuffle(enabled: boolean): void {
+    logger.info('Setting shuffle', { enabled });
+    this.state.shuffle = enabled;
+
+    if (enabled && this.state.playlist && this.state.playlist.items.length > 1) {
+      // Generate shuffled order, keeping current item in place
+      this.generateShuffledOrder();
+    } else {
+      this.state.shuffledOrder = undefined;
+    }
+
+    this.broadcast();
+  }
+
+  /**
+   * Generate a new shuffled order for the playlist.
+   * Ensures the current item stays at current position to avoid jarring skips.
+   */
+  private generateShuffledOrder(): void {
+    const playlist = this.state.playlist;
+    if (!playlist) return;
+
+    const indices = Array.from({ length: playlist.items.length }, (_, i) => i);
+    const currentIndex = this.state.playlistIndex;
+
+    // Remove current index from shuffle pool
+    const remaining = indices.filter(i => i !== currentIndex);
+
+    // Fisher-Yates shuffle
+    for (let i = remaining.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const temp = remaining[i]!;
+      remaining[i] = remaining[j]!;
+      remaining[j] = temp;
+    }
+
+    // Insert current index at current position
+    remaining.splice(currentIndex, 0, currentIndex);
+    this.state.shuffledOrder = remaining;
+
+    logger.debug('Generated shuffled order', { order: this.state.shuffledOrder });
+  }
+
+  /**
+   * Get the actual playlist index for the current shuffle position.
+   */
+  private getActualIndex(position: number): number {
+    if (this.state.shuffle && this.state.shuffledOrder) {
+      return this.state.shuffledOrder[position] ?? position;
+    }
+    return position;
+  }
+
+  /**
    * Handle content ended event from player.
    */
   handleContentEnded(): void {
@@ -573,6 +680,7 @@ export const previousItem = () => playbackManager.previous();
 export const restartPlayback = () => playbackManager.restart();
 export const setPlaybackVolume = (level: number) => playbackManager.setVolume(level);
 export const setImageDuration = (duration: number) => playbackManager.setImageDuration(duration);
+export const setPlaybackShuffle = (enabled: boolean) => playbackManager.setShuffle(enabled);
 export const handleContentEnded = () => playbackManager.handleContentEnded();
 export const handleIntroComplete = () => playbackManager.handleIntroComplete();
 export const addPlayerClient = (ws: WebSocket) => playbackManager.addPlayerClient(ws);

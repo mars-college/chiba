@@ -106,6 +106,9 @@ export interface TaskResult {
   itemsDownloaded?: number;
   itemsSkipped?: number;
   itemsFailed?: number;
+  collectionName?: string;
+  /** Playlist created from collection sync */
+  playlist?: import('./content.js').Playlist;
 }
 
 /** Error details for failed tasks */
@@ -167,6 +170,26 @@ export interface NodeErrorMessage {
 }
 
 /**
+ * Content cached notification from node to controller.
+ * Sent when new content is cached on a node so controller can add it to global library.
+ */
+export interface NodeContentCachedMessage {
+  type: 'content_cached';
+  /** Content metadata */
+  content: {
+    hash: string;
+    filename: string;
+    name?: string;
+    originalUrl?: string;
+    sourceType: string;
+    sourceData: string;
+    contentType: string;
+    sizeBytes?: number;
+    metadata?: string;
+  };
+}
+
+/**
  * Union of all messages from node to controller.
  */
 export type NodeToControllerMessage =
@@ -175,7 +198,8 @@ export type NodeToControllerMessage =
   | NodeStateMessage
   | NodeDownloadProgressMessage
   | NodePongMessage
-  | NodeErrorMessage;
+  | NodeErrorMessage
+  | NodeContentCachedMessage;
 
 // ============================================================================
 // Node <-> Player Messages (Local WebSocket)
@@ -249,11 +273,28 @@ export interface NodeToPlayerPreloadMessage {
 }
 
 /**
+ * Download progress message from node to player.
+ * Shown as overlay when lazy-loading playlist content.
+ */
+export interface NodeToPlayerDownloadProgressMessage {
+  type: 'download_progress';
+  /** Progress percentage (0-100) */
+  progress: number;
+  /** Status message */
+  message?: string;
+  /** Item name being downloaded */
+  name?: string;
+  /** Download status */
+  status: 'downloading' | 'processing' | 'completed' | 'error';
+}
+
+/**
  * Union of all messages from node to player.
  */
 export type NodeToPlayerMessage =
   | NodeToPlayerStateMessage
-  | NodeToPlayerPreloadMessage;
+  | NodeToPlayerPreloadMessage
+  | NodeToPlayerDownloadProgressMessage;
 
 // ============================================================================
 // Controller <-> Dashboard Messages

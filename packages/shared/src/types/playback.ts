@@ -27,6 +27,10 @@ export interface PlaybackState {
   playlistIndex: number;
   /** Whether playlist should loop */
   loop: boolean;
+  /** Whether playlist should shuffle */
+  shuffle: boolean;
+  /** Shuffled order of playlist indices (when shuffle is enabled) */
+  shuffledOrder?: number[];
   /** Whether playback is paused */
   paused: boolean;
   /** Volume level (0-100) */
@@ -46,6 +50,7 @@ export const DEFAULT_PLAYBACK_STATE: PlaybackState = {
   mode: 'off',
   playlistIndex: 0,
   loop: true,
+  shuffle: false,
   paused: false,
   volume: 100,
   imageDuration: DEFAULT_IMAGE_DURATION,

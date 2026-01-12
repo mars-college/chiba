@@ -6,3 +6,4 @@ export { OfflineScreen } from './OfflineScreen';
 export { UrlDisplay } from './UrlDisplay';
 export { ErrorScreen } from './ErrorScreen';
 export { InteractionOverlay } from './InteractionOverlay';
+export { DownloadOverlay } from './DownloadOverlay';

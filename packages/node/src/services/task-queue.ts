@@ -13,6 +13,7 @@ import type {
 import { getDatabase } from '../db/index.js';
 import { downloadAndCache } from './content-cache.js';
 import { downloadYouTube, isYouTubeUrl } from './youtube.js';
+import { syncCollection, downloadCreation } from './eden.js';
 
 const logger = createLogger('node', 'task-queue');
 
@@ -355,9 +356,77 @@ export class TaskQueue {
       }
 
       case 'eden': {
-        // Eden sync will be handled later - for now throw error
-        // This requires importing the eden service which has complex dependencies
-        throw new Error('Eden sync not yet implemented in task queue');
+        const db = source.db || 'PROD';
+
+        // Handle Eden creation (single item)
+        if (source.creationId) {
+          this.sendProgress({
+            taskId: task.id,
+            taskType: task.type,
+            status: 'downloading',
+            progress: 10,
+            message: `Fetching Eden creation ${source.creationId}...`,
+          });
+
+          const result = await downloadCreation(source.creationId, {
+            db,
+            name: metadata?.name,
+          });
+
+          return {
+            filename: result.content.filename,
+            hash: result.content.hash,
+            sizeBytes: result.content.sizeBytes,
+            alreadyCached: result.alreadyCached,
+          };
+        }
+
+        // Handle Eden collection sync
+        if (source.collectionId) {
+          this.sendProgress({
+            taskId: task.id,
+            taskType: task.type,
+            status: 'downloading',
+            progress: 5,
+            message: `Syncing Eden collection ${source.collectionId}...`,
+          });
+
+          const result = await syncCollection(source.collectionId, {
+            db,
+            skipExisting: true,
+            onProgress: (progress) => {
+              const percent = Math.round((progress.current / progress.total) * 100);
+              this.sendProgress({
+                taskId: task.id,
+                taskType: task.type,
+                status: progress.status === 'complete' ? 'completed' :
+                        progress.status === 'error' ? 'error' : 'downloading',
+                progress: percent,
+                message: `${progress.current}/${progress.total}: ${progress.filename}`,
+              });
+            },
+          });
+
+          // Return info about the sync
+          // For collections, we return info about first item if available
+          const firstFile = result.files.find(f => f.content);
+          return {
+            filename: firstFile?.content?.filename || `collection_${source.collectionId}`,
+            hash: firstFile?.content?.hash || source.collectionId,
+            sizeBytes: result.files.reduce((sum, f) => sum + (f.content?.sizeBytes || 0), 0),
+            alreadyCached: result.downloaded === 0 && result.skipped > 0,
+            // Include extra info about the sync
+            itemsTotal: result.total,
+            itemsDownloaded: result.downloaded,
+            itemsSkipped: result.skipped,
+            itemsFailed: result.failed,
+            collectionName: result.collectionName,
+            // Include the playlist for playback
+            playlist: result.playlist,
+          } as TaskResult;
+        }
+
+        throw new Error('Eden task requires either creationId or collectionId');
       }
 
       default:

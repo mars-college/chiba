@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import type { NodeStatus } from '@chiba/shared';
 
 interface NodeCardProps {
@@ -6,7 +6,6 @@ interface NodeCardProps {
 }
 
 export function NodeCard({ status }: NodeCardProps) {
-  const navigate = useNavigate();
   const { node, connected, lastSeen, playbackState, diskUsage } = status;
   const nodeId = node.id || '';
 
@@ -63,7 +62,7 @@ export function NodeCard({ status }: NodeCardProps) {
           <div className="node-info-row">
             <span className="node-info-label">Disk</span>
             <span className="node-info-value">
-              {formatBytes(diskUsage.usedBytes)} / {formatBytes(diskUsage.totalBytes)}
+              {formatBytes(diskUsage.totalBytes - diskUsage.usedBytes)} free
             </span>
           </div>
         )}
@@ -95,7 +94,7 @@ export function NodeCard({ status }: NodeCardProps) {
       <div className="node-card-footer">
         <Link
           to={nodeId ? `/nodes/${nodeId}` : '#'}
-          className="btn btn-secondary btn-sm"
+          className="btn btn-primary btn-sm"
           style={{ flex: 1 }}
           onClick={(e) => {
             if (!nodeId) {
@@ -104,16 +103,8 @@ export function NodeCard({ status }: NodeCardProps) {
             }
           }}
         >
-          Details
+          Open
         </Link>
-        <button
-          className="btn btn-primary btn-sm"
-          disabled={!connected || !nodeId}
-          style={{ flex: 1 }}
-          onClick={() => nodeId && navigate(`/nodes/${nodeId}`)}
-        >
-          Control
-        </button>
       </div>
     </div>
   );

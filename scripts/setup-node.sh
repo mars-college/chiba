@@ -387,6 +387,33 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
+echo "=== Creating network watchdog service ==="
+# Copy network watchdog script
+cp "$INSTALL_DIR/scripts/network-watchdog.sh" "$INSTALL_DIR/scripts/network-watchdog.sh" 2>/dev/null || true
+chmod +x "$INSTALL_DIR/scripts/network-watchdog.sh"
+
+sudo tee /etc/systemd/system/chiba-network-watchdog.service > /dev/null << EOF
+[Unit]
+Description=Chiba Network Watchdog
+After=network.target NetworkManager.service
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/scripts/network-watchdog.sh
+Restart=always
+RestartSec=30
+Environment=CHECK_INTERVAL=30
+Environment=FAILURE_THRESHOLD=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "=== Enabling TTY2 for emergency terminal access ==="
+# Enable getty on TTY2 so user can switch with Ctrl+Alt+F2
+sudo systemctl enable getty@tty2.service 2>/dev/null || true
+
 echo "=== Configuring boot options ==="
 # Set console auto-login
 sudo raspi-config nonint do_boot_behaviour B2 2>/dev/null || true
@@ -404,7 +431,15 @@ cat > "$INSTALL_DIR/scripts/run-kiosk.sh" << 'EOF'
 #!/bin/bash
 # Chiba Kiosk Launcher
 # Runs Chromium in kiosk mode connecting to the local node server
-# Exit kiosk by pressing Ctrl+Alt+Q in the player UI or clicking the exit button
+#
+# EXIT KIOSK OPTIONS:
+#   1. Press Ctrl+Alt+F2 to switch to TTY2 terminal (login as pi)
+#   2. Click "Exit Kiosk" button in player UI
+#   3. SSH in and run: sudo systemctl stop chiba-kiosk
+#   4. SSH in and run: touch /tmp/chiba-exit-kiosk
+#
+# RETURN TO KIOSK:
+#   Press Ctrl+Alt+F1 to switch back to kiosk TTY
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHIBA_DIR="$(dirname "$SCRIPT_DIR")"
@@ -417,6 +452,8 @@ rm -f "$EXIT_SIGNAL"
 # Required environment for Wayland
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
 export WLR_NO_HARDWARE_CURSORS=1
+# Allow VT switching with Ctrl+Alt+Fn keys
+export WLR_LIBINPUT_NO_DEVICES=1
 
 # Wait for node server to be ready
 echo "Waiting for node server on port 8080..."
@@ -477,9 +514,16 @@ watch_exit_signal() {
         if [ -f "$EXIT_SIGNAL" ]; then
             echo "Exit signal detected, stopping kiosk..."
             rm -f "$EXIT_SIGNAL"
-            # Kill cage (which will kill chromium too)
-            pkill -f "cage.*chromium" 2>/dev/null
-            pkill cage 2>/dev/null
+            # Kill cage using multiple methods for reliability
+            # Method 1: Kill by process name
+            pkill -9 cage 2>/dev/null
+            # Method 2: Kill by pattern match
+            pkill -9 -f "cage.*chromium" 2>/dev/null
+            # Method 3: Kill all chromium under cage
+            pkill -9 chromium 2>/dev/null
+            pkill -9 chromium-browser 2>/dev/null
+            # Method 4: Use killall as fallback
+            killall -9 cage 2>/dev/null
             exit 0
         fi
         sleep 1
@@ -501,7 +545,8 @@ cleanup() {
 trap cleanup EXIT
 
 # Run Chromium in cage (Wayland compositor)
-cage -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
+# -s flag enables VT switching (Ctrl+Alt+F1-F12)
+cage -s -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
 
 # If cage exits normally, clean up
 cleanup
@@ -546,6 +591,7 @@ echo "=== Enabling services ==="
 sudo systemctl daemon-reload
 sudo systemctl enable disable-blanking
 sudo systemctl enable chiba-node
+sudo systemctl enable chiba-network-watchdog
 
 echo "=== Verifying installation ==="
 echo ""
@@ -562,6 +608,8 @@ echo ""
 echo "Checking services..."
 systemctl is-enabled disable-blanking &>/dev/null && echo "  ✓ Screen blanking disabled" || echo "  ✗ Screen blanking NOT enabled"
 systemctl is-enabled chiba-node &>/dev/null && echo "  ✓ Chiba node service enabled" || echo "  ✗ Chiba node service NOT enabled"
+systemctl is-enabled chiba-network-watchdog &>/dev/null && echo "  ✓ Network watchdog enabled" || echo "  ✗ Network watchdog NOT enabled"
+systemctl is-enabled getty@tty2 &>/dev/null && echo "  ✓ Emergency TTY2 enabled (Ctrl+Alt+F2)" || echo "  ✗ Emergency TTY2 NOT enabled"
 grep -q "run-kiosk.sh" "$HOME_DIR/.bash_profile" && echo "  ✓ Kiosk auto-start configured" || echo "  ✗ Kiosk auto-start NOT configured"
 [ -f "$HOME_DIR/.asoundrc" ] && echo "  ✓ Audio configured ($AUDIO_DEVICE)" || echo "  ✗ Audio NOT configured"
 [ -f "$INSTALL_DIR/.display-rotate" ] && echo "  ✓ Display rotation ($(cat "$INSTALL_DIR/.display-rotate") degrees)" || echo "  ✗ Display rotation NOT configured"
@@ -607,6 +655,21 @@ echo "To change display rotation:"
 echo "  $INSTALL_DIR/scripts/rotate-display.sh 90   # Portrait (90 degrees)"
 echo "  $INSTALL_DIR/scripts/rotate-display.sh 270  # Portrait (270 degrees)"
 echo "  $INSTALL_DIR/scripts/rotate-display.sh 0    # Landscape (default)"
+echo ""
+echo "============================================"
+echo "  EMERGENCY KIOSK ACCESS"
+echo "============================================"
+echo ""
+echo "If kiosk becomes unresponsive:"
+echo "  1. Press Ctrl+Alt+F2 to switch to terminal (login as pi)"
+echo "  2. Press Ctrl+Alt+F1 to return to kiosk"
+echo "  3. SSH in: ssh pi@$PI_IP"
+echo ""
+echo "To exit kiosk mode:"
+echo "  touch /tmp/chiba-exit-kiosk"
+echo ""
+echo "Network watchdog is enabled - WiFi will auto-reconnect"
+echo "  Logs: journalctl -u chiba-network-watchdog -f"
 echo ""
 
 read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r </dev/tty

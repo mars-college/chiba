@@ -88,6 +88,8 @@ export const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp
 export interface ContentMetadata {
   /** Title to display on intro screen */
   title?: string;
+  /** Description of the content */
+  description?: string;
   /** Author/creator to display on intro screen */
   author?: string;
   /** Duration of intro screen in milliseconds (default: 3000) */

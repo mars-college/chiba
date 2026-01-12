@@ -76,6 +76,7 @@ export type {
   NodeDownloadProgressMessage,
   NodePongMessage,
   NodeErrorMessage,
+  NodeContentCachedMessage,
   NodeToControllerMessage,
   // Player -> Node
   PlayerReadyMessage,
@@ -87,6 +88,7 @@ export type {
   // Node -> Player
   NodeToPlayerStateMessage,
   NodeToPlayerPreloadMessage,
+  NodeToPlayerDownloadProgressMessage,
   NodeToPlayerMessage,
   // Controller -> Dashboard
   DashboardNodesMessage,

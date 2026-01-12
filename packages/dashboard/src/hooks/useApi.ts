@@ -155,6 +155,27 @@ export async function apiPost<T>(endpoint: string, body?: unknown): Promise<T> {
   }
 }
 
+export async function apiPut<T>(endpoint: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const apiKey = await getApiKey();
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    method: 'PUT',
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function apiDelete<T>(endpoint: string): Promise<T> {
   const headers: Record<string, string> = {};
   const apiKey = await getApiKey();

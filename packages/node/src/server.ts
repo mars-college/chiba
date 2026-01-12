@@ -44,7 +44,7 @@ import {
   type DisplayRotation,
 } from '@chiba/shared';
 import { initDatabase, closeDatabase, setConfig, getAllConfig, listPlaylists } from './db/index.js';
-import { getMediaDir, listCachedContent, getCacheSize, getContentByFilename, clearAllCache } from './services/content-cache.js';
+import { getMediaDir, listCachedContent, getCacheSize, getContentByFilename, clearAllCache, setContentCachedCallback } from './services/content-cache.js';
 import { getDiskUsage as getDiskUsageActual, getHardwareMetrics as getHardwareMetricsActual } from './services/hardware.js';
 import { isYouTubeUrl } from './services/youtube.js';
 import { isEdenUrl, parseEdenUrl } from './services/eden.js';
@@ -62,6 +62,7 @@ import {
   previousItem,
   setPlaybackVolume,
   setImageDuration,
+  setPlaybackShuffle,
   handleContentEnded,
   handleIntroComplete,
   appendItems,
@@ -632,8 +633,10 @@ async function handleRequest(
             sendError(res, `File not found in cache: ${filenameToPlay}`, 404);
             return;
           }
+          // Preserve current loop setting if not explicitly provided
+          const currentState = playbackManager.getState();
           const playOptions = {
-            loop: body?.loop !== false,
+            loop: body?.loop !== undefined ? body.loop as boolean : currentState.loop,
             showIntro: body?.showIntro === true,
           };
           playContent(content, playOptions);
@@ -643,6 +646,12 @@ async function handleRequest(
 
         // URL - auto-detect type
         if (urlToPlay) {
+          logger.info('Processing URL for play', {
+            url: urlToPlay,
+            isEden: isEdenUrl(urlToPlay),
+            parsedEden: parseEdenUrl(urlToPlay),
+          });
+
           // Eden URL (creation or collection) - async with playAfter
           if (isEdenUrl(urlToPlay)) {
             const edenInfo = parseEdenUrl(urlToPlay);
@@ -739,8 +748,10 @@ async function handleRequest(
         // Direct content object - play immediately (synchronous)
         if (body?.content) {
           const content = body.content as import('@chiba/shared').Content;
+          // Preserve current loop setting if not explicitly provided
+          const currentState = playbackManager.getState();
           const playOptions = {
-            loop: body?.loop !== false,
+            loop: body?.loop !== undefined ? body.loop as boolean : currentState.loop,
             showIntro: body?.showIntro === true,
           };
           playContent(content, playOptions);
@@ -798,6 +809,13 @@ async function handleRequest(
         const enabled = body?.enabled as boolean ?? !playbackManager.getState().loop;
         playbackManager.setLoop(enabled);
         sendJson(res, { success: true, data: { loop: playbackManager.getState().loop } });
+        return;
+      }
+
+      case '/shuffle': {
+        const enabled = body?.enabled as boolean ?? !playbackManager.getState().shuffle;
+        setPlaybackShuffle(enabled);
+        sendJson(res, { success: true, data: { shuffle: playbackManager.getState().shuffle } });
         return;
       }
 
@@ -1373,12 +1391,47 @@ export function startServer(port = DEFAULT_PORT): http.Server {
   });
   taskQueue.setPlayCallback((result) => {
     // When a task with playAfter completes, start playback
+    // Loop/shuffle settings are preserved from current state
+
+    // If result includes a playlist (Eden collection), play the playlist
+    if (result.playlist) {
+      playPlaylist(result.playlist);
+      logger.info('Auto-playing playlist after collection sync', {
+        playlistName: result.playlist.name,
+        itemCount: result.playlist.items.length,
+      });
+      return;
+    }
+
+    // Otherwise play single content by filename
     if (result.filename) {
       const content = getContentByFilename(result.filename);
       if (content) {
-        playContent(content, { loop: true });
+        playContent(content);
         logger.info('Auto-playing content after download', { filename: result.filename });
       }
+    }
+  });
+
+  // Set up content cached callback to notify controller
+  setContentCachedCallback((content) => {
+    if (state.controllerWs?.readyState === WebSocket.OPEN) {
+      const msg: NodeToControllerMessage = {
+        type: 'content_cached',
+        content: {
+          hash: content.hash,
+          filename: content.filename,
+          name: content.name,
+          originalUrl: content.originalUrl,
+          sourceType: content.source.type,
+          sourceData: JSON.stringify(content.source),
+          contentType: content.type,
+          sizeBytes: content.sizeBytes,
+          metadata: content.metadata ? JSON.stringify(content.metadata) : undefined,
+        },
+      };
+      state.controllerWs.send(JSON.stringify(msg));
+      logger.debug('Content cached notification sent to controller', { hash: content.hash });
     }
   });
 

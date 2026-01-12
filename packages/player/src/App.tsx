@@ -9,6 +9,7 @@ import {
   UrlDisplay,
   ErrorScreen,
   InteractionOverlay,
+  DownloadOverlay,
 } from './components';
 
 // Get WebSocket URL from query param, or default to current host
@@ -56,7 +57,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [needsInteraction, setNeedsInteraction] = useState(!hasUserInteracted());
   const wsUrl = getWebSocketUrl();
-  const { connected, playbackState, sendEnded, sendError } = useWebSocket(wsUrl);
+  const { connected, playbackState, downloadProgress, sendEnded, sendError } = useWebSocket(wsUrl);
 
   // Also mark as interacted on any click/touch anywhere
   useEffect(() => {
@@ -116,6 +117,15 @@ export default function App() {
     );
   }
 
+  // Render download overlay when active (shown on top of everything)
+  const downloadOverlay = downloadProgress?.active ? (
+    <DownloadOverlay
+      progress={downloadProgress.progress}
+      message={downloadProgress.message}
+      name={downloadProgress.name}
+    />
+  ) : null;
+
   // Render based on playback mode
   const { mode, currentContent, currentUrl, introMetadata, loop, paused, volume } = playbackState;
 
@@ -124,12 +134,14 @@ export default function App() {
       if (!currentContent) {
         return (
           <div className="player-container">
+            {downloadOverlay}
             <ErrorScreen message="No content to play" />
           </div>
         );
       }
       return (
         <div className="player-container">
+          {downloadOverlay}
           <VideoPlayer
             content={currentContent}
             loop={loop}
@@ -145,12 +157,14 @@ export default function App() {
       if (!currentContent) {
         return (
           <div className="player-container">
+            {downloadOverlay}
             <ErrorScreen message="No content to display" />
           </div>
         );
       }
       return (
         <div className="player-container">
+          {downloadOverlay}
           <ImageDisplay
             content={currentContent}
             onError={handleError}
@@ -162,12 +176,14 @@ export default function App() {
       if (!introMetadata) {
         return (
           <div className="player-container">
+            {downloadOverlay}
             <ErrorScreen message="No intro metadata" />
           </div>
         );
       }
       return (
         <div className="player-container">
+          {downloadOverlay}
           <IntroScreen metadata={introMetadata} />
         </div>
       );
@@ -176,12 +192,14 @@ export default function App() {
       if (!currentUrl) {
         return (
           <div className="player-container">
+            {downloadOverlay}
             <ErrorScreen message="No URL to display" />
           </div>
         );
       }
       return (
         <div className="player-container">
+          {downloadOverlay}
           <UrlDisplay url={currentUrl} onError={handleError} />
         </div>
       );
@@ -192,12 +210,14 @@ export default function App() {
       if (!connected) {
         return (
           <div className="player-container">
+            {downloadOverlay}
             <OfflineScreen />
           </div>
         );
       }
       return (
         <div className="player-container">
+          {downloadOverlay}
           <DebugScreen connected={connected} />
         </div>
       );

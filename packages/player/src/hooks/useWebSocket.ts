@@ -4,15 +4,24 @@ import { DEFAULT_PLAYBACK_STATE, WS_RECONNECT_DELAY } from '@chiba/shared';
 
 const WS_RECONNECT_INTERVAL = WS_RECONNECT_DELAY;
 
+export interface DownloadProgress {
+  active: boolean;
+  progress: number;
+  message?: string;
+  name?: string;
+}
+
 interface WebSocketState {
   connected: boolean;
   playbackState: PlaybackState;
+  downloadProgress: DownloadProgress | null;
 }
 
 export function useWebSocket(url: string) {
   const [state, setState] = useState<WebSocketState>({
     connected: false,
     playbackState: DEFAULT_PLAYBACK_STATE,
+    downloadProgress: null,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -41,6 +50,20 @@ export function useWebSocket(url: string) {
             setState(prev => ({
               ...prev,
               playbackState: message.playback,
+            }));
+          } else if (message.type === 'download_progress') {
+            console.log('[WebSocket] Download progress', message.status, message.progress);
+            setState(prev => ({
+              ...prev,
+              downloadProgress:
+                message.status === 'completed' || message.status === 'error'
+                  ? null
+                  : {
+                      active: true,
+                      progress: message.progress,
+                      message: message.message,
+                      name: message.name,
+                    },
             }));
           }
         } catch (err) {

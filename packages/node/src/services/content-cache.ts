@@ -15,6 +15,35 @@ import { getDatabase, generateId } from '../db/index.js';
 const logger = createLogger('node', 'cache');
 
 /**
+ * Callback invoked when new content is cached.
+ * Used to notify controller about new content in the library.
+ */
+type ContentCachedCallback = (content: Content) => void;
+let contentCachedCallback: ContentCachedCallback | null = null;
+
+/**
+ * Set callback for when new content is cached.
+ * @param callback Function to call with the newly cached content
+ */
+export function setContentCachedCallback(callback: ContentCachedCallback | null): void {
+  contentCachedCallback = callback;
+}
+
+/**
+ * Notify about newly cached content. Called by other services (e.g., eden.ts)
+ * after they cache content directly.
+ */
+export function notifyContentCached(content: Content): void {
+  if (contentCachedCallback) {
+    try {
+      contentCachedCallback(content);
+    } catch (err) {
+      logger.error('Content cached callback error', err as Error);
+    }
+  }
+}
+
+/**
  * Video magic byte signatures for validation.
  */
 const VIDEO_SIGNATURES = [
@@ -182,9 +211,9 @@ export function getExistingContent(hash: string): Content | null {
 }
 
 /**
- * Save content metadata to database.
+ * Save content metadata to database and notify callback.
  */
-function saveContent(content: Content): void {
+function saveContent(content: Content, isNew = true): void {
   const db = getDatabase();
   db.prepare(`
     INSERT OR REPLACE INTO cached_content (
@@ -206,6 +235,15 @@ function saveContent(content: Content): void {
     content.metadata ? JSON.stringify(content.metadata) : null,
     content.createdAt
   );
+
+  // Notify callback for new content (not already cached)
+  if (isNew && contentCachedCallback) {
+    try {
+      contentCachedCallback(content);
+    } catch (err) {
+      logger.error('Content cached callback error', err as Error);
+    }
+  }
 }
 
 export interface CacheResult {

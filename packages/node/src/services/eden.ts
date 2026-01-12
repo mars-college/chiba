@@ -10,7 +10,7 @@ import crypto from 'crypto';
 import { createLogger, EDEN_API, getContentType } from '@chiba/shared';
 import type { Content, ContentMetadata, Playlist, PlaylistItem } from '@chiba/shared';
 import { getDatabase, generateId } from '../db/index.js';
-import { getMediaDir, getExistingContent } from './content-cache.js';
+import { getMediaDir, getExistingContent, notifyContentCached } from './content-cache.js';
 
 const logger = createLogger('node', 'eden');
 
@@ -60,12 +60,25 @@ export interface EdenUrlInfo {
  * Eden API response.
  */
 interface EdenApiResponse {
-  docs?: EdenCreation[];
+  docs?: Array<{ _id: string; url?: string; filename?: string }>;
   hasNextPage?: boolean;
+}
+
+/**
+ * Sanitize a creation name: max 40 chars, no line breaks.
+ */
+export function sanitizeCreationName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  // Remove line breaks and extra whitespace
+  const cleaned = name.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // Truncate to 40 chars
+  if (cleaned.length <= 40) return cleaned;
+  return cleaned.slice(0, 37) + '...';
 }
 
 export interface EdenSyncResult {
   collectionId: string;
+  collectionName: string;
   db: 'PROD' | 'STAGE';
   total: number;
   downloaded: number;
@@ -265,7 +278,8 @@ export async function getCollectionCreationsList(
 }
 
 /**
- * Fetch all creations from an Eden collection with pagination.
+ * Fetch all creations from an Eden collection with full details.
+ * First gets the list of IDs, then fetches each creation individually for full metadata.
  */
 async function getCollectionCreations(
   collectionId: string,
@@ -277,12 +291,13 @@ async function getCollectionCreations(
   }
 
   const apiBase = getApiBase(db);
-  const creations: EdenCreation[] = [];
+  const creationIds: string[] = [];
   let page = 1;
   let hasNextPage = true;
 
-  logger.info('Fetching Eden collection', { collectionId, db, apiBase });
+  logger.info('Fetching Eden collection creation IDs', { collectionId, db, apiBase });
 
+  // First, get all creation IDs from the collection
   while (hasNextPage) {
     const url = `${apiBase}/v2/collections/${collectionId}/creations?page=${page}&limit=100`;
 
@@ -304,12 +319,27 @@ async function getCollectionCreations(
     });
 
     if (data.docs) {
-      creations.push(...data.docs);
+      creationIds.push(...data.docs.map(d => d._id));
       logger.debug('Fetched page', { page, count: data.docs.length });
     }
 
     hasNextPage = data.hasNextPage ?? false;
     page++;
+  }
+
+  logger.info('Found creation IDs', { collectionId, count: creationIds.length });
+
+  // Now fetch full details for each creation
+  const creations: EdenCreation[] = [];
+  for (const creationId of creationIds) {
+    try {
+      const creation = await getCreation(creationId, db);
+      if (creation) {
+        creations.push(creation);
+      }
+    } catch (err) {
+      logger.warn('Failed to fetch creation details', { creationId, error: (err as Error).message });
+    }
   }
 
   logger.info('Fetched all creations', { collectionId, total: creations.length });
@@ -379,11 +409,16 @@ export async function syncCollection(
   logger.info('Starting Eden sync', { collectionId, db, skipExisting });
   const done = logger.time('Eden sync', { collectionId });
 
+  // Fetch collection metadata for the playlist name
+  const collectionInfo = await getCollectionInfo(collectionId, db);
+  const collectionName = collectionInfo?.name || `Eden Collection ${collectionId}`;
+
   // Fetch all creations
   const creations = await getCollectionCreations(collectionId, db);
 
   const result: EdenSyncResult = {
     collectionId,
+    collectionName,
     db,
     total: creations.length,
     downloaded: 0,
@@ -425,7 +460,7 @@ export async function syncCollection(
         content: existing,
         order: order++,
         metadata: {
-          title: creation.title || creation.name,
+          title: sanitizeCreationName(creation.name) || sanitizeCreationName(creation.title) || `Creation ${creation._id.slice(0, 8)}`,
           author: creation.user?.username,
         },
       });
@@ -445,8 +480,10 @@ export async function syncCollection(
       await downloadFile(creation.url, destPath);
 
       const stats = fs.statSync(destPath);
+      // Sanitize name: max 40 chars, no line breaks
+      const contentName = sanitizeCreationName(creation.name) || sanitizeCreationName(creation.title) || `Creation ${creation._id.slice(0, 8)}`;
       const metadata: ContentMetadata = {
-        title: creation.title || creation.name,
+        title: contentName,
         author: creation.user?.username,
       };
 
@@ -454,6 +491,7 @@ export async function syncCollection(
         id: generateId(),
         hash: urlHash,
         filename,
+        name: contentName,
         originalUrl: creation.url,
         source: { type: 'eden_collection', collectionId, db },
         type: getContentType(filename) ?? 'video',
@@ -466,20 +504,24 @@ export async function syncCollection(
       const database = getDatabase();
       database.prepare(`
         INSERT OR REPLACE INTO cached_content (
-          hash, filename, original_url, source_type, source_data,
+          hash, filename, name, original_url, source_type, source_data,
           content_type, size_bytes, metadata, cached_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         content.hash,
         content.filename,
+        content.name,
         creation.url,
         'eden_collection',
         JSON.stringify({ type: 'eden_collection', collectionId, db }),
-        'video',
+        content.type,
         content.sizeBytes,
         JSON.stringify(metadata),
         content.createdAt
       );
+
+      // Notify about newly cached content
+      notifyContentCached(content);
 
       result.downloaded++;
       result.files.push({ filename, status: 'downloaded', url: creation.url, content });
@@ -518,7 +560,7 @@ export async function syncCollection(
   if (playlistItems.length > 0) {
     result.playlist = {
       id: generateId(),
-      name: `Eden Collection ${collectionId}`,
+      name: collectionName,
       items: playlistItems,
       loop: true,
       showIntros: true,
@@ -593,8 +635,10 @@ export async function downloadCreation(
   await downloadFile(creation.url, destPath);
 
   const stats = fs.statSync(destPath);
+  // Sanitize name: max 40 chars, no line breaks
+  const contentName = name || sanitizeCreationName(creation.name) || sanitizeCreationName(creation.title) || `Creation ${creation._id.slice(0, 8)}`;
   const metadata: ContentMetadata = {
-    title: name || creation.title || creation.name,
+    title: contentName,
     author: creation.user?.username,
   };
 
@@ -602,7 +646,7 @@ export async function downloadCreation(
     id: generateId(),
     hash: urlHash,
     filename,
-    name: name || creation.title || creation.name,
+    name: contentName,
     originalUrl: creation.url,
     source: { type: 'eden_creation', creationId, db },
     type: getContentType(filename) ?? 'video',
@@ -630,6 +674,9 @@ export async function downloadCreation(
     JSON.stringify(metadata),
     content.createdAt
   );
+
+  // Notify about newly cached content
+  notifyContentCached(content);
 
   logger.info('Creation downloaded', { creationId, filename, size: stats.size });
 
