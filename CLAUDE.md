@@ -153,6 +153,7 @@ States include: mode, currentContent, playlist, index, loop, paused, volume, ima
 | `scripts/init-chiba.sh` | Generate API key, create .env, show deploy commands |
 | `scripts/setup-node.sh` | Full Pi setup (packages, audio, kiosk, systemd) |
 | `scripts/find-pis.sh` | Discover Pis by mDNS hostname |
+| `scripts/rename.sh` | Rename a node via API (usage: `./rename.sh <host> <name>`) |
 
 ## Development
 
@@ -215,6 +216,7 @@ pnpm dev:dashboard   # Start dashboard dev server
 - `POST /cache` - Cache content (doesn't play)
 - `POST /clear-cache` - Delete all cached content
 - `POST /exit-kiosk` - Exit kiosk mode (writes signal file for run-kiosk.sh)
+- `POST /rename` - Rename node's friendly name (auto-updates dashboard via WebSocket)
 
 ## Node API Details
 

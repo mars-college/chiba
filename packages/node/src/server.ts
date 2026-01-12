@@ -923,6 +923,47 @@ async function handleRequest(
         }
         return;
       }
+
+      case '/rename': {
+        // Rename the node's friendly name
+        const newName = body?.name as string | undefined;
+        if (!newName || typeof newName !== 'string' || newName.trim() === '') {
+          sendError(res, 'Missing or invalid name parameter', 400);
+          return;
+        }
+
+        const trimmedName = newName.trim();
+        const oldName = state.config.friendlyName;
+        logger.info('Rename command received', { oldName, newName: trimmedName });
+
+        // Update runtime state
+        state.config.friendlyName = trimmedName;
+
+        // Persist to database
+        setConfig('node.friendly_name', trimmedName);
+
+        // Send state update to controller so dashboard updates
+        sendStateToController(playbackManager.getState());
+
+        // Also send a heartbeat with the new name
+        if (state.controllerWs?.readyState === WebSocket.OPEN) {
+          const heartbeatMessage: NodeToControllerMessage = {
+            type: 'heartbeat',
+            status: getNodeStatus(),
+          };
+          state.controllerWs.send(JSON.stringify(heartbeatMessage));
+        }
+
+        logger.info('Node renamed', { oldName, newName: trimmedName });
+        sendJson(res, {
+          success: true,
+          data: {
+            oldName,
+            newName: trimmedName,
+          },
+        });
+        return;
+      }
     }
   }
 
