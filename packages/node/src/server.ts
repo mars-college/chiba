@@ -1186,10 +1186,12 @@ function connectToController(): void {
 
   try {
     const ws = new WebSocket(wsUrl);
+    let isAlive = true;
 
     ws.on('open', () => {
       logger.info('Connected to controller');
       state.controllerWs = ws;
+      isAlive = true;
 
       // Send registration
       const registerMessage: NodeToControllerMessage = {
@@ -1203,7 +1205,13 @@ function connectToController(): void {
       startHeartbeat();
     });
 
+    // WebSocket-level pong response (detects stale connections)
+    ws.on('pong', () => {
+      isAlive = true;
+    });
+
     ws.on('message', (data) => {
+      isAlive = true; // Any message means connection is alive
       try {
         const message = JSON.parse(data.toString()) as ControllerToNodeMessage;
         handleControllerMessage(message);
@@ -1225,6 +1233,29 @@ function connectToController(): void {
       stopHeartbeat();
       scheduleReconnect();
     });
+
+    // Ping the controller every 30 seconds to detect stale connections
+    const pingInterval = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        clearInterval(pingInterval);
+        return;
+      }
+
+      if (!isAlive) {
+        // No response since last ping - connection is stale
+        logger.warn('Controller connection stale (no pong), forcing reconnect');
+        clearInterval(pingInterval);
+        ws.terminate(); // Force close, triggers 'close' event
+        return;
+      }
+
+      isAlive = false;
+      ws.ping(); // Send WebSocket-level ping
+    }, 30000);
+
+    // Clean up ping interval on close
+    ws.on('close', () => clearInterval(pingInterval));
+
   } catch (error) {
     logger.error('Failed to connect to controller', error as Error);
     scheduleReconnect();

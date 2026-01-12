@@ -249,34 +249,35 @@ export function PlaylistsPage() {
           {playlists.map((playlist) => (
             <div key={playlist.id} className="card">
               <div className="card-header">
-                <h3 className="card-title">{playlist.name}</h3>
+                <h3 className="card-title">
+                  {playlist.name}
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 'normal', fontSize: '0.875rem', marginLeft: '8px' }}>
+                    ({playlist.items.length})
+                  </span>
+                </h3>
               </div>
               <div className="card-body">
-                <div className="node-info-row">
-                  <span className="node-info-label">Items</span>
-                  <span className="node-info-value">{playlist.items.length}</span>
-                </div>
                 {playlist.items.length > 0 && (
-                  <div style={{ marginTop: '12px' }}>
-                    <div className="form-label">Contents:</div>
-                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                      {playlist.items.slice(0, 3).map((item, index) => {
-                        const label = getItemLabel(item);
-                        return (
-                          <div key={index} style={{
-                            padding: '4px 0',
-                            borderBottom: index < Math.min(playlist.items.length, 3) - 1 ? '1px solid var(--border)' : 'none',
-                          }}>
-                            {label}
-                          </div>
-                        );
-                      })}
-                      {playlist.items.length > 3 && (
-                        <div style={{ padding: '4px 0', color: 'var(--text-muted)' }}>
-                          +{playlist.items.length - 3} more...
+                  <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                    {playlist.items.slice(0, 3).map((item, index) => {
+                      const label = getItemLabel(item);
+                      return (
+                        <div key={index} style={{
+                          padding: '4px 0',
+                          borderBottom: index < Math.min(playlist.items.length, 3) - 1 ? '1px solid var(--border)' : 'none',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}>
+                          {label}
                         </div>
-                      )}
-                    </div>
+                      );
+                    })}
+                    {playlist.items.length > 3 && (
+                      <div style={{ padding: '4px 0', color: 'var(--text-muted)' }}>
+                        +{playlist.items.length - 3} more...
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -386,15 +387,22 @@ export function PlaylistsPage() {
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
+                          gap: '8px',
                           padding: '8px 12px',
                           backgroundColor: 'var(--bg-secondary)',
                           borderRadius: '4px',
                         }}
                       >
-                        <span style={{ fontSize: '0.875rem' }}>{getItemLabel(item)}</span>
+                        <span style={{
+                          fontSize: '0.875rem',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          minWidth: 0,
+                        }}>{getItemLabel(item)}</span>
                         <button
                           className="btn btn-sm"
-                          style={{ padding: '4px 8px', backgroundColor: 'var(--error)', color: 'white' }}
+                          style={{ padding: '4px 8px', backgroundColor: 'var(--error)', color: 'white', flexShrink: 0 }}
                           onClick={() => handleRemoveItemFromPlaylist(index)}
                           title="Remove from playlist"
                         >
@@ -425,15 +433,22 @@ export function PlaylistsPage() {
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
+                          gap: '8px',
                           padding: '8px 12px',
                           backgroundColor: 'var(--bg-tertiary)',
                           borderRadius: '4px',
                         }}
                       >
-                        <span style={{ fontSize: '0.875rem' }}>{item.name || item.filename}</span>
+                        <span style={{
+                          fontSize: '0.875rem',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          minWidth: 0,
+                        }}>{item.name || item.filename}</span>
                         <button
                           className="btn btn-sm"
-                          style={{ padding: '4px 8px', backgroundColor: 'var(--success)', color: 'white' }}
+                          style={{ padding: '4px 8px', backgroundColor: 'var(--success)', color: 'white', flexShrink: 0 }}
                           onClick={() => handleAddItemToPlaylist(item)}
                           title="Add to playlist"
                         >

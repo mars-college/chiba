@@ -195,7 +195,23 @@ export function NodeDetailPage() {
         <Link to="/" className="btn btn-secondary btn-sm" style={{ marginBottom: '16px' }}>
           Back to Nodes
         </Link>
-        <h1 className="page-title">{node.node.friendlyName}</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <h1 className="page-title" style={{ margin: 0 }}>{node.node.friendlyName}</h1>
+          <a
+            href={`http://${node.node.ip}:${node.node.port}/player?kiosk`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-secondary btn-sm"
+            style={{ textDecoration: 'none', padding: '4px 8px', display: 'inline-flex', alignItems: 'center' }}
+            title="Open player in new tab"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </a>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '8px', flexWrap: 'wrap' }}>
           <p className="page-subtitle" style={{ margin: 0 }}>
             <span className={`status-dot ${node.connected ? 'online' : 'offline'}`} style={{ display: 'inline-block', marginRight: '8px' }} />
