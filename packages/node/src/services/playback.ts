@@ -146,48 +146,55 @@ class PlaybackManager {
    * Play a single content item.
    */
   playContent(content: Content, options: { loop?: boolean; showIntro?: boolean } = {}): void {
-    // Preserve current loop setting if not explicitly provided
-    const { loop = this.state.loop, showIntro = false } = options;
+    // loop option controls single-item looping, NOT playlist looping
+    // Default to false for playlist items, true for single items played with loop intent
+    const { loop: singleItemLoop = false, showIntro = false } = options;
 
-    logger.info('Playing content', { filename: content.filename, type: content.type, loop });
+    logger.info('Playing content', { filename: content.filename, type: content.type, singleItemLoop });
     markAsPlayed(content.hash);
 
     if (showIntro && content.metadata?.title) {
-      // Show intro first
+      // Show intro first - don't modify global loop state
       this.transition('intro', {
         currentContent: content,
         introMetadata: content.metadata,
-        loop,
         paused: false,
       });
 
       // Transition to actual content after intro
       const introDuration = content.metadata.introDuration ?? DEFAULT_INTRO_DURATION;
       this.introTimer = setTimeout(() => {
-        this.startContentPlayback(content, loop);
+        this.startContentPlayback(content, singleItemLoop);
       }, introDuration);
     } else {
-      this.startContentPlayback(content, loop);
+      this.startContentPlayback(content, singleItemLoop);
     }
   }
 
   /**
    * Start actual content playback (after intro if shown).
+   * @param content The content to play
+   * @param singleItemLoop Whether a single item (not in playlist) should loop indefinitely
    */
-  private startContentPlayback(content: Content, loop: boolean): void {
+  private startContentPlayback(content: Content, singleItemLoop: boolean): void {
     // Detect actual content type from filename extension (don't trust content.type which may be stale)
     const actualType = getContentType(content.filename) ?? content.type;
     const mode: PlaybackMode = actualType === 'video' ? 'video' : 'image';
 
+    // Don't modify the global loop state here - it controls playlist looping
+    // Only update content and mode
     this.transition(mode, {
       currentContent: content,
       introMetadata: undefined,
-      loop,
       paused: false,
     });
 
-    // For images, auto-advance after global duration
-    if (actualType === 'image' && !loop) {
+    // For images: auto-advance after duration UNLESS it's a single item set to loop
+    // In playlist mode, images always auto-advance (playlist loop is handled by next())
+    const isInPlaylist = !!this.state.playlist;
+    const shouldAutoAdvance = actualType === 'image' && (isInPlaylist || !singleItemLoop);
+
+    if (shouldAutoAdvance) {
       this.imageTimer = setTimeout(() => {
         this.handleContentEnded();
       }, this.state.imageDuration);
@@ -404,13 +411,9 @@ class PlaybackManager {
 
     const showIntro = playlist.showIntros && (metadata.title || metadata.author);
 
-    // Preserve the playlist's loop setting - individual items don't loop,
-    // but we need to keep the playlist loop setting for when the playlist ends
-    const playlistLoop = this.state.loop;
+    // Play content - loop:false means individual items don't loop indefinitely
+    // The global loop state (for playlist looping) is preserved automatically
     this.playContent(contentWithMeta, { loop: false, showIntro: !!showIntro });
-    // Restore and broadcast the correct loop state (playContent set it to false for item looping)
-    this.state.loop = playlistLoop;
-    this.broadcast();
   }
 
   /**
@@ -658,7 +661,10 @@ class PlaybackManager {
     logger.debug('Intro complete');
 
     if (this.state.currentContent) {
-      this.startContentPlayback(this.state.currentContent, this.state.loop);
+      // In playlist mode, items never loop individually
+      // For single items, respect the global loop setting
+      const singleItemLoop = !this.state.playlist && this.state.loop;
+      this.startContentPlayback(this.state.currentContent, singleItemLoop);
     }
   }
 }

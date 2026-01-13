@@ -165,6 +165,53 @@ export function getContentByFilename(filename: string): Content | null {
 }
 
 /**
+ * Check if content with this original URL already exists.
+ * Used to avoid re-downloading the same URL.
+ */
+export function getContentByOriginalUrl(url: string): Content | null {
+  const db = getDatabase();
+  const row = db.prepare(`
+    SELECT * FROM cached_content WHERE original_url = ?
+  `).get(url) as {
+    hash: string;
+    filename: string;
+    name: string | null;
+    original_url: string | null;
+    source_type: string;
+    source_data: string | null;
+    content_type: string;
+    size_bytes: number;
+    duration: number | null;
+    width: number | null;
+    height: number | null;
+    metadata: string | null;
+    cached_at: number;
+    last_played_at: number | null;
+  } | undefined;
+
+  if (!row) return null;
+
+  const source: ContentSource = JSON.parse(row.source_data ?? '{}');
+
+  return {
+    id: row.hash,
+    hash: row.hash,
+    filename: row.filename,
+    name: row.name ?? undefined,
+    originalUrl: row.original_url ?? undefined,
+    source,
+    type: row.content_type as ContentType,
+    sizeBytes: row.size_bytes,
+    duration: row.duration ?? undefined,
+    width: row.width ?? undefined,
+    height: row.height ?? undefined,
+    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    createdAt: row.cached_at,
+    lastPlayedAt: row.last_played_at ?? undefined,
+  };
+}
+
+/**
  * Check if content with this hash already exists.
  */
 export function getExistingContent(hash: string): Content | null {
@@ -269,6 +316,18 @@ export async function downloadAndCache(
   options?: { metadata?: ContentMetadata; name?: string; onProgress?: ProgressCallback }
 ): Promise<CacheResult> {
   const { metadata, name, onProgress } = options || {};
+
+  // Check if URL is already cached before downloading
+  const existingByUrl = getContentByOriginalUrl(url);
+  if (existingByUrl) {
+    const mediaDir = getMediaDir();
+    const filePath = path.join(mediaDir, existingByUrl.filename);
+    if (fs.existsSync(filePath)) {
+      logger.info('URL already cached, skipping download', { url, filename: existingByUrl.filename });
+      return { content: existingByUrl, alreadyCached: true };
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const protocol = url.startsWith('https') ? https : http;
     const mediaDir = getMediaDir();
