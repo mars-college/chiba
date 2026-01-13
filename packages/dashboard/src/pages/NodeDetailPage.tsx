@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import type { NodeStatus, DisplayRotation } from '@chiba/shared';
 import { apiGet, apiPost } from '../hooks/useApi';
 import { PlaybackPanel } from '../components/PlaybackPanel';
-import { CachedContentList } from '../components/CachedContentList';
+import { CachedPlaylistList } from '../components/CachedPlaylistList';
 import { HardwareMetricsBar } from '../components/HardwareMetricsBar';
 import { RotationControl } from '../components/RotationControl';
 
@@ -141,6 +141,25 @@ export function NodeDetailPage() {
     }
   };
 
+  const handlePlayPlaylist = async (playlistId: string, startIndex?: number) => {
+    if (!id) return;
+    setPlayError(null);
+    setPlayLoading(true);
+    try {
+      await apiPost(`/nodes/${id}/play`, {
+        playlistId,
+        startIndex: startIndex ?? 0
+      });
+      setTimeout(fetchNode, 500);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Play failed';
+      setPlayError(errorMsg);
+      console.error('Play playlist failed:', err);
+    } finally {
+      setPlayLoading(false);
+    }
+  };
+
   const [rotationLoading, setRotationLoading] = useState(false);
   const [clearCacheLoading, setClearCacheLoading] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
@@ -215,7 +234,7 @@ export function NodeDetailPage() {
       <div>
         <div className="page-header">
           <Link to="/" className="btn btn-secondary btn-sm" style={{ marginBottom: '16px' }}>
-            Back to Nodes 33
+            Back to Nodes
           </Link>
           <h1 className="page-title">Node Not Found</h1>
         </div>
@@ -231,7 +250,7 @@ export function NodeDetailPage() {
       {/* Header Section */}
       <div className="page-header" style={{ marginBottom: '24px' }}>
         <Link to="/" className="btn btn-secondary btn-sm" style={{ marginBottom: '16px' }}>
-          Back to Nodes 44
+          Back to Nodes
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <h1 className="page-title" style={{ margin: 0 }}>{node.node.friendlyName}</h1>
@@ -321,15 +340,15 @@ export function NodeDetailPage() {
           </div>
         </div>
 
-        {/* Cached Content */}
+        {/* Cached Playlists */}
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <div className="card-header">
-            <h3 className="card-title">Cached Content</h3>
+            <h3 className="card-title">Cached Playlists</h3>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <span className="badge badge-info">
-                {node.cachedContent?.length || 0} files
+                {node.cachedPlaylists?.length || 0} playlists
               </span>
-              {(node.cachedContent?.length ?? 0) > 0 && (
+              {((node.cachedPlaylists?.length ?? 0) > 0 || (node.cachedContent?.length ?? 0) > 0) && (
                 <button
                   className="btn btn-sm"
                   style={{
@@ -347,9 +366,10 @@ export function NodeDetailPage() {
             </div>
           </div>
           <div className="card-body">
-            <CachedContentList
-              content={node.cachedContent || []}
-              onPlay={(filename) => handlePlay({ type: 'file', filename })}
+            <CachedPlaylistList
+              playlists={node.cachedPlaylists || []}
+              onPlay={(playlistId) => handlePlayPlaylist(playlistId)}
+              onPlayItem={(filename) => handlePlay({ type: 'file', filename })}
               disabled={playLoading}
             />
           </div>

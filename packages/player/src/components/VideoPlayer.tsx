@@ -3,7 +3,6 @@ import type { Content } from '@chiba/shared';
 
 interface VideoPlayerProps {
   content: Content;
-  loop: boolean;
   paused: boolean;
   volume: number;
   onEnded: () => void;
@@ -28,7 +27,6 @@ function getNodeBaseUrl(): string {
 
 export function VideoPlayer({
   content,
-  loop,
   paused,
   volume,
   onEnded,
@@ -168,12 +166,10 @@ export function VideoPlayer({
     }
   }, [volume]);
 
-  // Handle video end
+  // Handle video end - always notify node, playlist logic handles looping
   const handleEnded = useCallback(() => {
-    if (!loop) {
-      onEnded();
-    }
-  }, [loop, onEnded]);
+    onEnded();
+  }, [onEnded]);
 
   // Handle actual video errors (network, decode, etc.)
   const handleError = useCallback(() => {
@@ -200,7 +196,6 @@ export function VideoPlayer({
       className="video-player"
       src={mediaUrl}
       autoPlay
-      loop={loop}
       muted  // Always start muted for autoplay compliance
       playsInline
       controls={false}  // Hide controls for kiosk mode

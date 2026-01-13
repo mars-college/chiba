@@ -33,6 +33,7 @@ class PlaybackManager {
   private introTimer: NodeJS.Timeout | null = null;
   private imageTimer: NodeJS.Timeout | null = null;
   private stateChangeCallback: ((state: PlaybackState) => void) | null = null;
+  private consecutiveFailures: number = 0;
 
   constructor() {
     this.state = { ...DEFAULT_PLAYBACK_STATE, volume: getVolume() };
@@ -143,62 +144,183 @@ class PlaybackManager {
   }
 
   /**
-   * Play a single content item.
+   * Create a single-item playlist from content.
+   * This allows all playback to go through the unified playlist path.
    */
-  playContent(content: Content, options: { loop?: boolean; showIntro?: boolean } = {}): void {
-    // loop option controls single-item looping, NOT playlist looping
-    // Default to false for playlist items, true for single items played with loop intent
-    const { loop: singleItemLoop = false, showIntro = false } = options;
+  private createSingleItemPlaylist(content: Content, showIntro: boolean): Playlist {
+    return {
+      id: `single_${content.hash}_${Date.now()}`,
+      name: content.name || content.filename,
+      items: [{
+        id: `item_${content.hash}`,
+        content: content,
+        order: 0,
+        metadata: content.metadata,
+      }],
+      loop: this.state.loop,  // Use current loop setting
+      showIntros: showIntro && !!content.metadata?.title,
+      introDuration: content.metadata?.introDuration ?? DEFAULT_INTRO_DURATION,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
 
-    logger.info('Playing content', { filename: content.filename, type: content.type, singleItemLoop });
+  /**
+   * Play a single content item.
+   * Wraps content in a single-item playlist for unified playback handling.
+   */
+  playContent(content: Content, options: { showIntro?: boolean } = {}): void {
+    const { showIntro = false } = options;
+
+    logger.info('Playing content', { filename: content.filename, type: content.type });
     markAsPlayed(content.hash);
 
-    if (showIntro && content.metadata?.title) {
-      // Show intro first - don't modify global loop state
-      this.transition('intro', {
-        currentContent: content,
-        introMetadata: content.metadata,
-        paused: false,
-      });
-
-      // Transition to actual content after intro
-      const introDuration = content.metadata.introDuration ?? DEFAULT_INTRO_DURATION;
-      this.introTimer = setTimeout(() => {
-        this.startContentPlayback(content, singleItemLoop);
-      }, introDuration);
-    } else {
-      this.startContentPlayback(content, singleItemLoop);
-    }
+    // Create single-item playlist - loop/shuffle/duration settings are preserved
+    const playlist = this.createSingleItemPlaylist(content, showIntro);
+    this.playPlaylist(playlist, 0);
   }
 
   /**
    * Start actual content playback (after intro if shown).
-   * @param content The content to play
-   * @param singleItemLoop Whether a single item (not in playlist) should loop indefinitely
+   * All content is now played via playlists, so images always auto-advance.
    */
-  private startContentPlayback(content: Content, singleItemLoop: boolean): void {
+  private startContentPlayback(content: Content): void {
     // Detect actual content type from filename extension (don't trust content.type which may be stale)
     const actualType = getContentType(content.filename) ?? content.type;
     const mode: PlaybackMode = actualType === 'video' ? 'video' : 'image';
 
-    // Don't modify the global loop state here - it controls playlist looping
-    // Only update content and mode
     this.transition(mode, {
       currentContent: content,
       introMetadata: undefined,
       paused: false,
     });
 
-    // For images: auto-advance after duration UNLESS it's a single item set to loop
-    // In playlist mode, images always auto-advance (playlist loop is handled by next())
-    const isInPlaylist = !!this.state.playlist;
-    const shouldAutoAdvance = actualType === 'image' && (isInPlaylist || !singleItemLoop);
-
-    if (shouldAutoAdvance) {
+    // Images always auto-advance - playlist next() handles looping at boundaries
+    if (actualType === 'image') {
       this.imageTimer = setTimeout(() => {
         this.handleContentEnded();
       }, this.state.imageDuration);
     }
+    // Videos: wait for 'ended' event from player
+  }
+
+  /**
+   * Preload all playlist items by resolving ContentSource items to Content.
+   * Downloads all files in advance to ensure smooth transitions.
+   */
+  private async preloadPlaylistItems(playlist: Playlist): Promise<Playlist> {
+    const totalItems = playlist.items.length;
+    let processedCount = 0;
+
+    logger.info('Preloading playlist items', { name: playlist.name, totalItems });
+
+    // Send initial preload progress
+    this.sendDownloadProgress({
+      progress: 0,
+      status: 'downloading',
+      message: `Preloading playlist (0/${totalItems})...`,
+    });
+
+    const resolvedItems: PlaylistItem[] = [];
+
+    for (const item of playlist.items) {
+      let content: Content | null = null;
+
+      if ('hash' in item.content) {
+        // Already resolved Content object
+        content = item.content as Content;
+        processedCount++;
+      } else {
+        // It's a ContentSource - need to download/resolve
+        const source = item.content as ContentSource;
+        const itemName = item.metadata?.title || (source.type === 'file' ? source.filename : `Item ${processedCount + 1}`);
+
+        logger.info('Preloading playlist item', {
+          index: processedCount,
+          sourceType: source.type,
+          name: itemName
+        });
+
+        // Send item-specific progress
+        this.sendDownloadProgress({
+          progress: (processedCount / totalItems) * 100,
+          status: 'downloading',
+          name: itemName,
+          message: `Preloading ${itemName} (${processedCount + 1}/${totalItems})...`,
+        });
+
+        try {
+          if (source.type === 'file') {
+            // Look up by filename in cache
+            content = getContentByFilename(source.filename);
+            if (!content) {
+              logger.warn('File not found in cache during preload', { filename: source.filename });
+            }
+          } else if (source.type === 'url') {
+            // Download URL content
+            if (isYouTubeUrl(source.url)) {
+              const result = await downloadYouTube(source.url, { name: item.metadata?.title });
+              content = result.content;
+            } else {
+              const result = await downloadAndCache(source.url, { name: item.metadata?.title });
+              content = result.content;
+            }
+          } else if (source.type === 'youtube') {
+            // Download YouTube content
+            const result = await downloadYouTube(source.url, { name: item.metadata?.title });
+            content = result.content;
+          } else if (source.type === 'eden_creation') {
+            // Download Eden creation
+            const result = await downloadEdenCreation(source.creationId, { db: source.db, name: item.metadata?.title });
+            content = result.content;
+          } else if (source.type === 'eden_collection') {
+            // Sync Eden collection and take first item
+            const result = await syncEdenCollection(source.collectionId, { db: source.db });
+            const firstItem = result.playlist?.items[0];
+            if (firstItem && 'hash' in firstItem.content) {
+              content = firstItem.content as Content;
+            }
+          }
+          processedCount++;
+        } catch (err) {
+          logger.error('Failed to preload playlist item', err as Error, {
+            index: processedCount,
+            source
+          });
+          // Continue with other items - failed ones will be skipped during playback
+          processedCount++;
+        }
+      }
+
+      // Keep item with resolved content (or original if resolution failed)
+      if (content) {
+        resolvedItems.push({
+          ...item,
+          content: content,
+        });
+      } else {
+        // Keep original item - it will be skipped during playback
+        resolvedItems.push(item);
+      }
+    }
+
+    // Send preload complete
+    this.sendDownloadProgress({
+      progress: 100,
+      status: 'completed',
+      message: `Preloaded ${resolvedItems.filter(i => 'hash' in i.content).length}/${totalItems} items`,
+    });
+
+    logger.info('Playlist preload complete', {
+      name: playlist.name,
+      resolved: resolvedItems.filter(i => 'hash' in i.content).length,
+      total: totalItems
+    });
+
+    return {
+      ...playlist,
+      items: resolvedItems,
+    };
   }
 
   /**
@@ -212,12 +334,40 @@ class PlaybackManager {
 
     logger.info('Playing playlist', { name: playlist.name, items: playlist.items.length, startIndex });
 
-    // Save playlist to database
-    try {
-      savePlaylist(playlist);
-      markPlaylistPlayed(playlist.id);
-    } catch (err) {
-      logger.warn('Failed to save playlist to database', { error: (err as Error).message });
+    // Reset failure counter for new playlist
+    this.consecutiveFailures = 0;
+
+    // For single-item playlists (including direct content playback), skip preload
+    // since we already have the content resolved
+    const needsPreload = playlist.items.some(item => !('hash' in item.content));
+
+    if (needsPreload) {
+      // Preload all items first, then start playback
+      this.preloadPlaylistItems(playlist).then(preloadedPlaylist => {
+        this.startPlaylistPlayback(preloadedPlaylist, startIndex);
+      }).catch(err => {
+        logger.error('Failed to preload playlist', err as Error);
+        // Fall back to playing without preload
+        this.startPlaylistPlayback(playlist, startIndex);
+      });
+    } else {
+      // All items already resolved, start immediately
+      this.startPlaylistPlayback(playlist, startIndex);
+    }
+  }
+
+  /**
+   * Internal: Start playlist playback after preloading is complete.
+   */
+  private startPlaylistPlayback(playlist: Playlist, startIndex: number): void {
+    // Save playlist to database (skip transient single-item playlists)
+    if (!playlist.id.startsWith('single_')) {
+      try {
+        savePlaylist(playlist);
+        markPlaylistPlayed(playlist.id);
+      } catch (err) {
+        logger.warn('Failed to save playlist to database', { error: (err as Error).message });
+      }
     }
 
     this.state.playlist = playlist;
@@ -396,11 +546,31 @@ class PlaybackManager {
     }
 
     if (!content) {
-      logger.warn('Could not resolve playlist item content', { index: this.state.playlistIndex });
+      this.consecutiveFailures++;
+      logger.warn('Could not resolve playlist item content', {
+        index: this.state.playlistIndex,
+        consecutiveFailures: this.consecutiveFailures,
+        playlistLength: playlist.items.length,
+      });
+
+      // Stop if all items in playlist have failed consecutively
+      if (this.consecutiveFailures >= playlist.items.length) {
+        logger.error('All playlist items failed to resolve, stopping playback', new Error('All items failed'), {
+          playlistName: playlist.name,
+          itemCount: playlist.items.length,
+        });
+        this.consecutiveFailures = 0;
+        this.stop();
+        return;
+      }
+
       // Skip to next item
       this.next();
       return;
     }
+
+    // Reset failure counter on success
+    this.consecutiveFailures = 0;
 
     // Merge item metadata with content metadata
     const metadata: ContentMetadata = {
@@ -411,9 +581,25 @@ class PlaybackManager {
 
     const showIntro = playlist.showIntros && (metadata.title || metadata.author);
 
-    // Play content - loop:false means individual items don't loop indefinitely
-    // The global loop state (for playlist looping) is preserved automatically
-    this.playContent(contentWithMeta, { loop: false, showIntro: !!showIntro });
+    // Play content directly (don't go through playContent which creates new playlists)
+    markAsPlayed(contentWithMeta.hash);
+
+    if (showIntro) {
+      // Show intro first
+      this.transition('intro', {
+        currentContent: contentWithMeta,
+        introMetadata: metadata,
+        paused: false,
+      });
+
+      // Transition to actual content after intro
+      const introDuration = metadata.introDuration ?? DEFAULT_INTRO_DURATION;
+      this.introTimer = setTimeout(() => {
+        this.startContentPlayback(contentWithMeta);
+      }, introDuration);
+    } else {
+      this.startContentPlayback(contentWithMeta);
+    }
   }
 
   /**
@@ -479,8 +665,7 @@ class PlaybackManager {
     const nextIndex = this.state.playlistIndex + 1;
 
     if (nextIndex >= playlist.items.length) {
-      // EMERGENCY HARDCODE: Always loop playlists. Remove `true ||` to restore normal behavior.
-      if (true || this.state.loop) {
+      if (this.state.loop) {
         this.state.playlistIndex = 0;
         logger.info('Playlist looping to start');
       } else {
@@ -511,8 +696,7 @@ class PlaybackManager {
     const prevIndex = this.state.playlistIndex - 1;
 
     if (prevIndex < 0) {
-      // EMERGENCY HARDCODE: Always loop playlists. Remove `true ||` to restore normal behavior.
-      if (true || this.state.loop) {
+      if (this.state.loop) {
         this.state.playlistIndex = playlist.items.length - 1;
         logger.info('Playlist looping to end');
       } else {
@@ -663,8 +847,7 @@ class PlaybackManager {
     logger.debug('Intro complete');
 
     if (this.state.currentContent) {
-      // Loop setting only applies to playlists, individual items never loop
-      this.startContentPlayback(this.state.currentContent, false);
+      this.startContentPlayback(this.state.currentContent);
     }
   }
 }
@@ -674,7 +857,7 @@ export const playbackManager = new PlaybackManager();
 
 // Export convenience functions
 export const getPlaybackState = () => playbackManager.getState();
-export const playContent = (content: Content, options?: { loop?: boolean; showIntro?: boolean }) =>
+export const playContent = (content: Content, options?: { showIntro?: boolean }) =>
   playbackManager.playContent(content, options);
 export const playPlaylist = (playlist: Playlist, startIndex?: number) =>
   playbackManager.playPlaylist(playlist, startIndex);

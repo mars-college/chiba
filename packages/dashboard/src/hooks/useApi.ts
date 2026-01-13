@@ -218,7 +218,9 @@ export interface UploadProgress {
 export async function apiUpload(
   file: File,
   name?: string,
-  onProgress?: (progress: UploadProgress) => void
+  onProgress?: (progress: UploadProgress) => void,
+  description?: string,
+  author?: string
 ): Promise<{ success: boolean; data: UploadResult }> {
   const apiKey = await getApiKey();
 
@@ -226,6 +228,12 @@ export async function apiUpload(
   formData.append('file', file);
   if (name) {
     formData.append('name', name);
+  }
+  if (description) {
+    formData.append('description', description);
+  }
+  if (author) {
+    formData.append('author', author);
   }
 
   return new Promise((resolve, reject) => {

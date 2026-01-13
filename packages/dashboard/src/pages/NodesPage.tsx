@@ -40,7 +40,9 @@ export function NodesPage() {
         </div>
       ) : (
         <div className="node-grid">
-          {nodes.map(node => (
+          {[...nodes].sort((a, b) =>
+            (a.node.friendlyName || a.node.id).localeCompare(b.node.friendlyName || b.node.id)
+          ).map(node => (
             <NodeCard key={node.node.id} status={node} />
           ))}
         </div>

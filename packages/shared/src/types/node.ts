@@ -95,6 +95,50 @@ export interface ContentSummary {
   cachedAt: number;
 }
 
+/**
+ * Summary of a playlist item for display purposes.
+ */
+export interface PlaylistItemSummary {
+  /** Item ID */
+  id: string;
+  /** Display name */
+  name?: string;
+  /** Content type (video/image) */
+  type?: 'video' | 'image';
+  /** Size in bytes (if resolved) */
+  sizeBytes?: number;
+  /** Whether content is cached locally */
+  isCached: boolean;
+  /** Filename if cached */
+  filename?: string;
+}
+
+/**
+ * Summary of a cached playlist on a node.
+ */
+export interface PlaylistSummary {
+  /** Unique ID for this playlist */
+  id: string;
+  /** Human-readable playlist name */
+  name: string;
+  /** Number of items in the playlist */
+  itemCount: number;
+  /** Total size of all resolved/cached content in bytes */
+  totalSizeBytes: number;
+  /** Whether to loop when reaching the end */
+  loop: boolean;
+  /** Whether to show intro screens between items */
+  showIntros: boolean;
+  /** Unix timestamp when created */
+  createdAt: number;
+  /** Unix timestamp when last modified */
+  updatedAt: number;
+  /** Unix timestamp when last played (if ever) */
+  lastPlayedAt?: number;
+  /** Items in the playlist (for expansion in UI) */
+  items: PlaylistItemSummary[];
+}
+
 // Import PlaybackState from playback.ts to avoid circular dependency
 import type { PlaybackState } from './playback.js';
 
@@ -112,6 +156,8 @@ export interface NodeStatus {
   playbackState: PlaybackState;
   /** List of cached content */
   cachedContent: ContentSummary[];
+  /** List of cached playlists */
+  cachedPlaylists: PlaylistSummary[];
   /** Disk usage information */
   diskUsage: DiskUsage;
   /** Hardware metrics (optional, may not be available on all platforms) */

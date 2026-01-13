@@ -10,6 +10,8 @@ export type {
   DiskUsage,
   HardwareMetrics,
   ContentSummary,
+  PlaylistItemSummary,
+  PlaylistSummary,
   RegisterNodeRequest,
   RegisterNodeResponse,
   DisplayRotation,

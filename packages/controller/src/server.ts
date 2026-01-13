@@ -281,6 +281,7 @@ async function handleRequest(
             // Content
             'GET /api/content',
             'POST /api/content',
+            'PUT /api/content/:id',
             'POST /api/upload',
             'GET /uploads/:filename',
             'DELETE /api/content/:id',
@@ -332,14 +333,42 @@ async function handleRequest(
         return;
 
       case '/api/content': {
-        // Content library from database
+        // Content library from database with pagination and search
         const db = getDatabase();
+        const urlParams = new URL(req.url || '', `http://${req.headers.host}`).searchParams;
+
+        // Parse pagination params
+        const page = Math.max(1, parseInt(urlParams.get('page') || '1', 10));
+        const limit = Math.min(100, Math.max(1, parseInt(urlParams.get('limit') || '100', 10)));
+        const search = urlParams.get('search')?.trim().toLowerCase() || '';
+        const offset = (page - 1) * limit;
+
+        // Build WHERE clause for search
+        let whereClause = '';
+        const params: string[] = [];
+        if (search) {
+          whereClause = `WHERE (
+            LOWER(COALESCE(name, '')) LIKE ? OR
+            LOWER(filename) LIKE ? OR
+            LOWER(COALESCE(metadata, '')) LIKE ?
+          )`;
+          const searchPattern = `%${search}%`;
+          params.push(searchPattern, searchPattern, searchPattern);
+        }
+
+        // Get total count
+        const countResult = db.prepare(`SELECT COUNT(*) as total FROM content ${whereClause}`).get(...params) as { total: number };
+        const total = countResult.total;
+
+        // Get paginated results
         const rows = db.prepare(`
           SELECT id, hash, filename, name, original_url, source_type, source_data,
                  content_type, size_bytes, duration, metadata, created_at
           FROM content
+          ${whereClause}
           ORDER BY created_at DESC
-        `).all() as Array<{
+          LIMIT ? OFFSET ?
+        `).all(...params, limit, offset) as Array<{
           id: string;
           hash: string;
           filename: string;
@@ -354,7 +383,7 @@ async function handleRequest(
           created_at: number;
         }>;
 
-        const contentList = rows.map(row => ({
+        const items = rows.map(row => ({
           id: row.id,
           hash: row.hash,
           filename: row.filename,
@@ -368,7 +397,7 @@ async function handleRequest(
           createdAt: row.created_at,
         }));
 
-        sendJson(res, { success: true, data: contentList });
+        sendJson(res, { success: true, data: { items, total, page, limit } });
         return;
       }
 
@@ -653,9 +682,15 @@ async function handleRequest(
         uploadUrl,
       });
 
+      // Build metadata JSON if description or author provided
+      const metadata = (result.description || result.author) ? JSON.stringify({
+        description: result.description || undefined,
+        author: result.author || undefined,
+      }) : null;
+
       db.prepare(`
-        INSERT INTO content (id, hash, filename, name, original_url, source_type, source_data, content_type, size_bytes, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO content (id, hash, filename, name, original_url, source_type, source_data, content_type, size_bytes, metadata, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         result.hash,
@@ -666,6 +701,7 @@ async function handleRequest(
         sourceData,
         result.contentType,
         result.sizeBytes,
+        metadata,
         Date.now()
       );
 
@@ -1478,9 +1514,9 @@ async function handleRequest(
           // Build ContentSource based on source type
           let content: Record<string, unknown>;
           if (item.sourceType === 'eden_creation') {
-            content = { type: 'eden_creation', creationId: item.sourceData.id, db: item.sourceData.db };
+            content = { type: 'eden_creation', creationId: item.sourceData.creationId || item.sourceData.id, db: item.sourceData.db };
           } else if (item.sourceType === 'eden_collection') {
-            content = { type: 'eden_collection', collectionId: item.sourceData.id, db: item.sourceData.db };
+            content = { type: 'eden_collection', collectionId: item.sourceData.collectionId || item.sourceData.id, db: item.sourceData.db };
           } else if (item.sourceType === 'youtube') {
             content = { type: 'youtube', url: item.sourceData.url };
           } else if (item.sourceType === 'url') {
@@ -1571,10 +1607,10 @@ async function handleRequest(
       for (const item of items) {
         const cacheBody: Record<string, unknown> = {};
         if (item.sourceType === 'eden_creation') {
-          cacheBody.creationId = item.sourceData.id;
+          cacheBody.creationId = item.sourceData.creationId || item.sourceData.id;
           cacheBody.db = item.sourceData.db;
         } else if (item.sourceType === 'eden_collection') {
-          cacheBody.collectionId = item.sourceData.id;
+          cacheBody.collectionId = item.sourceData.collectionId || item.sourceData.id;
           cacheBody.db = item.sourceData.db;
         } else if (item.sourceType === 'youtube' || item.sourceType === 'url') {
           cacheBody.url = item.sourceData.url;
@@ -1620,6 +1656,65 @@ async function handleRequest(
         apiKey: process.env.API_KEY || '',
       },
     });
+    return;
+  }
+
+  // Update content metadata
+  if (method === 'PUT' && url.pathname.startsWith('/api/content/')) {
+    const contentId = url.pathname.split('/')[3];
+    if (!contentId) {
+      sendError(res, 'Missing content ID');
+      return;
+    }
+
+    const db = getDatabase();
+    const existing = db.prepare('SELECT * FROM content WHERE id = ?').get(contentId) as {
+      id: string;
+      metadata: string | null;
+    } | undefined;
+    if (!existing) {
+      sendError(res, 'Content not found', 404);
+      return;
+    }
+
+    const body = await readJsonBody<{
+      name?: string;
+      description?: string;
+      author?: string;
+    }>(req);
+
+    if (!body) {
+      sendError(res, 'Invalid JSON body');
+      return;
+    }
+
+    // Update name if provided
+    if (body.name !== undefined) {
+      db.prepare('UPDATE content SET name = ? WHERE id = ?').run(body.name || null, contentId);
+    }
+
+    // Update metadata if description or author provided
+    if (body.description !== undefined || body.author !== undefined) {
+      const currentMetadata = existing.metadata ? JSON.parse(existing.metadata) : {};
+      const newMetadata = {
+        ...currentMetadata,
+        ...(body.description !== undefined && { description: body.description || undefined }),
+        ...(body.author !== undefined && { author: body.author || undefined }),
+      };
+      // Clean up undefined values
+      Object.keys(newMetadata).forEach(key => {
+        if (newMetadata[key] === undefined || newMetadata[key] === '') {
+          delete newMetadata[key];
+        }
+      });
+      db.prepare('UPDATE content SET metadata = ? WHERE id = ?').run(
+        Object.keys(newMetadata).length > 0 ? JSON.stringify(newMetadata) : null,
+        contentId
+      );
+    }
+
+    logger.info('Content updated', { id: contentId, updates: body });
+    sendJson(res, { success: true, message: 'Content updated' });
     return;
   }
 
@@ -2059,6 +2154,7 @@ function handleNodeMessage(
         lastSeen: Date.now(),
         playbackState: { ...DEFAULT_PLAYBACK_STATE },
         cachedContent: [],
+        cachedPlaylists: [],
         diskUsage: {
           totalBytes: 0,
           usedBytes: 0,

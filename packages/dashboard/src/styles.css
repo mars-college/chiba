@@ -218,6 +218,10 @@ body {
   background-color: var(--text-muted);
 }
 
+.status-dot.idle {
+  background-color: var(--text-muted);
+}
+
 .node-card-body {
   padding: 16px;
 }

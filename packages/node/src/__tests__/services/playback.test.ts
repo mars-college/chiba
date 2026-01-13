@@ -20,6 +20,23 @@ vi.mock('../../services/volume.js', () => ({
 vi.mock('../../services/content-cache.js', () => ({
   markAsPlayed: vi.fn(),
   getExistingContent: vi.fn(),
+  getContentByFilename: vi.fn(),
+  downloadAndCache: vi.fn(),
+}));
+
+vi.mock('../../db/index.js', () => ({
+  savePlaylist: vi.fn(),
+  markPlaylistPlayed: vi.fn(),
+}));
+
+vi.mock('../../services/youtube.js', () => ({
+  isYouTubeUrl: vi.fn(() => false),
+  downloadYouTube: vi.fn(),
+}));
+
+vi.mock('../../services/eden.js', () => ({
+  downloadCreation: vi.fn(),
+  syncCollection: vi.fn(),
 }));
 
 import {
@@ -81,6 +98,8 @@ describe('playback service', () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     stopPlayback();
+    // Reset loop to default (true) to ensure clean state between tests
+    playbackManager.setLoop(true);
   });
 
   afterEach(() => {
@@ -129,8 +148,10 @@ describe('playback service', () => {
       expect(state.mode).toBe('image');
     });
 
-    it('should respect loop option', () => {
-      playContent(sampleContent, { loop: false });
+    it('should preserve existing loop setting when playing content', () => {
+      // Loop is now controlled separately via setLoop(), not passed to playContent
+      playbackManager.setLoop(false);
+      playContent(sampleContent);
 
       expect(getPlaybackState().loop).toBe(false);
     });
@@ -181,12 +202,15 @@ describe('playback service', () => {
       expect(getPlaybackState().playlist).toBeUndefined();
     });
 
-    it('should use playlist loop setting', () => {
+    it('should preserve loop setting when playing playlist', () => {
+      // Loop is controlled independently via setLoop(), not from playlist object
+      playbackManager.setLoop(false);
       const loopPlaylist = { ...samplePlaylist, loop: true };
 
       playPlaylist(loopPlaylist);
 
-      expect(getPlaybackState().loop).toBe(true);
+      // Loop setting should be preserved (not taken from playlist)
+      expect(getPlaybackState().loop).toBe(false);
     });
   });
 
@@ -268,6 +292,7 @@ describe('playback service', () => {
     });
 
     it('should stop when at end and loop disabled', () => {
+      playbackManager.setLoop(false);
       playPlaylist(samplePlaylist, 2); // Start at last item
 
       nextItem();
@@ -275,10 +300,15 @@ describe('playback service', () => {
       expect(getPlaybackState().mode).toBe('off');
     });
 
-    it('should do nothing without playlist', () => {
+    it('should work with single content (wrapped as playlist)', () => {
+      // Single content is now wrapped in a 1-item playlist
       playContent(sampleContent);
-      nextItem();
+      const stateAfterPlay = getPlaybackState();
+      expect(stateAfterPlay.playlist).toBeDefined();
+      expect(stateAfterPlay.playlist?.items.length).toBe(1);
 
+      // With loop=true (default), nextItem loops back to the same item
+      nextItem();
       expect(getPlaybackState().mode).toBe('video');
     });
   });
@@ -301,6 +331,7 @@ describe('playback service', () => {
     });
 
     it('should stay at start when loop disabled', () => {
+      playbackManager.setLoop(false);
       playPlaylist(samplePlaylist, 0);
 
       previousItem();
@@ -343,14 +374,19 @@ describe('playback service', () => {
     });
 
     it('should loop single content when loop enabled', () => {
-      playContent(sampleContent, { loop: true });
+      // Single content is now wrapped in a 1-item playlist
+      // Loop controls whether that playlist restarts
+      playbackManager.setLoop(true);
+      playContent(sampleContent);
       handleContentEnded();
 
+      // Should restart the single-item playlist
       expect(getPlaybackState().mode).toBe('video');
     });
 
     it('should stop when single content finishes and loop disabled', () => {
-      playContent(sampleContent, { loop: false });
+      playbackManager.setLoop(false);
+      playContent(sampleContent);
       handleContentEnded();
 
       expect(getPlaybackState().mode).toBe('off');

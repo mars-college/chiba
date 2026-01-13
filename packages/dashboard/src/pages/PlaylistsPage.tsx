@@ -33,8 +33,8 @@ export function PlaylistsPage() {
 
   const fetchContent = async () => {
     try {
-      const response = await apiGet<{ success: boolean; data: Content[] }>('/content');
-      setContent(response.data || []);
+      const response = await apiGet<{ success: boolean; data: { items: Content[]; total: number } }>('/content');
+      setContent(response.data.items || []);
     } catch (err) {
       console.error('Failed to fetch content:', err);
     }
@@ -525,7 +525,7 @@ export function PlaylistsPage() {
                       disabled={playingTo !== null}
                     >
                       <span style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }}>
-                        <span className={`status-dot ${node.connected ? 'online' : 'offline'}`} />
+                        <span className={`status-dot ${!node.connected ? 'offline' : node.playbackState.mode === 'off' ? 'idle' : 'online'}`} />
                         <span style={{ flex: 1 }}>{node.node.friendlyName}</span>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                           {node.node.ip}

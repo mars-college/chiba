@@ -168,6 +168,7 @@ export const SAMPLE_NODE_STATUS: NodeStatus = {
       cachedAt: SAMPLE_CONTENT.createdAt,
     },
   ],
+  cachedPlaylists: [],
   diskUsage: SAMPLE_DISK_USAGE,
   hardware: SAMPLE_HARDWARE_METRICS,
 };

@@ -22,6 +22,8 @@ export interface UploadResult {
   contentType: 'video' | 'image';
   sizeBytes: number;
   mimeType: string;
+  description?: string;
+  author?: string;
 }
 
 // Allowed MIME types
@@ -76,11 +78,17 @@ export function handleUpload(req: http.IncomingMessage): Promise<UploadResult> {
 
     let rejected = false;
     let nameFromField: string | null = null;
+    let descriptionFromField: string | null = null;
+    let authorFromField: string | null = null;
     let fileProcessingPromise: Promise<UploadResult> | null = null;
 
     busboy.on('field', (fieldname, val) => {
       if (fieldname === 'name') {
         nameFromField = val.trim() || null;
+      } else if (fieldname === 'description') {
+        descriptionFromField = val.trim() || null;
+      } else if (fieldname === 'author') {
+        authorFromField = val.trim() || null;
       }
     });
 
@@ -155,6 +163,8 @@ export function handleUpload(req: http.IncomingMessage): Promise<UploadResult> {
             contentType: detectedType,
             sizeBytes,
             mimeType,
+            description: descriptionFromField || undefined,
+            author: authorFromField || undefined,
           });
         });
       });

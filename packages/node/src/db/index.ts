@@ -336,6 +336,19 @@ export function deletePlaylist(id: string): boolean {
 }
 
 /**
+ * Delete all playlists.
+ * Returns the number of playlists deleted.
+ */
+export function clearAllPlaylists(): number {
+  const database = getDatabase();
+  const result = database
+    .prepare('DELETE FROM playlists')
+    .run();
+  logger.info('All playlists cleared', { deletedCount: result.changes });
+  return result.changes;
+}
+
+/**
  * Update last_played_at timestamp for a playlist.
  */
 export function markPlaylistPlayed(id: string): void {

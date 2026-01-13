@@ -37,13 +37,15 @@ import {
   type DiskUsage,
   type HardwareMetrics,
   type ContentSummary,
+  type PlaylistSummary,
+  type PlaylistItemSummary,
   type PlaylistItem,
   type NodeToControllerMessage,
   type ControllerToNodeMessage,
   type PlayerToNodeMessage,
   type DisplayRotation,
 } from '@chiba/shared';
-import { initDatabase, closeDatabase, setConfig, getAllConfig, listPlaylists } from './db/index.js';
+import { initDatabase, closeDatabase, setConfig, getAllConfig, listPlaylists, getPlaylist, clearAllPlaylists } from './db/index.js';
 import { getMediaDir, listCachedContent, getCacheSize, getContentByFilename, clearAllCache, setContentCachedCallback } from './services/content-cache.js';
 import { getDiskUsage as getDiskUsageActual, getHardwareMetrics as getHardwareMetricsActual } from './services/hardware.js';
 import { isYouTubeUrl } from './services/youtube.js';
@@ -293,6 +295,68 @@ function getCachedContent(): ContentSummary[] {
 }
 
 /**
+ * Get cached playlists with summary info.
+ */
+function getCachedPlaylists(): PlaylistSummary[] {
+  const playlists = listPlaylists();
+
+  return playlists.map(playlist => {
+    let totalSizeBytes = 0;
+
+    const items: PlaylistItemSummary[] = playlist.items.map((item, index) => {
+      // Check if content is a resolved Content object with a filename
+      let isCached = false;
+      let filename: string | undefined;
+      let sizeBytes: number | undefined;
+      let type: 'video' | 'image' | undefined;
+      let name: string | undefined;
+
+      const content = item.content;
+
+      // If content has a filename property, try to find it in cache
+      if ('filename' in content && content.filename) {
+        const cachedContent = getContentByFilename(content.filename);
+        if (cachedContent) {
+          isCached = true;
+          filename = cachedContent.filename;
+          sizeBytes = cachedContent.sizeBytes;
+          type = cachedContent.type;
+          name = cachedContent.name || cachedContent.metadata?.title;
+          totalSizeBytes += cachedContent.sizeBytes;
+        }
+      }
+
+      // Get name from metadata or item
+      if (!name && item.metadata?.title) {
+        name = item.metadata.title;
+      }
+
+      return {
+        id: item.id,
+        name: name || `Item ${index + 1}`,
+        type,
+        sizeBytes,
+        isCached,
+        filename,
+      };
+    });
+
+    return {
+      id: playlist.id,
+      name: playlist.name,
+      itemCount: playlist.items.length,
+      totalSizeBytes,
+      loop: playlist.loop,
+      showIntros: playlist.showIntros,
+      createdAt: playlist.createdAt,
+      updatedAt: playlist.updatedAt,
+      lastPlayedAt: undefined, // Could be added to playlist table if needed
+      items,
+    };
+  });
+}
+
+/**
  * Get full node status.
  */
 function getNodeStatus(): NodeStatus {
@@ -302,6 +366,7 @@ function getNodeStatus(): NodeStatus {
     lastSeen: Date.now(),
     playbackState: playbackManager.getState(),
     cachedContent: getCachedContent(),
+    cachedPlaylists: getCachedPlaylists(),
     diskUsage: getDiskUsage(),
     hardware: getHardwareMetrics(),
   };
@@ -689,13 +754,11 @@ async function handleRequest(
             sendError(res, `File not found in cache: ${filenameToPlay}`, 404);
             return;
           }
-          // Preserve current loop setting if not explicitly provided
-          const currentState = playbackManager.getState();
-          const playOptions = {
-            loop: body?.loop !== undefined ? body.loop as boolean : currentState.loop,
-            showIntro: body?.showIntro === true,
-          };
-          playContent(content, playOptions);
+          // If loop is explicitly provided, set it via API (loop is now a playlist-level setting)
+          if (body?.loop !== undefined) {
+            playbackManager.setLoop(body.loop as boolean);
+          }
+          playContent(content, { showIntro: body?.showIntro === true });
           sendJson(res, { success: true, data: { state: playbackManager.getState() } });
           return;
         }
@@ -825,13 +888,11 @@ async function handleRequest(
         // Direct content object - play immediately (synchronous)
         if (body?.content) {
           const content = body.content as import('@chiba/shared').Content;
-          // Preserve current loop setting if not explicitly provided
-          const currentState = playbackManager.getState();
-          const playOptions = {
-            loop: body?.loop !== undefined ? body.loop as boolean : currentState.loop,
-            showIntro: body?.showIntro === true,
-          };
-          playContent(content, playOptions);
+          // If loop is explicitly provided, set it via API (loop is now a playlist-level setting)
+          if (body?.loop !== undefined) {
+            playbackManager.setLoop(body.loop as boolean);
+          }
+          playContent(content, { showIntro: body?.showIntro === true });
           sendJson(res, { success: true, data: { state: playbackManager.getState() } });
           return;
         }
@@ -845,7 +906,21 @@ async function handleRequest(
           return;
         }
 
-        sendError(res, 'Missing filename, url, collectionId, creationId, content, or playlist');
+        // Play playlist by ID (from cached playlists)
+        const playlistId = body?.playlistId as string | undefined;
+        if (playlistId) {
+          const playlist = getPlaylist(playlistId);
+          if (!playlist) {
+            sendError(res, `Playlist not found: ${playlistId}`, 404);
+            return;
+          }
+          const startIndex = (body?.startIndex as number) ?? 0;
+          playPlaylist(playlist, startIndex);
+          sendJson(res, { success: true, data: { state: playbackManager.getState() } });
+          return;
+        }
+
+        sendError(res, 'Missing filename, url, collectionId, creationId, content, playlist, or playlistId');
         return;
       }
 
@@ -1054,13 +1129,15 @@ async function handleRequest(
         if (playbackManager.getState().mode !== 'off') {
           stopPlayback();
         }
-        const result = clearAllCache();
-        logger.info('Cache cleared', result);
+        const cacheResult = clearAllCache();
+        const playlistsDeleted = clearAllPlaylists();
+        logger.info('Cache cleared', { ...cacheResult, playlistsDeleted });
         sendJson(res, {
           success: true,
           data: {
-            deletedCount: result.deletedCount,
-            freedBytes: result.freedBytes,
+            deletedCount: cacheResult.deletedCount,
+            freedBytes: cacheResult.freedBytes,
+            playlistsDeleted,
           },
         });
         return;
@@ -1450,13 +1527,13 @@ function loadConfig(): void {
   const dbConfig = getAllConfig();
 
   // Build config
-  // For friendlyName: prefer .env, then db (if explicitly set), then default
-  // This ensures .env takes precedence, but /rename changes persist in db
+  // For friendlyName: prefer db (if explicitly set via rename), then .env, then default
+  // This ensures /rename changes persist across reboots even if .env update fails
   const dbFriendlyName = dbConfig['node.friendly_name'];
   const envFriendlyName = process.env.NODE_NAME;
   const friendlyName =
-    envFriendlyName ||
     (dbFriendlyName && dbFriendlyName !== 'unnamed-node' ? dbFriendlyName : null) ||
+    envFriendlyName ||
     'unnamed-node';
 
   state.config = {

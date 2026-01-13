@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Content, NodeStatus } from '@chiba/shared';
-import { apiGet, apiPost, apiDelete, apiUpload, UploadProgress } from '../hooks/useApi';
+import { apiGet, apiPost, apiPut, apiDelete, apiUpload, UploadProgress } from '../hooks/useApi';
 
 const ALLOWED_FILE_TYPES = [
   'video/mp4',
@@ -17,6 +17,11 @@ export function ContentPage() {
   const [content, setContent] = useState<Content[]>([]);
   const [nodes, setNodes] = useState<NodeStatus[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Pagination and search state
+  const [page, setPage] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'url' | 'upload'>('url');
   const [urlInput, setUrlInput] = useState('');
   const [nameInput, setNameInput] = useState('');
@@ -29,22 +34,47 @@ export function ContentPage() {
   const [selectedContent, setSelectedContent] = useState<Content | null>(null);
   const [sendToContent, setSendToContent] = useState<Content | null>(null); // For "Send to" modal
 
+  // Edit modal state
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editAuthor, setEditAuthor] = useState('');
+  const [saving, setSaving] = useState(false);
+
   // Upload state
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [uploadName, setUploadName] = useState('');
+  const [uploadDescription, setUploadDescription] = useState('');
+  const [uploadAuthor, setUploadAuthor] = useState('');
+  const [stagedFile, setStagedFile] = useState<File | null>(null);
+  const [stagedPreviewUrl, setStagedPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchContent();
     fetchNodes();
   }, []);
 
+  useEffect(() => {
+    fetchContent();
+  }, [page, search]);
+
   const fetchContent = async () => {
     try {
-      const response = await apiGet<{ success: boolean; data: Content[] }>('/content');
-      setContent(response.data || []);
+      setLoading(true);
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: '100',
+      });
+      if (search) {
+        params.set('search', search);
+      }
+      const response = await apiGet<{
+        success: boolean;
+        data: { items: Content[]; total: number; page: number; limit: number };
+      }>(`/content?${params}`);
+      setContent(response.data.items || []);
+      setTotalItems(response.data.total || 0);
     } catch (err) {
       console.error('Failed to fetch content:', err);
     } finally {
@@ -115,6 +145,34 @@ export function ContentPage() {
     }
   };
 
+  const handleOpenDetails = (item: Content) => {
+    setSelectedContent(item);
+    setEditName(item.name || '');
+    setEditDescription(item.metadata?.description || '');
+    setEditAuthor(item.metadata?.author || '');
+  };
+
+  const handleSaveContent = async () => {
+    if (!selectedContent) return;
+
+    setSaving(true);
+    try {
+      await apiPut(`/content/${selectedContent.id}`, {
+        name: editName,
+        description: editDescription,
+        author: editAuthor,
+      });
+      setMessage({ type: 'success', text: 'Content updated successfully' });
+      fetchContent();
+      setSelectedContent(null);
+      setTimeout(() => setMessage(null), 3000);
+    } catch (err) {
+      setMessage({ type: 'error', text: `Failed to update: ${(err as Error).message}` });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleAddContent = async () => {
     if (!urlInput.trim()) return;
 
@@ -172,8 +230,8 @@ export function ContentPage() {
     }
   };
 
-  // File upload handlers
-  const handleUpload = useCallback(async (file: File) => {
+  // File upload handlers - stage file for preview before adding
+  const handleStageFile = useCallback((file: File) => {
     // Validate file type
     if (!ALLOWED_FILE_TYPES.includes(file.type)) {
       setMessage({
@@ -183,22 +241,51 @@ export function ContentPage() {
       return;
     }
 
+    // Clean up previous preview URL
+    if (stagedPreviewUrl) {
+      URL.revokeObjectURL(stagedPreviewUrl);
+    }
+
+    // Stage the file and create preview URL
+    setStagedFile(file);
+    setStagedPreviewUrl(URL.createObjectURL(file));
+    setUploadName(file.name.replace(/\.[^/.]+$/, '')); // Default name from filename without extension
+    setUploadDescription('');
+    setUploadAuthor('');
+    setMessage(null);
+  }, [stagedPreviewUrl]);
+
+  // Actually upload and add the staged file to library
+  const handleAddUpload = useCallback(async () => {
+    if (!stagedFile) return;
+
     setUploading(true);
     setUploadProgress(null);
     setMessage(null);
 
     try {
       const result = await apiUpload(
-        file,
-        uploadName.trim() || file.name,
-        (progress) => setUploadProgress(progress)
+        stagedFile,
+        uploadName.trim() || stagedFile.name,
+        (progress) => setUploadProgress(progress),
+        uploadDescription.trim() || undefined,
+        uploadAuthor.trim() || undefined
       );
 
       setMessage({
         type: 'success',
-        text: `Uploaded "${result.data.originalName}" successfully!`,
+        text: `Added "${result.data.originalName}" to library!`,
       });
+
+      // Clear staged file
+      if (stagedPreviewUrl) {
+        URL.revokeObjectURL(stagedPreviewUrl);
+      }
+      setStagedFile(null);
+      setStagedPreviewUrl(null);
       setUploadName('');
+      setUploadDescription('');
+      setUploadAuthor('');
       setUploadProgress(null);
       fetchContent();
       setTimeout(() => setMessage(null), 5000);
@@ -210,7 +297,18 @@ export function ContentPage() {
     } finally {
       setUploading(false);
     }
-  }, [uploadName]);
+  }, [stagedFile, uploadName, uploadDescription, uploadAuthor, stagedPreviewUrl]);
+
+  const handleClearStagedFile = useCallback(() => {
+    if (stagedPreviewUrl) {
+      URL.revokeObjectURL(stagedPreviewUrl);
+    }
+    setStagedFile(null);
+    setStagedPreviewUrl(null);
+    setUploadName('');
+    setUploadDescription('');
+    setUploadAuthor('');
+  }, [stagedPreviewUrl]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -218,9 +316,9 @@ export function ContentPage() {
 
     const file = e.dataTransfer.files[0];
     if (file) {
-      handleUpload(file);
+      handleStageFile(file);
     }
-  }, [handleUpload]);
+  }, [handleStageFile]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -235,11 +333,11 @@ export function ContentPage() {
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      handleUpload(file);
+      handleStageFile(file);
       // Reset input so same file can be selected again
       e.target.value = '';
     }
-  }, [handleUpload]);
+  }, [handleStageFile]);
 
   const formatBytes = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -306,7 +404,10 @@ export function ContentPage() {
       <div className="card" style={{ marginBottom: '24px' }}>
         <div className="card-header">
           <h3 className="card-title">Add Content</h3>
-          <div style={{ display: 'flex', gap: '8px' }}>
+        </div>
+        <div className="card-body">
+          {/* Tab selector - centered */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
             <button
               className={`btn btn-sm ${activeTab === 'url' ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setActiveTab('url')}
@@ -320,29 +421,18 @@ export function ContentPage() {
               Upload File
             </button>
           </div>
-        </div>
-        <div className="card-body">
           {activeTab === 'url' ? (
             <>
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
-                <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
-                  <label className="form-label">URL</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="YouTube, Eden, Google Drive, or direct media URL"
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && !showDescription && handleAddContent()}
-                  />
-                </div>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleAddContent}
-                  disabled={!urlInput.trim() || adding}
-                >
-                  {adding ? 'Adding...' : 'Add'}
-                </button>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">URL</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="YouTube, Eden, Google Drive, or direct media URL"
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !showDescription && handleAddContent()}
+                />
               </div>
 
               {/* Collapsible metadata section */}
@@ -413,6 +503,18 @@ export function ContentPage() {
                   </div>
                 )}
               </div>
+
+              {/* Add button at bottom */}
+              <div style={{ marginTop: '16px' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleAddContent}
+                  disabled={!urlInput.trim() || adding}
+                  style={{ width: '100%' }}
+                >
+                  {adding ? 'Adding...' : 'Add to Library'}
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -426,108 +528,100 @@ export function ContentPage() {
                 disabled={uploading}
               />
 
-              <div
-                onClick={() => !uploading && fileInputRef.current?.click()}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                style={{
-                  border: `2px dashed ${dragActive ? 'var(--primary)' : 'var(--border-color)'}`,
+              {uploading ? (
+                /* Upload progress */
+                <div style={{
+                  border: '2px dashed var(--border-color)',
                   borderRadius: '8px',
                   padding: '32px 24px',
                   textAlign: 'center',
-                  cursor: uploading ? 'default' : 'pointer',
-                  backgroundColor: dragActive ? 'rgba(59, 130, 246, 0.05)' : 'transparent',
-                  transition: 'all 0.2s',
-                }}
-              >
-                {uploading ? (
-                  <div>
+                }}>
+                  <div style={{
+                    width: '100%',
+                    height: '8px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    borderRadius: '4px',
+                    overflow: 'hidden',
+                    marginBottom: '12px',
+                  }}>
                     <div style={{
-                      width: '100%',
-                      height: '8px',
-                      backgroundColor: 'var(--bg-secondary)',
-                      borderRadius: '4px',
-                      overflow: 'hidden',
-                      marginBottom: '12px',
-                    }}>
-                      <div style={{
-                        width: `${uploadProgress?.percent || 0}%`,
-                        height: '100%',
-                        backgroundColor: 'var(--primary)',
-                        transition: 'width 0.2s',
-                      }} />
-                    </div>
-                    <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
-                      Uploading... {uploadProgress?.percent || 0}%
-                      {uploadProgress && uploadProgress.total > 0 && (
-                        <span style={{ marginLeft: '8px', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-                          ({formatBytes(uploadProgress.loaded)} / {formatBytes(uploadProgress.total)})
-                        </span>
-                      )}
-                    </p>
+                      width: `${uploadProgress?.percent || 0}%`,
+                      height: '100%',
+                      backgroundColor: 'var(--primary)',
+                      transition: 'width 0.2s',
+                    }} />
                   </div>
-                ) : (
-                  <div>
-                    <svg
-                      width="48"
-                      height="48"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                      style={{ color: 'var(--text-muted)', marginBottom: '12px' }}
+                  <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                    Uploading... {uploadProgress?.percent || 0}%
+                    {uploadProgress && uploadProgress.total > 0 && (
+                      <span style={{ marginLeft: '8px', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                        ({formatBytes(uploadProgress.loaded)} / {formatBytes(uploadProgress.total)})
+                      </span>
+                    )}
+                  </p>
+                </div>
+              ) : stagedFile ? (
+                /* Staged file - show preview and metadata */
+                <div>
+                  {/* Preview */}
+                  <div style={{
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                    marginBottom: '16px',
+                    position: 'relative',
+                  }}>
+                    {/* Clear button */}
+                    <button
+                      onClick={handleClearStagedFile}
+                      style={{
+                        position: 'absolute',
+                        top: '8px',
+                        right: '8px',
+                        background: 'rgba(0,0,0,0.6)',
+                        border: 'none',
+                        borderRadius: '50%',
+                        width: '28px',
+                        height: '28px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10,
+                      }}
+                      title="Remove file"
                     >
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="17 8 12 3 7 8" />
-                      <line x1="12" y1="3" x2="12" y2="15" />
-                    </svg>
-                    <p style={{ color: 'var(--text-secondary)', margin: '0 0 8px 0' }}>
-                      Drag and drop a file here, or click to browse
-                    </p>
-                    <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.875rem' }}>
-                      MP4, WebM, MOV, MKV, JPEG, PNG, GIF, WebP
-                    </p>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                    {stagedFile.type.startsWith('video/') ? (
+                      <video
+                        src={stagedPreviewUrl || undefined}
+                        style={{ width: '100%', maxHeight: '200px', objectFit: 'contain', backgroundColor: '#000' }}
+                        controls
+                      />
+                    ) : (
+                      <img
+                        src={stagedPreviewUrl || undefined}
+                        alt="Preview"
+                        style={{ width: '100%', maxHeight: '200px', objectFit: 'contain', backgroundColor: '#000' }}
+                      />
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Collapsible metadata section for uploads */}
-              <div style={{ marginTop: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowDescription(!showDescription)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    padding: 0,
+                  {/* File info */}
+                  <div style={{
                     fontSize: '0.875rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    style={{
-                      transform: showDescription ? 'rotate(90deg)' : 'rotate(0deg)',
-                      transition: 'transform 0.2s',
-                    }}
-                  >
-                    <polyline points="9 18 15 12 9 6" />
-                  </svg>
-                  Add name, description
-                </button>
+                    color: 'var(--text-muted)',
+                    marginBottom: '16px',
+                  }}>
+                    {stagedFile.name} ({formatBytes(stagedFile.size)})
+                  </div>
 
-                {showDescription && (
-                  <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {/* Metadata form */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label">Name</label>
                       <input
@@ -536,7 +630,6 @@ export function ContentPage() {
                         placeholder="Display name for this file"
                         value={uploadName}
                         onChange={(e) => setUploadName(e.target.value)}
-                        disabled={uploading}
                       />
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
@@ -544,10 +637,10 @@ export function ContentPage() {
                       <textarea
                         className="form-input"
                         rows={2}
-                        value={descriptionInput}
-                        onChange={(e) => setDescriptionInput(e.target.value)}
+                        placeholder="Optional description"
+                        value={uploadDescription}
+                        onChange={(e) => setUploadDescription(e.target.value)}
                         style={{ resize: 'vertical' }}
-                        disabled={uploading}
                       />
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
@@ -555,14 +648,62 @@ export function ContentPage() {
                       <input
                         type="text"
                         className="form-input"
-                        value={authorInput}
-                        onChange={(e) => setAuthorInput(e.target.value)}
-                        disabled={uploading}
+                        placeholder="Author / Creator"
+                        value={uploadAuthor}
+                        onChange={(e) => setUploadAuthor(e.target.value)}
                       />
                     </div>
                   </div>
-                )}
-              </div>
+
+                  {/* Add button */}
+                  <div style={{ marginTop: '16px' }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleAddUpload}
+                      style={{ width: '100%' }}
+                    >
+                      Add to Library
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Drop zone - no file staged */
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  style={{
+                    border: `2px dashed ${dragActive ? 'var(--primary)' : 'var(--border-color)'}`,
+                    borderRadius: '8px',
+                    padding: '32px 24px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    backgroundColor: dragActive ? 'rgba(59, 130, 246, 0.05)' : 'transparent',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <svg
+                    width="48"
+                    height="48"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1"
+                    style={{ color: 'var(--text-muted)', marginBottom: '12px' }}
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  <p style={{ color: 'var(--text-secondary)', margin: '0 0 8px 0' }}>
+                    Drag and drop a file here, or click to browse
+                  </p>
+                  <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.875rem' }}>
+                    MP4, WebM, MOV, MKV, JPEG, PNG, GIF, WebP
+                  </p>
+                </div>
+              )}
             </>
           )}
 
@@ -583,9 +724,24 @@ export function ContentPage() {
 
       {/* Content List */}
       <div className="card">
-        <div className="card-header">
-          <h3 className="card-title">All Content</h3>
-          <span className="badge badge-info">{content.length} items</span>
+        <div className="card-header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 className="card-title">All Content</h3>
+            <span className="badge badge-info">
+              {totalItems > 100 ? `${content.length} of ${totalItems}` : totalItems} items
+            </span>
+          </div>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="Search by name, author, or description..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1); // Reset to first page on search
+            }}
+            style={{ maxWidth: '400px' }}
+          />
         </div>
         <div className="card-body" style={{ padding: 0 }}>
           {loading ? (
@@ -601,9 +757,9 @@ export function ContentPage() {
                   <line x1="12" y1="3" x2="12" y2="15" />
                 </svg>
               </div>
-              <h2 className="empty-state-title">No content yet</h2>
+              <h2 className="empty-state-title">{search ? 'No matches found' : 'No content yet'}</h2>
               <p className="empty-state-description">
-                Add content using the form above to get started.
+                {search ? 'Try a different search term.' : 'Add content using the form above to get started.'}
               </p>
             </div>
           ) : (
@@ -627,7 +783,7 @@ export function ContentPage() {
                         <div>
                           <div style={{ fontWeight: 500 }}>{item.name || item.filename}</div>
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {item.name ? item.filename : `${item.hash.substring(0, 8)}...`}
+                            {item.metadata?.author || (item.name ? item.filename : `${item.hash.substring(0, 8)}...`)}
                           </div>
                         </div>
                       </div>
@@ -654,12 +810,12 @@ export function ContentPage() {
                         <button
                           className="btn btn-sm"
                           style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}
-                          onClick={() => setSelectedContent(item)}
-                          title="View details"
+                          onClick={() => handleOpenDetails(item)}
+                          title="View/edit details"
                         >
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                            <circle cx="12" cy="12" r="3" />
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                           </svg>
                         </button>
                         <button
@@ -680,6 +836,36 @@ export function ContentPage() {
               </tbody>
             </table>
           )}
+
+          {/* Pagination controls */}
+          {totalItems > 100 && (
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: '16px',
+              padding: '16px',
+              borderTop: '1px solid var(--border-color)',
+            }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1 || loading}
+              >
+                Previous
+              </button>
+              <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                Page {page} of {Math.ceil(totalItems / 100)}
+              </span>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setPage(p => p + 1)}
+                disabled={page >= Math.ceil(totalItems / 100) || loading}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -697,69 +883,87 @@ export function ContentPage() {
               </button>
             </div>
             <div className="modal-body">
-              <div className="detail-row">
-                <span className="detail-label">Name</span>
-                <span className="detail-value">{selectedContent.name || '(none)'}</span>
+              {/* Editable fields */}
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label">Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Display name"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                />
               </div>
-              <div className="detail-row">
-                <span className="detail-label">Filename</span>
-                <span className="detail-value" style={{ wordBreak: 'break-all' }}>
-                  {selectedContent.filename}
-                </span>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label">Description</label>
+                <textarea
+                  className="form-input"
+                  rows={2}
+                  placeholder="Description"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  style={{ resize: 'vertical' }}
+                />
               </div>
-              <div className="detail-row">
-                <span className="detail-label">Hash</span>
-                <span className="detail-value" style={{ fontFamily: 'monospace', fontSize: '0.875rem' }}>
-                  {selectedContent.hash}
-                </span>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label">Author</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Author / Creator"
+                  value={editAuthor}
+                  onChange={(e) => setEditAuthor(e.target.value)}
+                />
               </div>
-              <div className="detail-row">
-                <span className="detail-label">Type</span>
-                <span className="detail-value">{selectedContent.type}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">Source</span>
-                <span className="detail-value">{selectedContent.source.type}</span>
-              </div>
-              {selectedContent.metadata?.author && (
+
+              {/* Read-only details */}
+              <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '8px' }}>
                 <div className="detail-row">
-                  <span className="detail-label">Author</span>
-                  <span className="detail-value">{selectedContent.metadata.author}</span>
-                </div>
-              )}
-              {selectedContent.metadata?.description && (
-                <div className="detail-row">
-                  <span className="detail-label">Description</span>
-                  <span className="detail-value" style={{ whiteSpace: 'pre-wrap' }}>
-                    {selectedContent.metadata.description}
+                  <span className="detail-label">Filename</span>
+                  <span className="detail-value" style={{ wordBreak: 'break-all' }}>
+                    {selectedContent.filename}
                   </span>
                 </div>
-              )}
-              {selectedContent.originalUrl && (
                 <div className="detail-row">
-                  <span className="detail-label">Original URL</span>
-                  <span className="detail-value" style={{ wordBreak: 'break-all', fontSize: '0.875rem' }}>
-                    {selectedContent.originalUrl}
+                  <span className="detail-label">Hash</span>
+                  <span className="detail-value" style={{ fontFamily: 'monospace', fontSize: '0.875rem' }}>
+                    {selectedContent.hash}
                   </span>
                 </div>
-              )}
-              <div className="detail-row">
-                <span className="detail-label">Size</span>
-                <span className="detail-value">
-                  {selectedContent.sizeBytes > 0 ? formatBytes(selectedContent.sizeBytes) : 'Unknown (not yet downloaded)'}
-                </span>
-              </div>
-              {selectedContent.duration && (
                 <div className="detail-row">
-                  <span className="detail-label">Duration</span>
-                  <span className="detail-value">{selectedContent.duration}s</span>
+                  <span className="detail-label">Type</span>
+                  <span className="detail-value">{selectedContent.type}</span>
                 </div>
-              )}
-              <div className="detail-row">
-                <span className="detail-label">Created</span>
-                <span className="detail-value">
-                  {new Date(selectedContent.createdAt).toLocaleString()}
-                </span>
+                <div className="detail-row">
+                  <span className="detail-label">Source</span>
+                  <span className="detail-value">{selectedContent.source.type}</span>
+                </div>
+                {selectedContent.originalUrl && (
+                  <div className="detail-row">
+                    <span className="detail-label">Original URL</span>
+                    <span className="detail-value" style={{ wordBreak: 'break-all', fontSize: '0.875rem' }}>
+                      {selectedContent.originalUrl}
+                    </span>
+                  </div>
+                )}
+                <div className="detail-row">
+                  <span className="detail-label">Size</span>
+                  <span className="detail-value">
+                    {selectedContent.sizeBytes > 0 ? formatBytes(selectedContent.sizeBytes) : 'Unknown (not yet downloaded)'}
+                  </span>
+                </div>
+                {selectedContent.duration && (
+                  <div className="detail-row">
+                    <span className="detail-label">Duration</span>
+                    <span className="detail-value">{selectedContent.duration}s</span>
+                  </div>
+                )}
+                <div className="detail-row">
+                  <span className="detail-label">Created</span>
+                  <span className="detail-value">
+                    {new Date(selectedContent.createdAt).toLocaleString()}
+                  </span>
+                </div>
               </div>
             </div>
             <div className="modal-footer">
@@ -767,7 +971,14 @@ export function ContentPage() {
                 className="btn btn-secondary"
                 onClick={() => setSelectedContent(null)}
               >
-                Close
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveContent}
+                disabled={saving}
+              >
+                {saving ? 'Saving...' : 'Save'}
               </button>
             </div>
           </div>
