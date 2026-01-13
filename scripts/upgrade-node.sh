@@ -198,6 +198,31 @@ WATCHDOG_EOF
         success "Network watchdog configured"
     fi
 
+    # Regenerate chiba-node.service (in case service definition changed)
+    log "Updating chiba-node service file..."
+    CURRENT_USER=$(stat -c '%U' "$INSTALL_DIR" 2>/dev/null || ls -ld "$INSTALL_DIR" | awk '{print $3}')
+    sudo tee /etc/systemd/system/chiba-node.service > /dev/null << SERVICE_EOF
+[Unit]
+Description=Chiba Node Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+WorkingDirectory=$INSTALL_DIR/packages/node
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=$INSTALL_DIR/.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+    success "Service file updated"
+
     # Restart service
     log "Restarting chiba-node service..."
     sudo systemctl daemon-reload
@@ -355,6 +380,31 @@ WATCHDOG_EOF
 
     # Enable TTY2 for emergency access
     sudo systemctl enable getty@tty2.service 2>/dev/null || true
+
+    # Regenerate chiba-node.service (in case service definition changed)
+    log "Updating chiba-node service file..."
+    CURRENT_USER=$(stat -c '%U' "$INSTALL_DIR" 2>/dev/null || ls -ld "$INSTALL_DIR" | awk '{print $3}')
+    sudo tee /etc/systemd/system/chiba-node.service > /dev/null << SERVICE_EOF
+[Unit]
+Description=Chiba Node Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+WorkingDirectory=$INSTALL_DIR/packages/node
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=$INSTALL_DIR/.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+    success "Service file updated"
 
     # Reload and restart service
     log "Restarting services..."

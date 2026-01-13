@@ -110,14 +110,41 @@ if [ "$MODE" = "soft" ]; then
     NODE_ENV=development pnpm build
     success "Build complete"
 
+    # Regenerate chiba-controller.service (in case service definition changed)
+    log "Updating chiba-controller service file..."
+    CURRENT_USER=$(stat -c '%U' "$PROJECT_DIR" 2>/dev/null || ls -ld "$PROJECT_DIR" | awk '{print $3}')
+    sudo tee /etc/systemd/system/chiba-controller.service > /dev/null << SERVICE_EOF
+[Unit]
+Description=Chiba Controller Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+WorkingDirectory=$PROJECT_DIR/packages/controller
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=$PROJECT_DIR/.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+    success "Service file updated"
+
     # Restart service if running
-    log "Checking for running service..."
-    if systemctl is-active --quiet chiba-controller 2>/dev/null; then
-        sudo systemctl daemon-reload
+    log "Restarting chiba-controller service..."
+    sudo systemctl daemon-reload
+    if systemctl is-enabled --quiet chiba-controller 2>/dev/null; then
         sudo systemctl restart chiba-controller
         success "Controller service restarted"
     else
-        warn "No systemd service running. Start manually if needed."
+        sudo systemctl enable chiba-controller
+        sudo systemctl start chiba-controller
+        success "Controller service enabled and started"
     fi
 
 else
@@ -195,6 +222,31 @@ else
     # Update scripts permissions
     chmod +x "$PROJECT_DIR/scripts/"*.sh 2>/dev/null || true
 
+    # Regenerate chiba-controller.service (in case service definition changed)
+    log "Updating chiba-controller service file..."
+    CURRENT_USER=$(stat -c '%U' "$PROJECT_DIR" 2>/dev/null || ls -ld "$PROJECT_DIR" | awk '{print $3}')
+    sudo tee /etc/systemd/system/chiba-controller.service > /dev/null << SERVICE_EOF
+[Unit]
+Description=Chiba Controller Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+WorkingDirectory=$PROJECT_DIR/packages/controller
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=$PROJECT_DIR/.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+    success "Service file updated"
+
     # Reload and restart service
     log "Restarting services..."
     sudo systemctl daemon-reload
@@ -202,7 +254,9 @@ else
         sudo systemctl restart chiba-controller
         success "Controller service restarted"
     else
-        warn "No systemd service enabled. Start manually if needed."
+        sudo systemctl enable chiba-controller
+        sudo systemctl start chiba-controller
+        success "Controller service enabled and started"
     fi
 
     # Clean up backup
