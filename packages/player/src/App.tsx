@@ -127,7 +127,12 @@ export default function App() {
   ) : null;
 
   // Render based on playback mode
-  const { mode, currentContent, currentUrl, introMetadata, loop, paused, volume } = playbackState;
+  const { mode, currentContent, currentUrl, introMetadata, loop, paused, volume, playlist } = playbackState;
+
+  // Video looping: only loop if loop is true AND there's no playlist
+  // When in a playlist, videos play once and advance to next track
+  // The loop setting controls whether the PLAYLIST loops, not individual videos
+  const videoLoop = loop && !playlist;
 
   switch (mode) {
     case 'video':
@@ -144,7 +149,7 @@ export default function App() {
           {downloadOverlay}
           <VideoPlayer
             content={currentContent}
-            loop={loop}
+            loop={videoLoop}
             paused={paused}
             volume={volume}
             onEnded={handleEnded}

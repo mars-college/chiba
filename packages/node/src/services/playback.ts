@@ -536,7 +536,8 @@ class PlaybackManager {
         logger.error('Failed to restart playlist', err as Error);
       });
     } else if (this.state.currentContent) {
-      this.playContent(this.state.currentContent, { loop: this.state.loop });
+      // Restart single item - loop only applies to playlists
+      this.playContent(this.state.currentContent);
     }
   }
 
@@ -638,18 +639,17 @@ class PlaybackManager {
 
   /**
    * Handle content ended event from player.
+   * Loop setting ONLY applies to playlists, not single items.
    */
   handleContentEnded(): void {
     logger.debug('Content ended');
 
     if (this.state.playlist) {
-      // Advance to next item
+      // Advance to next item in playlist
+      // At end of playlist, next() checks loop to decide whether to restart
       this.next();
-    } else if (this.state.loop && this.state.currentContent) {
-      // Loop single content
-      this.playContent(this.state.currentContent, { loop: true });
     } else {
-      // Stop
+      // Single item ended - always stop (loop only applies to playlists)
       this.stop();
     }
   }
@@ -661,10 +661,8 @@ class PlaybackManager {
     logger.debug('Intro complete');
 
     if (this.state.currentContent) {
-      // In playlist mode, items never loop individually
-      // For single items, respect the global loop setting
-      const singleItemLoop = !this.state.playlist && this.state.loop;
-      this.startContentPlayback(this.state.currentContent, singleItemLoop);
+      // Loop setting only applies to playlists, individual items never loop
+      this.startContentPlayback(this.state.currentContent, false);
     }
   }
 }
