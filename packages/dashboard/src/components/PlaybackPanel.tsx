@@ -1,11 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { PlaybackState } from '@chiba/shared';
+import { apiUpload, UploadProgress } from '../hooks/useApi';
+
+const ALLOWED_FILE_TYPES = [
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'video/x-matroska',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+];
 
 interface PlaybackPanelProps {
   playbackState?: PlaybackState;
   disabled: boolean;
   loading?: boolean;
-  onPlay: (source: { type: string; url?: string; filename?: string }) => void;
+  onPlay: (source: { type: string; url?: string; filename?: string; name?: string }) => void;
   onStop: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -31,10 +43,19 @@ export function PlaybackPanel({
   onVolumeChange,
 }: PlaybackPanelProps) {
   const [urlInput, setUrlInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
   const [localVolume, setLocalVolume] = useState(playbackState?.volume ?? 100);
   const [isInteracting, setIsInteracting] = useState(false);
   const lastSentVolume = useRef(playbackState?.volume ?? 100);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Upload state
+  const [playMode, setPlayMode] = useState<'url' | 'upload'>('url');
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isPlaying = playbackState && playbackState.mode !== 'off';
   const isPaused = playbackState?.paused;
@@ -65,9 +86,75 @@ export function PlaybackPanel({
 
   const handlePlayUrl = () => {
     if (!urlInput.trim()) return;
-    onPlay({ type: 'url', url: urlInput.trim() });
+    onPlay({ type: 'url', url: urlInput.trim(), name: nameInput.trim() || undefined });
     setUrlInput('');
+    setNameInput('');
   };
+
+  // File upload handlers
+  const formatBytes = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  };
+
+  const handleUpload = useCallback(async (file: File) => {
+    // Validate file type
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+      setUploadError(`Unsupported file type: ${file.type}`);
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress(null);
+    setUploadError(null);
+
+    try {
+      // Upload to controller first
+      const result = await apiUpload(
+        file,
+        nameInput.trim() || file.name,
+        (progress) => setUploadProgress(progress)
+      );
+
+      // Then play on node using the upload URL
+      onPlay({ type: 'url', url: result.data.url, name: result.data.originalName });
+      setNameInput('');
+      setUploadProgress(null);
+    } catch (err) {
+      setUploadError(`Upload failed: ${(err as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
+  }, [nameInput, onPlay]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      handleUpload(file);
+    }
+  }, [handleUpload]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+  }, []);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleUpload(file);
+      e.target.value = '';
+    }
+  }, [handleUpload]);
 
   // Debounced volume change - sends at most every 100ms
   const sendVolumeChange = useCallback((volume: number) => {
@@ -422,36 +509,185 @@ export function PlaybackPanel({
         </div>
       </div>
 
-      {/* Play URL Input */}
+      {/* Play from URL / Upload */}
       <div>
         <div style={{
-          fontSize: '0.75rem',
-          color: 'var(--text-secondary)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
           marginBottom: '8px',
         }}>
-          Play from URL
+          <div style={{
+            fontSize: '0.75rem',
+            color: 'var(--text-secondary)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+          }}>
+            Play Content
+          </div>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <button
+              onClick={() => setPlayMode('url')}
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.75rem',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                background: playMode === 'url' ? 'var(--primary)' : 'var(--bg-tertiary)',
+                color: playMode === 'url' ? 'white' : 'var(--text-secondary)',
+              }}
+            >
+              URL
+            </button>
+            <button
+              onClick={() => setPlayMode('upload')}
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.75rem',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                background: playMode === 'upload' ? 'var(--primary)' : 'var(--bg-tertiary)',
+                color: playMode === 'upload' ? 'white' : 'var(--text-secondary)',
+              }}
+            >
+              Upload
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <input
-            type="text"
-            className="form-input"
-            placeholder="YouTube, Eden, or direct media URL"
-            value={urlInput}
-            onChange={(e) => setUrlInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handlePlayUrl()}
-            disabled={disabled}
-            style={{ flex: 1 }}
-          />
-          <button
-            className="btn btn-primary"
-            onClick={handlePlayUrl}
-            disabled={disabled || !urlInput.trim()}
-          >
-            Play
-          </button>
-        </div>
+
+        {playMode === 'url' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="YouTube, Eden, Google Drive, or direct media URL"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handlePlayUrl()}
+              disabled={disabled}
+            />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Name (optional)"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handlePlayUrl()}
+                disabled={disabled}
+                style={{ flex: 1 }}
+              />
+              <button
+                className="btn btn-primary"
+                onClick={handlePlayUrl}
+                disabled={disabled || !urlInput.trim()}
+              >
+                Play
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ALLOWED_FILE_TYPES.join(',')}
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+              disabled={disabled || uploading}
+            />
+
+            <div style={{ marginBottom: '8px' }}>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Name (optional)"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                disabled={disabled || uploading}
+              />
+            </div>
+
+            <div
+              onClick={() => !uploading && !disabled && fileInputRef.current?.click()}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              style={{
+                border: `2px dashed ${dragActive ? 'var(--primary)' : 'var(--border)'}`,
+                borderRadius: '8px',
+                padding: '20px 16px',
+                textAlign: 'center',
+                cursor: uploading || disabled ? 'default' : 'pointer',
+                backgroundColor: dragActive ? 'rgba(59, 130, 246, 0.05)' : 'transparent',
+                transition: 'all 0.2s',
+                opacity: disabled ? 0.5 : 1,
+              }}
+            >
+              {uploading ? (
+                <div>
+                  <div style={{
+                    width: '100%',
+                    height: '6px',
+                    backgroundColor: 'var(--bg-secondary)',
+                    borderRadius: '3px',
+                    overflow: 'hidden',
+                    marginBottom: '8px',
+                  }}>
+                    <div style={{
+                      width: `${uploadProgress?.percent || 0}%`,
+                      height: '100%',
+                      backgroundColor: 'var(--primary)',
+                      transition: 'width 0.2s',
+                    }} />
+                  </div>
+                  <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.875rem' }}>
+                    Uploading... {uploadProgress?.percent || 0}%
+                    {uploadProgress && uploadProgress.total > 0 && (
+                      <span style={{ marginLeft: '6px', color: 'var(--text-muted)' }}>
+                        ({formatBytes(uploadProgress.loaded)} / {formatBytes(uploadProgress.total)})
+                      </span>
+                    )}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <svg
+                    width="32"
+                    height="32"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1"
+                    style={{ color: 'var(--text-muted)', marginBottom: '8px' }}
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.875rem' }}>
+                    Drop file or click to browse
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {uploadError && (
+              <div style={{
+                marginTop: '8px',
+                padding: '6px 10px',
+                borderRadius: '4px',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                color: 'var(--error, #ef4444)',
+                fontSize: '0.8125rem',
+              }}>
+                {uploadError}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

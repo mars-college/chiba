@@ -24,6 +24,8 @@ export type {
   EdenSource,
   EdenCollectionSource,
   EdenCreationSource,
+  GDriveSource,
+  UploadSource,
   ContentSource,
   ContentType,
   ContentMetadata,

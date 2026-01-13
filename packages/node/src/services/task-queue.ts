@@ -14,6 +14,7 @@ import { getDatabase } from '../db/index.js';
 import { downloadAndCache } from './content-cache.js';
 import { downloadYouTube, isYouTubeUrl } from './youtube.js';
 import { syncCollection, downloadCreation } from './eden.js';
+import { downloadGoogleDrive, isGoogleDriveUrl } from './gdrive.js';
 
 const logger = createLogger('node', 'task-queue');
 
@@ -333,6 +334,30 @@ export class TaskQueue {
           };
         }
 
+        // Check if it's a Google Drive URL that was misclassified
+        if (isGoogleDriveUrl(source.url)) {
+          const result = await downloadGoogleDrive(source.url, {
+            name: metadata?.name,
+            onProgress: (progress) => {
+              this.sendProgress({
+                taskId: task.id,
+                taskType: 'gdrive',
+                status: progress.status === 'complete' ? 'completed' :
+                        progress.status === 'error' ? 'error' : 'downloading',
+                progress: progress.progress,
+                hash: progress.hash || undefined,
+                message: progress.message,
+              });
+            },
+          });
+          return {
+            filename: result.content.filename,
+            hash: result.content.hash,
+            sizeBytes: result.content.sizeBytes,
+            alreadyCached: result.alreadyCached,
+          };
+        }
+
         const result = await downloadAndCache(source.url, {
           name: metadata?.name,
           onProgress: (progress) => {
@@ -429,6 +454,32 @@ export class TaskQueue {
         throw new Error('Eden task requires either creationId or collectionId');
       }
 
+      case 'gdrive': {
+        if (!source.url) {
+          throw new Error('Google Drive URL is required');
+        }
+        const result = await downloadGoogleDrive(source.url, {
+          name: metadata?.name,
+          onProgress: (progress) => {
+            this.sendProgress({
+              taskId: task.id,
+              taskType: task.type,
+              status: progress.status === 'complete' ? 'completed' :
+                      progress.status === 'error' ? 'error' : 'downloading',
+              progress: progress.progress,
+              hash: progress.hash || undefined,
+              message: progress.message,
+            });
+          },
+        });
+        return {
+          filename: result.content.filename,
+          hash: result.content.hash,
+          sizeBytes: result.content.sizeBytes,
+          alreadyCached: result.alreadyCached,
+        };
+      }
+
       default:
         throw new Error(`Unknown task type: ${task.type}`);
     }
@@ -459,6 +510,7 @@ export class TaskQueue {
       if (error.message.includes('content type')) return 'INVALID_CONTENT';
       if (error.message.includes('yt-dlp')) return 'YOUTUBE_ERROR';
       if (error.message.includes('Eden')) return 'EDEN_ERROR';
+      if (error.message.includes('gdown') || error.message.includes('Google Drive')) return 'GDRIVE_ERROR';
     }
     return 'DOWNLOAD_FAILED';
   }

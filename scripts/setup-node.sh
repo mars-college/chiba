@@ -243,6 +243,14 @@ else
     echo "Warning: yt-dlp installation may have failed"
 fi
 
+echo "=== Installing gdown ==="
+sudo pip3 install --break-system-packages gdown 2>/dev/null || sudo pip3 install gdown
+if command -v gdown &>/dev/null; then
+    echo "gdown installed: $(gdown --version 2>/dev/null || echo 'version unknown')"
+else
+    echo "Warning: gdown installation may have failed"
+fi
+
 echo "=== Setting up Chiba ==="
 # Clone or update repository
 if [ -d "$INSTALL_DIR" ]; then
@@ -650,6 +658,7 @@ echo "Checking installed components..."
 command -v node &>/dev/null && echo "  ✓ Node.js $(node -v)" || echo "  ✗ Node.js MISSING"
 command -v pnpm &>/dev/null && echo "  ✓ pnpm $(pnpm -v)" || echo "  ✗ pnpm MISSING"
 command -v yt-dlp &>/dev/null && echo "  ✓ yt-dlp $(yt-dlp --version 2>/dev/null)" || echo "  ✗ yt-dlp MISSING"
+command -v gdown &>/dev/null && echo "  ✓ gdown (Google Drive downloader)" || echo "  ✗ gdown MISSING"
 
 echo ""
 echo "Checking services..."

@@ -6,7 +6,7 @@
 /**
  * Types of content sources supported by the system.
  */
-export type ContentSourceType = 'file' | 'url' | 'youtube' | 'eden_collection' | 'eden_creation';
+export type ContentSourceType = 'file' | 'url' | 'youtube' | 'eden_collection' | 'eden_creation' | 'gdrive' | 'upload';
 
 /**
  * A local file already cached on the node.
@@ -58,6 +58,28 @@ export interface EdenCreationSource {
 }
 
 /**
+ * A Google Drive file to download via gdown.
+ */
+export interface GDriveSource {
+  type: 'gdrive';
+  /** Google Drive URL */
+  url: string;
+  /** Extracted file ID */
+  fileId: string;
+}
+
+/**
+ * An uploaded file stored on the controller.
+ */
+export interface UploadSource {
+  type: 'upload';
+  /** Original filename from upload */
+  originalName: string;
+  /** URL to fetch from controller */
+  uploadUrl: string;
+}
+
+/**
  * @deprecated Use EdenCollectionSource instead
  */
 export type EdenSource = EdenCollectionSource;
@@ -65,7 +87,7 @@ export type EdenSource = EdenCollectionSource;
 /**
  * Union type for all content sources.
  */
-export type ContentSource = FileSource | UrlSource | YouTubeSource | EdenCollectionSource | EdenCreationSource;
+export type ContentSource = FileSource | UrlSource | YouTubeSource | EdenCollectionSource | EdenCreationSource | GDriveSource | UploadSource;
 
 /**
  * Content types supported by the player.

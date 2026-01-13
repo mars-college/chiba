@@ -3,9 +3,12 @@
 # Run this on a Pi node to upgrade it
 #
 # Usage:
-#   ./upgrade-node.sh         # Soft upgrade (default): git pull + rebuild + restart
-#   ./upgrade-node.sh soft    # Same as above
-#   ./upgrade-node.sh hard    # Hard upgrade: full reinstall from scratch
+#   ./upgrade-node.sh              # Soft upgrade (default): git pull + rebuild + restart
+#   ./upgrade-node.sh soft         # Same as above
+#   ./upgrade-node.sh hard         # Hard upgrade: full reinstall from scratch
+#   ./upgrade-node.sh soft --bg    # Soft upgrade in background with reboot (SSH-safe)
+#   ./upgrade-node.sh hard --bg    # Hard upgrade in background with reboot (SSH-safe)
+#   ./upgrade-node.sh --bg         # Same as: ./upgrade-node.sh soft --bg
 #
 # Soft upgrade:
 #   - Pulls latest code from git
@@ -19,6 +22,13 @@
 #   - Reinstalls all system packages
 #   - Restores config files
 #   - Full setup like initial install
+#
+# --bg (background) mode:
+#   - Runs upgrade detached from terminal via nohup
+#   - Logs output to /tmp/chiba-upgrade.log
+#   - Auto-confirms all prompts (non-interactive)
+#   - Reboots system on successful completion
+#   - Safe to disconnect SSH immediately after starting
 
 set -e
 
@@ -30,9 +40,11 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 MODE="${1:-soft}"
+REBOOT_AFTER="${2:-}"
 INSTALL_DIR="/home/pi/chiba"
 REPO_URL="https://github.com/mars-college/chiba.git"
 SCRIPT_URL="https://raw.githubusercontent.com/mars-college/chiba/main/scripts/upgrade-node.sh"
+LOG_FILE="/tmp/chiba-upgrade.log"
 
 # Self-update check: fetch latest version of this script before doing anything destructive
 # Skip if we're already running the fetched version (indicated by __UPGRADED__ env var)
@@ -53,21 +65,62 @@ success() { echo -e "${GREEN}✓${NC} $1"; }
 warn() { echo -e "${YELLOW}⚠${NC} $1"; }
 error() { echo -e "${RED}✗${NC} $1"; exit 1; }
 
+# Handle --bg flag: run in background with nohup, detached from terminal
+if [ "$MODE" = "--bg" ] || [ "$REBOOT_AFTER" = "--bg" ]; then
+    # Shift args if --bg was first
+    if [ "$MODE" = "--bg" ]; then
+        MODE="${2:-soft}"
+        REBOOT_AFTER="--bg"
+    fi
+
+    # Check if already running in background (indicated by __BG_RUNNING__ env var)
+    if [ -z "$__BG_RUNNING__" ]; then
+        echo -e "${BLUE}[$(date +%H:%M:%S)]${NC} Starting background upgrade..."
+        echo "Logs will be written to: $LOG_FILE"
+        echo ""
+        echo "You can safely disconnect now. The upgrade will continue."
+        echo "To monitor progress: tail -f $LOG_FILE"
+        echo ""
+
+        # Re-exec ourselves with nohup, detached from terminal
+        __BG_RUNNING__=1 nohup bash "$0" "$MODE" --reboot > "$LOG_FILE" 2>&1 &
+        BG_PID=$!
+        echo "Background PID: $BG_PID"
+        echo "Upgrade started. Exiting SSH is now safe."
+        exit 0
+    fi
+fi
+
+# Handle --reboot flag (set by --bg mode)
+if [ "$REBOOT_AFTER" = "--reboot" ]; then
+    DO_REBOOT=1
+    # Make apt fully non-interactive in background mode
+    export DEBIAN_FRONTEND=noninteractive
+else
+    DO_REBOOT=0
+fi
+
 # Validate mode
 case "$MODE" in
     soft|hard)
         ;;
     --help|-h)
-        echo "Usage: $0 [soft|hard]"
+        echo "Usage: $0 [soft|hard] [--bg]"
         echo ""
         echo "Modes:"
         echo "  soft    (default) Git pull + rebuild + restart service"
         echo "  hard    Full reinstall from scratch (preserves config)"
         echo ""
+        echo "Options:"
+        echo "  --bg    Run in background with auto-reboot (safe to disconnect SSH)"
+        echo ""
         echo "Examples:"
-        echo "  $0           # Soft upgrade"
-        echo "  $0 soft      # Soft upgrade"
-        echo "  $0 hard      # Hard upgrade (reinstall everything)"
+        echo "  $0              # Soft upgrade"
+        echo "  $0 soft         # Soft upgrade"
+        echo "  $0 hard         # Hard upgrade (reinstall everything)"
+        echo "  $0 soft --bg    # Soft upgrade in background, reboot when done"
+        echo "  $0 hard --bg    # Hard upgrade in background, reboot when done"
+        echo "  $0 --bg         # Same as: $0 soft --bg"
         exit 0
         ;;
     *)
@@ -332,3 +385,12 @@ echo ""
 echo "To view logs:    journalctl -u chiba-node -f"
 echo "To check status: curl -s http://localhost:8080/health"
 echo ""
+
+# Reboot if requested (by --bg mode)
+if [ "$DO_REBOOT" = "1" ]; then
+    echo "==========================================="
+    echo "  Rebooting in 5 seconds..."
+    echo "==========================================="
+    sleep 5
+    sudo reboot
+fi

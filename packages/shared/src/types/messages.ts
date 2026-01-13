@@ -93,7 +93,7 @@ export interface NodeStateMessage {
 export type TaskStatus = 'queued' | 'started' | 'downloading' | 'processing' | 'completed' | 'error';
 
 /** Task type for async operations */
-export type TaskType = 'cache' | 'youtube' | 'eden';
+export type TaskType = 'cache' | 'youtube' | 'eden' | 'gdrive';
 
 /** Result data for completed tasks */
 export interface TaskResult {

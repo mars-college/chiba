@@ -41,6 +41,7 @@ import {
   getAllLights,
   getLightById,
 } from './services/lights.js';
+import { handleUpload, getUploadPath } from './services/uploads.js';
 import type {
   LightWithState,
   LightPreset,
@@ -150,12 +151,20 @@ const MIME_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
+  '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
   '.eot': 'application/vnd.ms-fontobject',
+  // Video types for uploaded media
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
+  '.m4v': 'video/x-m4v',
 };
 
 // Dashboard dist directory (relative to compiled server.js)
@@ -272,6 +281,8 @@ async function handleRequest(
             // Content
             'GET /api/content',
             'POST /api/content',
+            'POST /api/upload',
+            'GET /uploads/:filename',
             'DELETE /api/content/:id',
             // Playlists
             'GET /api/playlists',
@@ -567,6 +578,50 @@ async function handleRequest(
       }
     }
 
+    // Serve uploaded files with range request support
+    if (url.pathname.startsWith('/uploads/')) {
+      const filename = url.pathname.slice('/uploads/'.length);
+      const filePath = getUploadPath(filename);
+
+      if (!filePath) {
+        sendError(res, 'File not found', 404);
+        return;
+      }
+
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
+      const stat = fs.statSync(filePath);
+
+      // Support range requests for video streaming
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0] || '0', 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+        const chunksize = end - start + 1;
+
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': mimeType,
+          'Access-Control-Allow-Origin': '*',
+        });
+
+        fs.createReadStream(filePath, { start, end }).pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Length': stat.size,
+          'Content-Type': mimeType,
+          'Accept-Ranges': 'bytes',
+          'Access-Control-Allow-Origin': '*',
+        });
+
+        fs.createReadStream(filePath).pipe(res);
+      }
+      return;
+    }
+
     // Serve static files (dashboard) for non-API GET requests
     if (!url.pathname.startsWith('/api/')) {
       if (serveStaticFile(req, res, url.pathname)) {
@@ -578,6 +633,65 @@ async function handleRequest(
   // Protected routes (require auth)
   if (!isAuthenticated(req)) {
     sendError(res, 'Unauthorized', 401);
+    return;
+  }
+
+  // File upload endpoint
+  if (method === 'POST' && url.pathname === '/api/upload') {
+    try {
+      const result = await handleUpload(req);
+
+      // Add to content library
+      const db = getDatabase();
+      const id = generateId();
+      const controllerHost = req.headers.host || `localhost:${process.env.PORT || 8080}`;
+      const uploadUrl = `http://${controllerHost}/uploads/${result.filename}`;
+
+      const sourceData = JSON.stringify({
+        type: 'upload',
+        originalName: result.originalName,
+        uploadUrl,
+      });
+
+      db.prepare(`
+        INSERT INTO content (id, hash, filename, name, original_url, source_type, source_data, content_type, size_bytes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        result.hash,
+        result.filename,
+        result.originalName,
+        uploadUrl,
+        'upload',
+        sourceData,
+        result.contentType,
+        result.sizeBytes,
+        Date.now()
+      );
+
+      logger.info('Upload added to content library', {
+        id,
+        hash: result.hash,
+        filename: result.filename,
+        size: result.sizeBytes,
+      });
+
+      sendJson(res, {
+        success: true,
+        data: {
+          id,
+          hash: result.hash,
+          filename: result.filename,
+          originalName: result.originalName,
+          contentType: result.contentType,
+          sizeBytes: result.sizeBytes,
+          url: uploadUrl,
+        },
+      });
+    } catch (err) {
+      logger.error('Upload failed', err as Error);
+      sendError(res, `Upload failed: ${(err as Error).message}`, 400);
+    }
     return;
   }
 
@@ -1909,6 +2023,35 @@ function handleNodeMessage(
     case 'register': {
       const { config, info } = message;
       logger.info('Node registered', { id: config.id, name: config.friendlyName, ip: info.ip, port: info.port });
+
+      // Persist node to database (required for foreign key in node_content)
+      try {
+        const db = getDatabase();
+        db.prepare(`
+          INSERT INTO nodes (id, friendly_name, hostname, ip, port, version, last_seen, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            friendly_name = excluded.friendly_name,
+            hostname = excluded.hostname,
+            ip = excluded.ip,
+            port = excluded.port,
+            version = excluded.version,
+            last_seen = excluded.last_seen,
+            updated_at = excluded.updated_at
+        `).run(
+          config.id,
+          config.friendlyName,
+          info.hostname,
+          info.ip,
+          info.port,
+          info.version,
+          Date.now(),
+          Date.now(),
+          Date.now()
+        );
+      } catch (err) {
+        logger.error('Failed to persist node to database', err as Error);
+      }
 
       const status: NodeStatus = {
         node: info,

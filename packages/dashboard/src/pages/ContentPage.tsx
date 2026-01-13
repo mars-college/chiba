@@ -1,11 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Content, NodeStatus } from '@chiba/shared';
-import { apiGet, apiPost, apiDelete } from '../hooks/useApi';
+import { apiGet, apiPost, apiDelete, apiUpload, UploadProgress } from '../hooks/useApi';
+
+const ALLOWED_FILE_TYPES = [
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'video/x-matroska',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+];
 
 export function ContentPage() {
   const [content, setContent] = useState<Content[]>([]);
   const [nodes, setNodes] = useState<NodeStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'url' | 'upload'>('url');
   const [urlInput, setUrlInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [descriptionInput, setDescriptionInput] = useState('');
@@ -16,6 +28,13 @@ export function ContentPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [selectedContent, setSelectedContent] = useState<Content | null>(null);
   const [sendToContent, setSendToContent] = useState<Content | null>(null); // For "Send to" modal
+
+  // Upload state
+  const [dragActive, setDragActive] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [uploadName, setUploadName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchContent();
@@ -153,6 +172,75 @@ export function ContentPage() {
     }
   };
 
+  // File upload handlers
+  const handleUpload = useCallback(async (file: File) => {
+    // Validate file type
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+      setMessage({
+        type: 'error',
+        text: `Unsupported file type: ${file.type}. Allowed: MP4, WebM, MOV, JPEG, PNG, GIF, WebP`,
+      });
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress(null);
+    setMessage(null);
+
+    try {
+      const result = await apiUpload(
+        file,
+        uploadName.trim() || file.name,
+        (progress) => setUploadProgress(progress)
+      );
+
+      setMessage({
+        type: 'success',
+        text: `Uploaded "${result.data.originalName}" successfully!`,
+      });
+      setUploadName('');
+      setUploadProgress(null);
+      fetchContent();
+      setTimeout(() => setMessage(null), 5000);
+    } catch (err) {
+      setMessage({
+        type: 'error',
+        text: `Upload failed: ${(err as Error).message}`,
+      });
+    } finally {
+      setUploading(false);
+    }
+  }, [uploadName]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      handleUpload(file);
+    }
+  }, [handleUpload]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+  }, []);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleUpload(file);
+      // Reset input so same file can be selected again
+      e.target.value = '';
+    }
+  }, [handleUpload]);
+
   const formatBytes = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -165,9 +253,15 @@ export function ContentPage() {
       case 'youtube':
         return <span className="badge badge-error">YouTube</span>;
       case 'eden':
+      case 'eden_collection':
+      case 'eden_creation':
         return <span className="badge badge-success">Eden</span>;
       case 'url':
         return <span className="badge badge-info">URL</span>;
+      case 'upload':
+        return <span className="badge badge-warning">Uploaded</span>;
+      case 'gdrive':
+        return <span className="badge badge-info">GDrive</span>;
       default:
         return <span className="badge">{sourceType}</span>;
     }
@@ -212,97 +306,265 @@ export function ContentPage() {
       <div className="card" style={{ marginBottom: '24px' }}>
         <div className="card-header">
           <h3 className="card-title">Add Content</h3>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              className={`btn btn-sm ${activeTab === 'url' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setActiveTab('url')}
+            >
+              From URL
+            </button>
+            <button
+              className={`btn btn-sm ${activeTab === 'upload' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setActiveTab('upload')}
+            >
+              Upload File
+            </button>
+          </div>
         </div>
         <div className="card-body">
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
-            <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
-              <label className="form-label">URL</label>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="YouTube, Eden, or direct media URL"
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !showDescription && handleAddContent()}
-              />
-            </div>
-            <button
-              className="btn btn-primary"
-              onClick={handleAddContent}
-              disabled={!urlInput.trim() || adding}
-            >
-              {adding ? 'Adding...' : 'Add'}
-            </button>
-          </div>
+          {activeTab === 'url' ? (
+            <>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+                <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
+                  <label className="form-label">URL</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="YouTube, Eden, Google Drive, or direct media URL"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && !showDescription && handleAddContent()}
+                  />
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleAddContent}
+                  disabled={!urlInput.trim() || adding}
+                >
+                  {adding ? 'Adding...' : 'Add'}
+                </button>
+              </div>
 
-          {/* Collapsible metadata section */}
-          <div style={{ marginTop: '12px' }}>
-            <button
-              type="button"
-              onClick={() => setShowDescription(!showDescription)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer',
-                padding: 0,
-                fontSize: '0.875rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
+              {/* Collapsible metadata section */}
+              <div style={{ marginTop: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowDescription(!showDescription)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    padding: 0,
+                    fontSize: '0.875rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    style={{
+                      transform: showDescription ? 'rotate(90deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.2s',
+                    }}
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                  Add name, description
+                </button>
+
+                {showDescription && (
+                  <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Name</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={nameInput}
+                        onChange={(e) => setNameInput(e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Description</label>
+                      <textarea
+                        className="form-input"
+                        rows={2}
+                        value={descriptionInput}
+                        onChange={(e) => setDescriptionInput(e.target.value)}
+                        style={{ resize: 'vertical' }}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Author</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={authorInput}
+                        onChange={(e) => setAuthorInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddContent()}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Upload tab content */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ALLOWED_FILE_TYPES.join(',')}
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+                disabled={uploading}
+              />
+
+              <div
+                onClick={() => !uploading && fileInputRef.current?.click()}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
                 style={{
-                  transform: showDescription ? 'rotate(90deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.2s',
+                  border: `2px dashed ${dragActive ? 'var(--primary)' : 'var(--border-color)'}`,
+                  borderRadius: '8px',
+                  padding: '32px 24px',
+                  textAlign: 'center',
+                  cursor: uploading ? 'default' : 'pointer',
+                  backgroundColor: dragActive ? 'rgba(59, 130, 246, 0.05)' : 'transparent',
+                  transition: 'all 0.2s',
                 }}
               >
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              Add name, description
-            </button>
-
-            {showDescription && (
-              <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Name</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
-                  />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Description</label>
-                  <textarea
-                    className="form-input"
-                    rows={2}
-                    value={descriptionInput}
-                    onChange={(e) => setDescriptionInput(e.target.value)}
-                    style={{ resize: 'vertical' }}
-                  />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Author</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={authorInput}
-                    onChange={(e) => setAuthorInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddContent()}
-                  />
-                </div>
+                {uploading ? (
+                  <div>
+                    <div style={{
+                      width: '100%',
+                      height: '8px',
+                      backgroundColor: 'var(--bg-secondary)',
+                      borderRadius: '4px',
+                      overflow: 'hidden',
+                      marginBottom: '12px',
+                    }}>
+                      <div style={{
+                        width: `${uploadProgress?.percent || 0}%`,
+                        height: '100%',
+                        backgroundColor: 'var(--primary)',
+                        transition: 'width 0.2s',
+                      }} />
+                    </div>
+                    <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                      Uploading... {uploadProgress?.percent || 0}%
+                      {uploadProgress && uploadProgress.total > 0 && (
+                        <span style={{ marginLeft: '8px', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                          ({formatBytes(uploadProgress.loaded)} / {formatBytes(uploadProgress.total)})
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <svg
+                      width="48"
+                      height="48"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1"
+                      style={{ color: 'var(--text-muted)', marginBottom: '12px' }}
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                    <p style={{ color: 'var(--text-secondary)', margin: '0 0 8px 0' }}>
+                      Drag and drop a file here, or click to browse
+                    </p>
+                    <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.875rem' }}>
+                      MP4, WebM, MOV, MKV, JPEG, PNG, GIF, WebP
+                    </p>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+
+              {/* Collapsible metadata section for uploads */}
+              <div style={{ marginTop: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowDescription(!showDescription)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    padding: 0,
+                    fontSize: '0.875rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    style={{
+                      transform: showDescription ? 'rotate(90deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.2s',
+                    }}
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                  Add name, description
+                </button>
+
+                {showDescription && (
+                  <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Name</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Display name for this file"
+                        value={uploadName}
+                        onChange={(e) => setUploadName(e.target.value)}
+                        disabled={uploading}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Description</label>
+                      <textarea
+                        className="form-input"
+                        rows={2}
+                        value={descriptionInput}
+                        onChange={(e) => setDescriptionInput(e.target.value)}
+                        style={{ resize: 'vertical' }}
+                        disabled={uploading}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Author</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={authorInput}
+                        onChange={(e) => setAuthorInput(e.target.value)}
+                        disabled={uploading}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           {message && (
             <div style={{

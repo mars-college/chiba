@@ -193,3 +193,88 @@ export async function apiDelete<T>(endpoint: string): Promise<T> {
   }
   return response.json();
 }
+
+export interface UploadResult {
+  id: string;
+  hash: string;
+  filename: string;
+  originalName: string;
+  contentType: 'video' | 'image';
+  sizeBytes: number;
+  url: string;
+}
+
+export interface UploadProgress {
+  loaded: number;
+  total: number;
+  percent: number;
+}
+
+/**
+ * Upload a file to the controller.
+ * Returns a promise that resolves with the upload result.
+ * Optionally accepts an onProgress callback for progress tracking.
+ */
+export async function apiUpload(
+  file: File,
+  name?: string,
+  onProgress?: (progress: UploadProgress) => void
+): Promise<{ success: boolean; data: UploadResult }> {
+  const apiKey = await getApiKey();
+
+  const formData = new FormData();
+  formData.append('file', file);
+  if (name) {
+    formData.append('name', name);
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress({
+          loaded: e.loaded,
+          total: e.total,
+          percent: Math.round((e.loaded / e.total) * 100),
+        });
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          if (response.success) {
+            resolve(response);
+          } else {
+            reject(new Error(response.error || 'Upload failed'));
+          }
+        } catch {
+          reject(new Error('Invalid response from server'));
+        }
+      } else {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          reject(new Error(response.error || `Upload failed: ${xhr.status}`));
+        } catch {
+          reject(new Error(`Upload failed: ${xhr.status}`));
+        }
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Network error during upload'));
+    });
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload cancelled'));
+    });
+
+    xhr.open('POST', `${API_BASE}/upload`);
+    if (apiKey) {
+      xhr.setRequestHeader('Authorization', `Bearer ${apiKey}`);
+    }
+    xhr.send(formData);
+  });
+}

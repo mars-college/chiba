@@ -7,7 +7,7 @@ Digital signage system for Raspberry Pi kiosks with central controller.
 Chiba is a multi-node digital signage system designed for:
 - **Central control** of multiple Raspberry Pi displays
 - **Content caching** with MD5 deduplication
-- **Multiple content sources**: local files, URLs, YouTube, Eden collections
+- **Multiple content sources**: local files, URLs, YouTube, Google Drive, Eden collections
 - **Real-time control** via WebSocket
 - **Offline resilience** with local playback
 
@@ -42,7 +42,7 @@ chiba/
 - **HTTP API**: Status, files, playback control, caching
 - **WebSocket**: Player connection (/ws), controller connection
 - **SQLite DB**: Cached content, config, playback history
-- **Services**: Registration, ContentCache, YouTube, Eden, Playback, Volume
+- **Services**: Registration, ContentCache, YouTube, GDrive, Eden, Playback, Volume
 
 ### @chiba/player
 - **React SPA**: Full-screen video/image/URL display
@@ -246,6 +246,10 @@ curl -X POST http://pi:8080/play -d '{"url":"https://example.com/page"}'
 curl -X POST http://pi:8080/play -d '{"url":"https://youtube.com/watch?v=..."}'
 # Response: {"success":true,"data":{"taskId":"youtube_abc...","status":"queued"}}
 
+# Play Google Drive file - returns taskId, plays when downloaded
+curl -X POST http://pi:8080/play -d '{"url":"https://drive.google.com/file/d/FILE_ID/view"}'
+# Response: {"success":true,"data":{"taskId":"gdrive_abc...","status":"queued"}}
+
 # Play media URL - returns taskId, plays when downloaded
 curl -X POST http://pi:8080/play -d '{"url":"https://example.com/video.mp4"}'
 
@@ -260,6 +264,10 @@ Cache content without playing. Always async - returns immediately with taskId.
 # Cache YouTube video
 curl -X POST http://pi:8080/cache -d '{"url":"https://youtube.com/watch?v=..."}'
 # Response: {"success":true,"data":{"taskId":"youtube_abc...","status":"queued","message":"Download queued"}}
+
+# Cache Google Drive file
+curl -X POST http://pi:8080/cache -d '{"url":"https://drive.google.com/file/d/FILE_ID/view"}'
+# Response: {"success":true,"data":{"taskId":"gdrive_abc...","status":"queued","message":"Download queued"}}
 
 # Cache media URL
 curl -X POST http://pi:8080/cache -d '{"url":"https://example.com/video.mp4"}'
@@ -316,7 +324,7 @@ Long-running operations (downloads, YouTube, Eden sync) use an async task queue:
   type: 'download_progress',
   taskId: 'youtube_abc123...',
   nodeId: 'pi-living-room',
-  taskType: 'youtube' | 'cache' | 'eden',
+  taskType: 'youtube' | 'cache' | 'eden' | 'gdrive',
   status: 'queued' | 'started' | 'downloading' | 'processing' | 'completed' | 'error',
   progress: 0-100,
   message?: 'Downloading...',
@@ -328,6 +336,7 @@ Long-running operations (downloads, YouTube, Eden sync) use an async task queue:
 ### Task Types
 - `cache`: Generic URL download
 - `youtube`: YouTube video via yt-dlp
+- `gdrive`: Google Drive file via gdown (supports share links, direct links, etc.)
 - `eden`: Eden collection sync or creation download
 
 ## WebSocket Protocols

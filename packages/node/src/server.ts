@@ -47,6 +47,7 @@ import { initDatabase, closeDatabase, setConfig, getAllConfig, listPlaylists } f
 import { getMediaDir, listCachedContent, getCacheSize, getContentByFilename, clearAllCache, setContentCachedCallback } from './services/content-cache.js';
 import { getDiskUsage as getDiskUsageActual, getHardwareMetrics as getHardwareMetricsActual } from './services/hardware.js';
 import { isYouTubeUrl } from './services/youtube.js';
+import { isGoogleDriveUrl } from './services/gdrive.js';
 import { isEdenUrl, parseEdenUrl } from './services/eden.js';
 import {
   playbackManager,
@@ -707,6 +708,27 @@ async function handleRequest(
             return;
           }
 
+          // Google Drive - async with playAfter
+          if (isGoogleDriveUrl(urlToPlay)) {
+            logger.info('Queuing Google Drive for play', { url: urlToPlay });
+            const taskId = taskQueue.enqueue({
+              type: 'gdrive',
+              source: { url: urlToPlay },
+              metadata: contentName ? { name: contentName } : undefined,
+              playAfter: true,
+              priority: 10,
+            });
+            sendJson(res, {
+              success: true,
+              data: {
+                taskId,
+                status: 'queued',
+                message: 'Google Drive download queued, will play when complete',
+              },
+            });
+            return;
+          }
+
           // Media file URL - async with playAfter
           const urlLower = urlToPlay.toLowerCase();
           const isMedia = /\.(mp4|webm|mov|mkv|jpg|jpeg|png|gif|webp)(\?|$)/i.test(urlLower);
@@ -884,7 +906,7 @@ async function handleRequest(
         logger.info('Queuing URL cache', { url: cacheUrl, name: cacheName });
 
         // Determine task type based on URL
-        let taskType: 'youtube' | 'eden' | 'cache' = 'cache';
+        let taskType: 'youtube' | 'eden' | 'cache' | 'gdrive' = 'cache';
         const source: TaskSource = { url: cacheUrl };
 
         if (isEdenUrl(cacheUrl)) {
@@ -902,6 +924,8 @@ async function handleRequest(
           }
         } else if (isYouTubeUrl(cacheUrl)) {
           taskType = 'youtube';
+        } else if (isGoogleDriveUrl(cacheUrl)) {
+          taskType = 'gdrive';
         }
 
         const taskId = taskQueue.enqueue({

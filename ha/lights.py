@@ -1,67 +1,340 @@
+#!/usr/bin/env python3
+"""Govee Lights CLI - Control Govee lights via LAN API.
+
+Usage:
+    python lights.py on all
+    python lights.py color gw1 red
+    python lights.py brightness all 50
+    python lights.py status all
+"""
+
+import argparse
 import colorsys
-import math
-import socket
 import json
-import time
+import socket
+import sys
 
-# ====== CONFIG ======
-# GOVEE_IP = "100.124.2.230"
-# GOVEE_IP = "100.124.2.207"
-GOVEE_IP = "100.124.2.206"
 GOVEE_PORT = 4003
-DURATION_SECONDS = 100          # total rotation time
-STEPS = DURATION_SECONDS * 4       # number of updates
-SATURATION = 100               # keep vivid colors
-BRIGHTNESS_MIN = 0             # 0–100 for Govee
-BRIGHTNESS_MAX = 100           # 0–100 for Govee
-BRIGHTNESS_CYCLES = 8          # oscillations per run
-# ====================
 
-def govee_send(cmd, data):
-    """Send command to Govee light via LAN API"""
+# Light configuration
+LIGHTS = {
+    "gw1": "100.124.2.208",  # Gallery West 1
+    "gw2": "100.124.2.207",  # Gallery West 2
+    "ge1": "100.124.2.209",  # Gallery East 1
+    "ge2": "100.124.2.114",  # Gallery East 2
+    "a": "100.124.2.115",    # Auditorium
+}
+
+# Color presets (RGB)
+COLORS = {
+    "red": (255, 0, 0),
+    "green": (0, 255, 0),
+    "blue": (0, 0, 255),
+    "yellow": (255, 255, 0),
+    "purple": (128, 0, 255),
+    "orange": (255, 165, 0),
+    "cyan": (0, 255, 255),
+    "white": (255, 255, 255),
+    "pink": (255, 105, 180),
+    "magenta": (255, 0, 255),
+}
+
+# Temperature presets (Kelvin)
+TEMPS = {
+    "warm": 2700,     # Cozy incandescent
+    "neutral": 4000,  # Balanced
+    "cool": 6500,     # Daylight
+}
+
+
+# --- Core Functions ---
+
+def send_command(ip: str, cmd: str, data: dict) -> dict | None:
+    """Send command to Govee light via LAN API."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(1)
     msg = {"msg": {"cmd": cmd, "data": data}}
-    sock.sendto(json.dumps(msg).encode(), (GOVEE_IP, GOVEE_PORT))
-    sock.close()
-
-def govee_turn_on():
-    govee_send("turn", {"value": 1})
-
-def govee_turn_off():
-    govee_send("turn", {"value": 0})
-
-def govee_set_color(r, g, b):
-    govee_send("colorwc", {"color": {"r": r, "g": g, "b": b}, "colorTemInKelvin": 0})
-
-def govee_set_brightness(value):
-    """Set brightness 0-100"""
-    govee_send("brightness", {"value": value})
-
-# Turn on first
-# print("Turning on Govee light...")
-# govee_turn_on()
-# time.sleep(0.5)
-
-# for step in range(STEPS):
-#     hue = step / STEPS
-#     r, g, b = colorsys.hsv_to_rgb(hue, SATURATION / 100, 1.0)
-#     r, g, b = int(r * 255), int(g * 255), int(b * 255)
-
-#     # Oscillate brightness using sine wave
-#     brightness_wave = (math.sin(2 * math.pi * BRIGHTNESS_CYCLES * step / STEPS) + 1) / 2
-#     brightness = int(BRIGHTNESS_MIN + brightness_wave * (BRIGHTNESS_MAX - BRIGHTNESS_MIN))
-
-#     print(f"Step {step + 1}/{STEPS} - Hue: {int(hue * 360)}° - Brightness: {brightness}% - RGB: ({r}, {g}, {b})")
-
-    
-#     # govee_set_color(r, g, b)
-#     govee_set_brightness(brightness)
-
-#     time.sleep(DURATION_SECONDS / STEPS)
-
-# print("Done.")
+    try:
+        sock.sendto(json.dumps(msg).encode(), (ip, GOVEE_PORT))
+        # Try to receive response (for status queries)
+        try:
+            data, _ = sock.recvfrom(4096)
+            return json.loads(data.decode())
+        except socket.timeout:
+            return None
+    finally:
+        sock.close()
 
 
-# govee_set_color(255, 9)
-govee_turn_on()
+def turn_on(ip: str) -> None:
+    """Turn light on."""
+    send_command(ip, "turn", {"value": 1})
+
+
+def turn_off(ip: str) -> None:
+    """Turn light off."""
+    send_command(ip, "turn", {"value": 0})
+
+
+def set_color(ip: str, r: int, g: int, b: int) -> None:
+    """Set light color (RGB 0-255)."""
+    send_command(ip, "colorwc", {
+        "color": {"r": r, "g": g, "b": b},
+        "colorTemInKelvin": 0
+    })
+
+
+def set_brightness(ip: str, value: int) -> None:
+    """Set brightness (0-100)."""
+    send_command(ip, "brightness", {"value": max(1, min(100, value))})
+
+
+def set_temp(ip: str, kelvin: int) -> None:
+    """Set color temperature (2000-9000K)."""
+    send_command(ip, "colorwc", {
+        "color": {"r": 0, "g": 0, "b": 0},
+        "colorTemInKelvin": max(2000, min(9000, kelvin))
+    })
+
+
+def get_status(ip: str) -> dict | None:
+    """Query device status."""
+    response = send_command(ip, "devStatus", {})
+    if response and response.get("msg", {}).get("cmd") == "devStatus":
+        return response["msg"]["data"]
+    return None
+
+
+# --- Helper Functions ---
+
+def resolve_targets(targets: list[str]) -> list[tuple[str, str]]:
+    """Resolve target names to (name, ip) pairs."""
+    results = []
+    for target in targets:
+        if target == "all":
+            results.extend(LIGHTS.items())
+        elif target in LIGHTS:
+            results.append((target, LIGHTS[target]))
+        else:
+            print(f"Unknown target: {target}", file=sys.stderr)
+            print(f"Available: {', '.join(LIGHTS.keys())}, all", file=sys.stderr)
+            sys.exit(1)
+    return results
+
+
+def hsb_to_rgb(h: float, s: float, b: float) -> tuple[int, int, int]:
+    """Convert HSB to RGB. H: 0-360, S: 0-100, B: 0-100."""
+    r, g, b_val = colorsys.hsv_to_rgb(h / 360, s / 100, b / 100)
+    return int(r * 255), int(g * 255), int(b_val * 255)
+
+
+def parse_rgb(rgb_str: str) -> tuple[int, int, int]:
+    """Parse RGB string like '255,128,0' to tuple."""
+    parts = rgb_str.split(",")
+    if len(parts) != 3:
+        raise ValueError(f"Invalid RGB format: {rgb_str}")
+    return tuple(max(0, min(255, int(p.strip()))) for p in parts)
+
+
+def parse_hsb(hsb_str: str) -> tuple[float, float, float]:
+    """Parse HSB string like '180,100,100' to tuple."""
+    parts = hsb_str.split(",")
+    if len(parts) != 3:
+        raise ValueError(f"Invalid HSB format: {hsb_str}")
+    h = max(0, min(360, float(parts[0].strip())))
+    s = max(0, min(100, float(parts[1].strip())))
+    b = max(0, min(100, float(parts[2].strip())))
+    return h, s, b
+
+
+# --- CLI Handlers ---
+
+def cmd_on(args) -> None:
+    """Handle 'on' command."""
+    targets = resolve_targets(args.targets)
+    for name, ip in targets:
+        turn_on(ip)
+        print(f"{name}: on")
+
+
+def cmd_off(args) -> None:
+    """Handle 'off' command."""
+    targets = resolve_targets(args.targets)
+    for name, ip in targets:
+        turn_off(ip)
+        print(f"{name}: off")
+
+
+def cmd_color(args) -> None:
+    """Handle 'color' command."""
+    # Parse color from preset, --rgb, or --hsb
+    r, g, b = None, None, None
+
+    if args.rgb:
+        r, g, b = parse_rgb(args.rgb)
+    elif args.hsb:
+        h, s, bri = parse_hsb(args.hsb)
+        r, g, b = hsb_to_rgb(h, s, bri)
+    elif args.preset:
+        if args.preset in COLORS:
+            r, g, b = COLORS[args.preset]
+        else:
+            print(f"Unknown color preset: {args.preset}", file=sys.stderr)
+            print(f"Available: {', '.join(COLORS.keys())}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print("Must specify color preset, --rgb, or --hsb", file=sys.stderr)
+        sys.exit(1)
+
+    targets = resolve_targets(args.targets)
+    for name, ip in targets:
+        turn_on(ip)  # Ensure light is on
+        set_color(ip, r, g, b)
+        print(f"{name}: rgb({r},{g},{b})")
+
+
+def cmd_brightness(args) -> None:
+    """Handle 'brightness' command."""
+    targets = resolve_targets(args.targets)
+    value = max(0, min(100, args.value))
+    for name, ip in targets:
+        set_brightness(ip, value)
+        print(f"{name}: brightness {value}%")
+
+
+def cmd_temp(args) -> None:
+    """Handle 'temp' command."""
+    kelvin = None
+
+    if args.kelvin:
+        kelvin = args.kelvin
+    elif args.preset:
+        if args.preset in TEMPS:
+            kelvin = TEMPS[args.preset]
+        else:
+            print(f"Unknown temp preset: {args.preset}", file=sys.stderr)
+            print(f"Available: {', '.join(TEMPS.keys())}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print("Must specify temp preset or --kelvin", file=sys.stderr)
+        sys.exit(1)
+
+    targets = resolve_targets(args.targets)
+    for name, ip in targets:
+        turn_on(ip)  # Ensure light is on
+        set_temp(ip, kelvin)
+        print(f"{name}: {kelvin}K")
+
+
+def cmd_status(args) -> None:
+    """Handle 'status' command."""
+    targets = resolve_targets(args.targets)
+    for name, ip in targets:
+        status = get_status(ip)
+        if status:
+            on_off = "ON" if status.get("onOff") else "OFF"
+            brightness = status.get("brightness", "?")
+            color = status.get("color", {})
+            temp = status.get("colorTemInKelvin", 0)
+
+            if temp and temp > 0:
+                print(f"{name}: {on_off}, brightness: {brightness}%, temp: {temp}K")
+            else:
+                r, g, b = color.get("r", 0), color.get("g", 0), color.get("b", 0)
+                print(f"{name}: {on_off}, brightness: {brightness}%, rgb({r},{g},{b})")
+        else:
+            print(f"{name}: no response")
+
+
+def cmd_list(args) -> None:
+    """Handle 'list' command."""
+    if args.what == "lights":
+        print("Lights:")
+        for name, ip in LIGHTS.items():
+            print(f"  {name}: {ip}")
+        print("  all: (all lights)")
+    elif args.what == "colors":
+        print("Color presets:")
+        for name, (r, g, b) in COLORS.items():
+            print(f"  {name}: rgb({r},{g},{b})")
+    elif args.what == "temps":
+        print("Temperature presets:")
+        for name, kelvin in TEMPS.items():
+            print(f"  {name}: {kelvin}K")
+
+
+# --- Main ---
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Control Govee lights via LAN API",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s on all                    Turn all lights on
+  %(prog)s off gw1 gw2               Turn off Gallery West lights
+  %(prog)s color all red             Set all lights to red
+  %(prog)s color gw1 --rgb 255,100,0 Set custom RGB color
+  %(prog)s color all --hsb 180,100,100  Set color via HSB
+  %(prog)s brightness all 50         Set brightness to 50%%
+  %(prog)s temp all warm             Set warm white temperature
+  %(prog)s status all                Query status of all lights
+  %(prog)s list colors               List color presets
+        """,
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # on
+    p_on = subparsers.add_parser("on", help="Turn lights on")
+    p_on.add_argument("targets", nargs="+", help="Light names (gw1, gw2, ge1, ge2, a, all)")
+    p_on.set_defaults(func=cmd_on)
+
+    # off
+    p_off = subparsers.add_parser("off", help="Turn lights off")
+    p_off.add_argument("targets", nargs="+", help="Light names")
+    p_off.set_defaults(func=cmd_off)
+
+    # color
+    p_color = subparsers.add_parser("color", help="Set light color")
+    p_color.add_argument("targets", nargs="+", help="Light names")
+    p_color.add_argument("preset", nargs="?", help="Color preset name")
+    p_color.add_argument("--rgb", type=str, help="RGB values (e.g., 255,128,0)")
+    p_color.add_argument("--hsb", type=str, help="HSB values (e.g., 180,100,100)")
+    p_color.set_defaults(func=cmd_color)
+
+    # brightness
+    p_bright = subparsers.add_parser("brightness", help="Set brightness (0-100)")
+    p_bright.add_argument("targets", nargs="+", help="Light names")
+    p_bright.add_argument("value", type=int, help="Brightness value (0-100)")
+    p_bright.set_defaults(func=cmd_brightness)
+
+    # dim (alias for brightness)
+    p_dim = subparsers.add_parser("dim", help="Set brightness (alias)")
+    p_dim.add_argument("targets", nargs="+", help="Light names")
+    p_dim.add_argument("value", type=int, help="Brightness value (0-100)")
+    p_dim.set_defaults(func=cmd_brightness)
+
+    # temp
+    p_temp = subparsers.add_parser("temp", help="Set color temperature")
+    p_temp.add_argument("targets", nargs="+", help="Light names")
+    p_temp.add_argument("preset", nargs="?", help="Temp preset (warm, neutral, cool)")
+    p_temp.add_argument("--kelvin", type=int, help="Temperature in Kelvin (2000-9000)")
+    p_temp.set_defaults(func=cmd_temp)
+
+    # status
+    p_status = subparsers.add_parser("status", help="Query light status")
+    p_status.add_argument("targets", nargs="+", help="Light names")
+    p_status.set_defaults(func=cmd_status)
+
+    # list
+    p_list = subparsers.add_parser("list", help="List available options")
+    p_list.add_argument("what", choices=["lights", "colors", "temps"], help="What to list")
+    p_list.set_defaults(func=cmd_list)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
