@@ -33,6 +33,16 @@ export const DEFAULT_INTRO_DURATION = 3000; // 3 seconds
 export const DEFAULT_IMAGE_DURATION = 10000; // 10 seconds
 
 /**
+ * Minimum image display duration in milliseconds.
+ */
+export const MIN_IMAGE_DURATION = 5000; // 5 seconds
+
+/**
+ * Maximum image display duration in milliseconds.
+ */
+export const MAX_IMAGE_DURATION = 120000; // 2 minutes
+
+/**
  * Default volume level (0-100).
  */
 export const DEFAULT_VOLUME = 100;

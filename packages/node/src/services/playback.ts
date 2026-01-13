@@ -3,7 +3,7 @@
  * Manages playback state transitions and broadcasts updates.
  */
 
-import { createLogger, DEFAULT_PLAYBACK_STATE, DEFAULT_INTRO_DURATION, getContentType } from '@chiba/shared';
+import { createLogger, DEFAULT_PLAYBACK_STATE, DEFAULT_INTRO_DURATION, MIN_IMAGE_DURATION, MAX_IMAGE_DURATION, getContentType } from '@chiba/shared';
 import type {
   PlaybackState,
   PlaybackMode,
@@ -186,12 +186,11 @@ class PlaybackManager {
       paused: false,
     });
 
-    // For images, auto-advance after duration
+    // For images, auto-advance after global duration
     if (actualType === 'image' && !loop) {
-      const duration = content.metadata?.introDuration ?? this.state.imageDuration;
       this.imageTimer = setTimeout(() => {
         this.handleContentEnded();
-      }, duration);
+      }, this.state.imageDuration);
     }
   }
 
@@ -409,7 +408,9 @@ class PlaybackManager {
     // but we need to keep the playlist loop setting for when the playlist ends
     const playlistLoop = this.state.loop;
     this.playContent(contentWithMeta, { loop: false, showIntro: !!showIntro });
+    // Restore and broadcast the correct loop state (playContent set it to false for item looping)
     this.state.loop = playlistLoop;
+    this.broadcast();
   }
 
   /**
@@ -567,10 +568,10 @@ class PlaybackManager {
   }
 
   /**
-   * Set image duration in milliseconds.
+   * Set image duration in milliseconds (clamped to 5s - 2min range).
    */
   setImageDuration(duration: number): void {
-    const clampedDuration = Math.max(1000, Math.round(duration)); // Minimum 1 second
+    const clampedDuration = Math.max(MIN_IMAGE_DURATION, Math.min(MAX_IMAGE_DURATION, Math.round(duration)));
     logger.info('Setting image duration', { duration: clampedDuration });
     this.state.imageDuration = clampedDuration;
     this.broadcast();

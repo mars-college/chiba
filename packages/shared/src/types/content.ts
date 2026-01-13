@@ -162,8 +162,6 @@ export interface PlaylistItem {
   id: string;
   /** Content source (may be resolved Content or pending ContentSource) */
   content: Content | ContentSource;
-  /** Override display duration for images (milliseconds) */
-  duration?: number;
   /** Position in playlist (0-indexed) */
   order: number;
   /** Metadata for intro screen (overrides content metadata) */

@@ -117,6 +117,69 @@ const ROTATION_CONFIG_FILE = path.join(CHIBA_DIR, '.display-rotate');
 const ROTATION_SIGNAL_FILE = '/tmp/chiba-rotate-signal';
 
 /**
+ * Update a key=value pair in a .env file.
+ * Creates the key if it doesn't exist, updates if it does.
+ */
+function updateEnvFile(envPath: string, key: string, value: string): boolean {
+  try {
+    let content = '';
+    if (fs.existsSync(envPath)) {
+      content = fs.readFileSync(envPath, 'utf-8');
+    }
+
+    const lines = content.split('\n');
+    let found = false;
+    const newLines = lines.map(line => {
+      // Match the key (with optional quotes around value)
+      const regex = new RegExp(`^${key}=`);
+      if (regex.test(line)) {
+        found = true;
+        return `${key}=${value}`;
+      }
+      return line;
+    });
+
+    if (!found) {
+      // Add new line (ensure there's a newline before if file isn't empty)
+      if (newLines.length > 0 && newLines[newLines.length - 1] !== '') {
+        newLines.push(`${key}=${value}`);
+      } else if (newLines.length > 0) {
+        // Last line is empty, insert before it
+        newLines.splice(newLines.length - 1, 0, `${key}=${value}`);
+      } else {
+        newLines.push(`${key}=${value}`);
+      }
+    }
+
+    fs.writeFileSync(envPath, newLines.join('\n'));
+    logger.info('Updated .env file', { path: envPath, key, value });
+    return true;
+  } catch (err) {
+    logger.error('Failed to update .env file', err as Error, { path: envPath, key });
+    return false;
+  }
+}
+
+/**
+ * Get the path to the .env file being used.
+ * On Pi, this is typically in the chiba directory.
+ */
+function getEnvFilePath(): string {
+  // Check current working directory first (Pi deployment)
+  const cwdEnv = path.join(process.cwd(), '.env');
+  if (fs.existsSync(cwdEnv)) {
+    return cwdEnv;
+  }
+  // Check CHIBA_DIR
+  const chibaEnv = path.join(CHIBA_DIR, '.env');
+  if (fs.existsSync(chibaEnv)) {
+    return chibaEnv;
+  }
+  // Default to cwd (will create if needed)
+  return cwdEnv;
+}
+
+/**
  * Get the current display rotation from config file.
  */
 function getDisplayRotation(): DisplayRotation {
@@ -1041,6 +1104,13 @@ async function handleRequest(
         // Persist to database
         setConfig('node.friendly_name', trimmedName);
 
+        // Update .env file so name persists across restarts
+        const envPath = getEnvFilePath();
+        const envUpdated = updateEnvFile(envPath, 'NODE_NAME', trimmedName);
+        if (!envUpdated) {
+          logger.warn('Failed to update .env file, name will revert on restart');
+        }
+
         // Send state update to controller so dashboard updates
         sendStateToController(playbackManager.getState());
 
@@ -1053,12 +1123,13 @@ async function handleRequest(
           state.controllerWs.send(JSON.stringify(heartbeatMessage));
         }
 
-        logger.info('Node renamed', { oldName, newName: trimmedName });
+        logger.info('Node renamed', { oldName, newName: trimmedName, envUpdated, envPath });
         sendJson(res, {
           success: true,
           data: {
             oldName,
             newName: trimmedName,
+            envUpdated,
           },
         });
         return;
@@ -1378,14 +1449,19 @@ function loadConfig(): void {
   // Load from database
   const dbConfig = getAllConfig();
 
-  // Build config, preferring environment variables
-  // Use || instead of ?? so empty strings fall through to defaults
+  // Build config
+  // For friendlyName: prefer .env, then db (if explicitly set), then default
+  // This ensures .env takes precedence, but /rename changes persist in db
+  const dbFriendlyName = dbConfig['node.friendly_name'];
+  const envFriendlyName = process.env.NODE_NAME;
+  const friendlyName =
+    envFriendlyName ||
+    (dbFriendlyName && dbFriendlyName !== 'unnamed-node' ? dbFriendlyName : null) ||
+    'unnamed-node';
+
   state.config = {
     id: process.env.NODE_ID || dbConfig['node.id'] || crypto.randomUUID(),
-    friendlyName:
-      dbConfig['node.friendly_name'] ||
-      process.env.NODE_NAME ||
-      'unnamed-node',
+    friendlyName,
     controllerUrl:
       process.env.CONTROLLER_URL || dbConfig['controller.url'] || '',
     apiKey: process.env.API_KEY || dbConfig['controller.api_key'],

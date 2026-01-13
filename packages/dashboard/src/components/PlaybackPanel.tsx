@@ -26,6 +26,7 @@ interface PlaybackPanelProps {
   onLoopChange: (enabled: boolean) => void;
   onShuffleChange: (enabled: boolean) => void;
   onVolumeChange: (volume: number) => void;
+  onImageDurationChange: (duration: number) => void;
 }
 
 export function PlaybackPanel({
@@ -41,13 +42,18 @@ export function PlaybackPanel({
   onLoopChange,
   onShuffleChange,
   onVolumeChange,
+  onImageDurationChange,
 }: PlaybackPanelProps) {
   const [urlInput, setUrlInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [localVolume, setLocalVolume] = useState(playbackState?.volume ?? 100);
+  const [localImageDuration, setLocalImageDuration] = useState(playbackState?.imageDuration ?? 10000);
   const [isInteracting, setIsInteracting] = useState(false);
+  const [isDurationInteracting, setIsDurationInteracting] = useState(false);
   const lastSentVolume = useRef(playbackState?.volume ?? 100);
+  const lastSentImageDuration = useRef(playbackState?.imageDuration ?? 10000);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const durationDebounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Upload state
   const [playMode, setPlayMode] = useState<'url' | 'upload'>('url');
@@ -75,11 +81,24 @@ export function PlaybackPanel({
     }
   }, [playbackState?.volume, isInteracting]);
 
-  // Cleanup debounce timer on unmount
+  // Sync image duration with server value when not interacting
+  useEffect(() => {
+    if (!isDurationInteracting && playbackState?.imageDuration !== undefined) {
+      if (Math.abs(playbackState.imageDuration - lastSentImageDuration.current) > 100) {
+        setLocalImageDuration(playbackState.imageDuration);
+        lastSentImageDuration.current = playbackState.imageDuration;
+      }
+    }
+  }, [playbackState?.imageDuration, isDurationInteracting]);
+
+  // Cleanup debounce timers on unmount
   useEffect(() => {
     return () => {
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
+      }
+      if (durationDebounceTimer.current) {
+        clearTimeout(durationDebounceTimer.current);
       }
     };
   }, []);
@@ -179,6 +198,30 @@ export function PlaybackPanel({
   const handleVolumeInteractionEnd = () => {
     // Keep interacting flag for a bit longer to prevent snap-back from delayed server response
     setTimeout(() => setIsInteracting(false), 500);
+  };
+
+  // Debounced image duration change - sends at most every 100ms
+  const sendImageDurationChange = useCallback((duration: number) => {
+    if (durationDebounceTimer.current) {
+      clearTimeout(durationDebounceTimer.current);
+    }
+    durationDebounceTimer.current = setTimeout(() => {
+      lastSentImageDuration.current = duration;
+      onImageDurationChange(duration);
+    }, 100);
+  }, [onImageDurationChange]);
+
+  const handleImageDurationChange = (newDuration: number) => {
+    setLocalImageDuration(newDuration);
+    sendImageDurationChange(newDuration);
+  };
+
+  const handleDurationInteractionStart = () => {
+    setIsDurationInteracting(true);
+  };
+
+  const handleDurationInteractionEnd = () => {
+    setTimeout(() => setIsDurationInteracting(false), 500);
   };
 
   const getCurrentContentInfo = () => {
@@ -507,6 +550,46 @@ export function PlaybackPanel({
             </svg>
           </button>
         </div>
+      </div>
+
+      {/* Image Duration Slider */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div
+          style={{
+            color: 'var(--text-secondary)',
+            padding: '4px',
+            display: 'flex',
+          }}
+          title="Image display duration"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+        </div>
+        <input
+          type="range"
+          className="volume-slider"
+          min="5"
+          max="120"
+          value={Math.round(localImageDuration / 1000)}
+          onChange={(e) => handleImageDurationChange(parseInt(e.target.value) * 1000)}
+          onMouseDown={handleDurationInteractionStart}
+          onMouseUp={handleDurationInteractionEnd}
+          onTouchStart={handleDurationInteractionStart}
+          onTouchEnd={handleDurationInteractionEnd}
+          disabled={disabled}
+          style={{ flex: 1 }}
+        />
+        <span style={{
+          minWidth: '40px',
+          textAlign: 'right',
+          fontSize: '0.875rem',
+          color: 'var(--text-secondary)',
+          fontFamily: "'SF Mono', Monaco, 'Courier New', monospace",
+        }}>
+          {Math.round(localImageDuration / 1000)}s
+        </span>
       </div>
 
       {/* Play from URL / Upload */}

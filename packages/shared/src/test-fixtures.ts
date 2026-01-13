@@ -132,7 +132,7 @@ export const SAMPLE_PLAYLIST: Playlist = {
   name: 'Test Playlist',
   items: [
     { id: 'item-1', content: SAMPLE_CONTENT, order: 0 },
-    { id: 'item-2', content: SAMPLE_IMAGE_CONTENT, duration: 5000, order: 1 },
+    { id: 'item-2', content: SAMPLE_IMAGE_CONTENT, order: 1 },
   ],
   loop: true,
   showIntros: true,

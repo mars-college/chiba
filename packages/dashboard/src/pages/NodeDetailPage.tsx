@@ -132,6 +132,15 @@ export function NodeDetailPage() {
     }
   };
 
+  const handleImageDurationChange = async (duration: number) => {
+    if (!id) return;
+    try {
+      await apiPost(`/nodes/${id}/image-duration`, { duration });
+    } catch (err) {
+      console.error('Image duration change failed:', err);
+    }
+  };
+
   const [rotationLoading, setRotationLoading] = useState(false);
   const [clearCacheLoading, setClearCacheLoading] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
@@ -292,6 +301,7 @@ export function NodeDetailPage() {
               onLoopChange={handleLoopChange}
               onShuffleChange={handleShuffleChange}
               onVolumeChange={handleVolumeChange}
+              onImageDurationChange={handleImageDurationChange}
             />
           </div>
         </div>
