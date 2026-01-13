@@ -215,7 +215,7 @@ export function NodeDetailPage() {
       <div>
         <div className="page-header">
           <Link to="/" className="btn btn-secondary btn-sm" style={{ marginBottom: '16px' }}>
-            Back to Nodes
+            Back to Nodes 33
           </Link>
           <h1 className="page-title">Node Not Found</h1>
         </div>
@@ -231,7 +231,7 @@ export function NodeDetailPage() {
       {/* Header Section */}
       <div className="page-header" style={{ marginBottom: '24px' }}>
         <Link to="/" className="btn btn-secondary btn-sm" style={{ marginBottom: '16px' }}>
-          Back to Nodes
+          Back to Nodes 44
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <h1 className="page-title" style={{ margin: 0 }}>{node.node.friendlyName}</h1>
