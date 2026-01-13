@@ -479,7 +479,8 @@ class PlaybackManager {
     const nextIndex = this.state.playlistIndex + 1;
 
     if (nextIndex >= playlist.items.length) {
-      if (this.state.loop) {
+      // EMERGENCY HARDCODE: Always loop playlists. Remove `true ||` to restore normal behavior.
+      if (true || this.state.loop) {
         this.state.playlistIndex = 0;
         logger.info('Playlist looping to start');
       } else {
@@ -510,7 +511,8 @@ class PlaybackManager {
     const prevIndex = this.state.playlistIndex - 1;
 
     if (prevIndex < 0) {
-      if (this.state.loop) {
+      // EMERGENCY HARDCODE: Always loop playlists. Remove `true ||` to restore normal behavior.
+      if (true || this.state.loop) {
         this.state.playlistIndex = playlist.items.length - 1;
         logger.info('Playlist looping to end');
       } else {
