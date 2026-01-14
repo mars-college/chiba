@@ -25,7 +25,28 @@ export const NODE_TIMEOUT = NODE_OFFLINE_TIMEOUT;
 /**
  * Default intro screen duration in milliseconds.
  */
-export const DEFAULT_INTRO_DURATION = 3000; // 3 seconds
+export const DEFAULT_INTRO_DURATION = 5000; // 5 seconds
+
+/**
+ * Minimum intro screen duration in milliseconds.
+ */
+export const MIN_INTRO_DURATION = 2000; // 2 seconds
+
+/**
+ * Maximum intro screen duration in milliseconds.
+ */
+export const MAX_INTRO_DURATION = 20000; // 20 seconds
+
+/**
+ * Threshold above which black screen padding is added before/after intro.
+ * At or above this duration, 20% padding is added.
+ */
+export const INTRO_PADDING_THRESHOLD = 5000; // 5 seconds
+
+/**
+ * Percentage of intro duration to use as black screen padding.
+ */
+export const INTRO_PADDING_PERCENT = 0.2; // 20%
 
 /**
  * Default image display duration in milliseconds (for playlists).

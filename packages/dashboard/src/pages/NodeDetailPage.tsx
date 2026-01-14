@@ -141,6 +141,25 @@ export function NodeDetailPage() {
     }
   };
 
+  const handleShowIntrosChange = async (enabled: boolean) => {
+    if (!id) return;
+    try {
+      await apiPost(`/nodes/${id}/intro`, { enabled });
+      setTimeout(fetchNode, 200);
+    } catch (err) {
+      console.error('Show intros change failed:', err);
+    }
+  };
+
+  const handleIntroDurationChange = async (duration: number) => {
+    if (!id) return;
+    try {
+      await apiPost(`/nodes/${id}/intro-duration`, { duration });
+    } catch (err) {
+      console.error('Intro duration change failed:', err);
+    }
+  };
+
   const handlePlayPlaylist = async (playlistId: string, startIndex?: number) => {
     if (!id) return;
     setPlayError(null);
@@ -321,6 +340,8 @@ export function NodeDetailPage() {
               onShuffleChange={handleShuffleChange}
               onVolumeChange={handleVolumeChange}
               onImageDurationChange={handleImageDurationChange}
+              onShowIntrosChange={handleShowIntrosChange}
+              onIntroDurationChange={handleIntroDurationChange}
             />
           </div>
         </div>

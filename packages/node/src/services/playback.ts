@@ -3,7 +3,18 @@
  * Manages playback state transitions and broadcasts updates.
  */
 
-import { createLogger, DEFAULT_PLAYBACK_STATE, DEFAULT_INTRO_DURATION, MIN_IMAGE_DURATION, MAX_IMAGE_DURATION, getContentType } from '@chiba/shared';
+import {
+  createLogger,
+  DEFAULT_PLAYBACK_STATE,
+  DEFAULT_INTRO_DURATION,
+  MIN_IMAGE_DURATION,
+  MAX_IMAGE_DURATION,
+  MIN_INTRO_DURATION,
+  MAX_INTRO_DURATION,
+  INTRO_PADDING_THRESHOLD,
+  INTRO_PADDING_PERCENT,
+  getContentType,
+} from '@chiba/shared';
 import type {
   PlaybackState,
   PlaybackMode,
@@ -32,6 +43,7 @@ class PlaybackManager {
   private playerClients: Set<WebSocket> = new Set();
   private introTimer: NodeJS.Timeout | null = null;
   private imageTimer: NodeJS.Timeout | null = null;
+  private transitionTimer: NodeJS.Timeout | null = null;
   private stateChangeCallback: ((state: PlaybackState) => void) | null = null;
   private consecutiveFailures: number = 0;
 
@@ -123,6 +135,10 @@ class PlaybackManager {
     if (this.imageTimer) {
       clearTimeout(this.imageTimer);
       this.imageTimer = null;
+    }
+    if (this.transitionTimer) {
+      clearTimeout(this.transitionTimer);
+      this.transitionTimer = null;
     }
   }
 
@@ -579,24 +595,63 @@ class PlaybackManager {
     };
     const contentWithMeta = { ...content, metadata };
 
-    const showIntro = playlist.showIntros && (metadata.title || metadata.author);
+    // Use node-level showIntros setting instead of playlist setting
+    const showIntro = this.state.showIntros && (metadata.title || metadata.author);
 
     // Play content directly (don't go through playContent which creates new playlists)
     markAsPlayed(contentWithMeta.hash);
 
     if (showIntro) {
-      // Show intro first
-      this.transition('intro', {
-        currentContent: contentWithMeta,
-        introMetadata: metadata,
-        paused: false,
-      });
+      // Use node-level introDuration setting
+      const introDuration = this.state.introDuration;
 
-      // Transition to actual content after intro
-      const introDuration = metadata.introDuration ?? DEFAULT_INTRO_DURATION;
-      this.introTimer = setTimeout(() => {
-        this.startContentPlayback(contentWithMeta);
-      }, introDuration);
+      // Calculate padding: at or above threshold, add 20% padding before and after
+      const paddingDuration = introDuration >= INTRO_PADDING_THRESHOLD
+        ? Math.round(introDuration * INTRO_PADDING_PERCENT)
+        : 0;
+
+      if (paddingDuration > 0) {
+        // Start with black screen (transition mode)
+        this.transition('transition', {
+          currentContent: contentWithMeta,
+          introMetadata: metadata,
+          paused: false,
+        });
+
+        // After pre-padding, show intro
+        this.transitionTimer = setTimeout(() => {
+          this.transition('intro', {
+            currentContent: contentWithMeta,
+            introMetadata: metadata,
+            paused: false,
+          });
+
+          // After intro, show post-padding black screen
+          this.introTimer = setTimeout(() => {
+            this.transition('transition', {
+              currentContent: contentWithMeta,
+              introMetadata: undefined,
+              paused: false,
+            });
+
+            // After post-padding, start content
+            this.transitionTimer = setTimeout(() => {
+              this.startContentPlayback(contentWithMeta);
+            }, paddingDuration);
+          }, introDuration);
+        }, paddingDuration);
+      } else {
+        // No padding needed - just show intro then content
+        this.transition('intro', {
+          currentContent: contentWithMeta,
+          introMetadata: metadata,
+          paused: false,
+        });
+
+        this.introTimer = setTimeout(() => {
+          this.startContentPlayback(contentWithMeta);
+        }, introDuration);
+      }
     } else {
       this.startContentPlayback(contentWithMeta);
     }
@@ -785,6 +840,25 @@ class PlaybackManager {
   }
 
   /**
+   * Set whether to show intro screens before each content item.
+   */
+  setShowIntros(enabled: boolean): void {
+    logger.info('Setting showIntros', { enabled });
+    this.state.showIntros = enabled;
+    this.broadcast();
+  }
+
+  /**
+   * Set intro screen duration in milliseconds (clamped to 2s - 20s range).
+   */
+  setIntroDuration(duration: number): void {
+    const clampedDuration = Math.max(MIN_INTRO_DURATION, Math.min(MAX_INTRO_DURATION, Math.round(duration)));
+    logger.info('Setting intro duration', { duration: clampedDuration });
+    this.state.introDuration = clampedDuration;
+    this.broadcast();
+  }
+
+  /**
    * Generate a new shuffled order for the playlist.
    * Ensures the current item stays at current position to avoid jarring skips.
    */
@@ -871,6 +945,8 @@ export const restartPlayback = () => playbackManager.restart();
 export const setPlaybackVolume = (level: number) => playbackManager.setVolume(level);
 export const setImageDuration = (duration: number) => playbackManager.setImageDuration(duration);
 export const setPlaybackShuffle = (enabled: boolean) => playbackManager.setShuffle(enabled);
+export const setShowIntros = (enabled: boolean) => playbackManager.setShowIntros(enabled);
+export const setIntroDuration = (duration: number) => playbackManager.setIntroDuration(duration);
 export const handleContentEnded = () => playbackManager.handleContentEnded();
 export const handleIntroComplete = () => playbackManager.handleIntroComplete();
 export const addPlayerClient = (ws: WebSocket) => playbackManager.addPlayerClient(ws);

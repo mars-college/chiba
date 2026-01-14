@@ -4,12 +4,13 @@
  */
 
 import type { Content, ContentSource, Playlist, PlaylistItem, ContentMetadata } from './content.js';
-import { DEFAULT_IMAGE_DURATION } from '../constants.js';
+import { DEFAULT_IMAGE_DURATION, DEFAULT_INTRO_DURATION } from '../constants.js';
 
 /**
  * Playback modes supported by the player.
+ * - 'transition': Black screen shown before/after intros (when introDuration >= 5s)
  */
-export type PlaybackMode = 'off' | 'video' | 'image' | 'playlist' | 'url' | 'intro';
+export type PlaybackMode = 'off' | 'video' | 'image' | 'playlist' | 'url' | 'intro' | 'transition';
 
 /**
  * Current state of playback on a node.
@@ -37,6 +38,10 @@ export interface PlaybackState {
   volume: number;
   /** Image display duration in milliseconds */
   imageDuration: number;
+  /** Whether to show intro screens before each content item */
+  showIntros: boolean;
+  /** Intro screen duration in milliseconds (2000-20000) */
+  introDuration: number;
   /** Current playback position in seconds (for videos) */
   position?: number;
   /** Intro screen currently being shown */
@@ -54,6 +59,8 @@ export const DEFAULT_PLAYBACK_STATE: PlaybackState = {
   paused: false,
   volume: 100,
   imageDuration: DEFAULT_IMAGE_DURATION,
+  showIntros: true,
+  introDuration: DEFAULT_INTRO_DURATION,
 };
 
 /**

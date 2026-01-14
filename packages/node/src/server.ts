@@ -66,6 +66,8 @@ import {
   setPlaybackVolume,
   setImageDuration,
   setPlaybackShuffle,
+  setShowIntros,
+  setIntroDuration,
   handleContentEnded,
   handleIntroComplete,
   appendItems,
@@ -979,6 +981,24 @@ async function handleRequest(
         }
         setImageDuration(duration);
         sendJson(res, { success: true, data: { imageDuration: playbackManager.getState().imageDuration } });
+        return;
+      }
+
+      case '/intro': {
+        const enabled = body?.enabled as boolean ?? !playbackManager.getState().showIntros;
+        setShowIntros(enabled);
+        sendJson(res, { success: true, data: { showIntros: playbackManager.getState().showIntros } });
+        return;
+      }
+
+      case '/intro-duration': {
+        const duration = body?.duration as number | undefined;
+        if (duration === undefined || typeof duration !== 'number') {
+          sendError(res, 'Duration (in ms) is required', 400);
+          return;
+        }
+        setIntroDuration(duration);
+        sendJson(res, { success: true, data: { introDuration: playbackManager.getState().introDuration } });
         return;
       }
 

@@ -516,7 +516,9 @@ export function PlaylistsPage() {
                     No nodes connected
                   </p>
                 ) : (
-                  nodes.map(node => (
+                  [...nodes].sort((a, b) =>
+                    (a.node.friendlyName || a.node.id).localeCompare(b.node.friendlyName || b.node.id)
+                  ).map(node => (
                     <button
                       key={node.node.id}
                       className="btn btn-secondary"

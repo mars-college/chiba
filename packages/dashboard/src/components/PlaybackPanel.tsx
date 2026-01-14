@@ -27,6 +27,8 @@ interface PlaybackPanelProps {
   onShuffleChange: (enabled: boolean) => void;
   onVolumeChange: (volume: number) => void;
   onImageDurationChange: (duration: number) => void;
+  onShowIntrosChange: (enabled: boolean) => void;
+  onIntroDurationChange: (duration: number) => void;
 }
 
 export function PlaybackPanel({
@@ -43,17 +45,23 @@ export function PlaybackPanel({
   onShuffleChange,
   onVolumeChange,
   onImageDurationChange,
+  onShowIntrosChange,
+  onIntroDurationChange,
 }: PlaybackPanelProps) {
   const [urlInput, setUrlInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [localVolume, setLocalVolume] = useState(playbackState?.volume ?? 100);
   const [localImageDuration, setLocalImageDuration] = useState(playbackState?.imageDuration ?? 10000);
+  const [localIntroDuration, setLocalIntroDuration] = useState(playbackState?.introDuration ?? 5000);
   const [isInteracting, setIsInteracting] = useState(false);
   const [isDurationInteracting, setIsDurationInteracting] = useState(false);
+  const [isIntroDurationInteracting, setIsIntroDurationInteracting] = useState(false);
   const lastSentVolume = useRef(playbackState?.volume ?? 100);
   const lastSentImageDuration = useRef(playbackState?.imageDuration ?? 10000);
+  const lastSentIntroDuration = useRef(playbackState?.introDuration ?? 5000);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   const durationDebounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const introDurationDebounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Upload state
   const [playMode, setPlayMode] = useState<'url' | 'upload'>('url');
@@ -68,6 +76,7 @@ export function PlaybackPanel({
   const isPlaylist = playbackState?.playlist && playbackState.playlist.items.length > 1;
   const loop = playbackState?.loop ?? true;
   const shuffle = playbackState?.shuffle ?? false;
+  const showIntros = playbackState?.showIntros ?? true;
 
   // Only sync with server value when not interacting AND server value differs significantly
   // This prevents snap-back while still allowing server-initiated changes
@@ -91,6 +100,16 @@ export function PlaybackPanel({
     }
   }, [playbackState?.imageDuration, isDurationInteracting]);
 
+  // Sync intro duration with server value when not interacting
+  useEffect(() => {
+    if (!isIntroDurationInteracting && playbackState?.introDuration !== undefined) {
+      if (Math.abs(playbackState.introDuration - lastSentIntroDuration.current) > 100) {
+        setLocalIntroDuration(playbackState.introDuration);
+        lastSentIntroDuration.current = playbackState.introDuration;
+      }
+    }
+  }, [playbackState?.introDuration, isIntroDurationInteracting]);
+
   // Cleanup debounce timers on unmount
   useEffect(() => {
     return () => {
@@ -99,6 +118,9 @@ export function PlaybackPanel({
       }
       if (durationDebounceTimer.current) {
         clearTimeout(durationDebounceTimer.current);
+      }
+      if (introDurationDebounceTimer.current) {
+        clearTimeout(introDurationDebounceTimer.current);
       }
     };
   }, []);
@@ -222,6 +244,30 @@ export function PlaybackPanel({
 
   const handleDurationInteractionEnd = () => {
     setTimeout(() => setIsDurationInteracting(false), 500);
+  };
+
+  // Debounced intro duration change - sends at most every 100ms
+  const sendIntroDurationChange = useCallback((duration: number) => {
+    if (introDurationDebounceTimer.current) {
+      clearTimeout(introDurationDebounceTimer.current);
+    }
+    introDurationDebounceTimer.current = setTimeout(() => {
+      lastSentIntroDuration.current = duration;
+      onIntroDurationChange(duration);
+    }, 100);
+  }, [onIntroDurationChange]);
+
+  const handleIntroDurationChange = (newDuration: number) => {
+    setLocalIntroDuration(newDuration);
+    sendIntroDurationChange(newDuration);
+  };
+
+  const handleIntroDurationInteractionStart = () => {
+    setIsIntroDurationInteracting(true);
+  };
+
+  const handleIntroDurationInteractionEnd = () => {
+    setTimeout(() => setIsIntroDurationInteracting(false), 500);
   };
 
   const getCurrentContentInfo = () => {
@@ -549,6 +595,31 @@ export function PlaybackPanel({
               <line x1="4" y1="4" x2="9" y2="9" />
             </svg>
           </button>
+          <button
+            onClick={() => onShowIntrosChange(!showIntros)}
+            disabled={disabled}
+            title="Show intro screens"
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '8px',
+              border: showIntros ? '1px solid var(--accent)' : '1px solid var(--border)',
+              background: showIntros ? 'rgba(59, 130, 246, 0.2)' : 'var(--bg-tertiary)',
+              color: showIntros ? 'var(--accent)' : 'var(--text-secondary)',
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: disabled ? 0.5 : 1,
+              transition: 'all 0.2s',
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -589,6 +660,47 @@ export function PlaybackPanel({
           fontFamily: "'SF Mono', Monaco, 'Courier New', monospace",
         }}>
           {Math.round(localImageDuration / 1000)}s
+        </span>
+      </div>
+
+      {/* Intro Duration Slider */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', opacity: showIntros ? 1 : 0.5 }}>
+        <div
+          style={{
+            color: 'var(--text-secondary)',
+            padding: '4px',
+            display: 'flex',
+          }}
+          title="Intro screen duration (2-20 sec)"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+          </svg>
+        </div>
+        <input
+          type="range"
+          className="volume-slider"
+          min="2"
+          max="20"
+          value={Math.round(localIntroDuration / 1000)}
+          onChange={(e) => handleIntroDurationChange(parseInt(e.target.value) * 1000)}
+          onMouseDown={handleIntroDurationInteractionStart}
+          onMouseUp={handleIntroDurationInteractionEnd}
+          onTouchStart={handleIntroDurationInteractionStart}
+          onTouchEnd={handleIntroDurationInteractionEnd}
+          disabled={disabled || !showIntros}
+          style={{ flex: 1 }}
+        />
+        <span style={{
+          minWidth: '40px',
+          textAlign: 'right',
+          fontSize: '0.875rem',
+          color: 'var(--text-secondary)',
+          fontFamily: "'SF Mono', Monaco, 'Courier New', monospace",
+        }}>
+          {Math.round(localIntroDuration / 1000)}s
         </span>
       </div>
 

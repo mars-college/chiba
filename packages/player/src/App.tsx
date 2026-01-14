@@ -203,6 +203,15 @@ export default function App() {
         </div>
       );
 
+    case 'transition':
+      // Pure black screen for transitions before/after intros
+      return (
+        <div className="player-container">
+          {downloadOverlay}
+          <div className="transition-screen" />
+        </div>
+      );
+
     case 'off':
     default:
       // Show debug screen when not playing

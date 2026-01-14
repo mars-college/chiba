@@ -187,6 +187,13 @@ html, body, #root {
   to { opacity: 1; }
 }
 
+/* Transition Screen (black padding before/after intros) */
+.transition-screen {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
 /* URL Display (iframe) */
 .url-display {
   width: 100%;
