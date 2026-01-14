@@ -361,3 +361,58 @@ Single shared `API_KEY` across controller and all nodes:
 - Configured via environment variable or .env file
 - Required for all POST endpoints on nodes
 - Passed via `Authorization: Bearer <key>` header, `X-API-Key` header, or `?api_key=` query param
+
+## Network Watchdog
+
+The `chiba-network-watchdog` systemd service monitors network connectivity and auto-recovers from WiFi dropouts.
+
+**Recovery levels (progressive):**
+1. Restart WiFi interface
+2. Reconnect via NetworkManager
+3. Restart NetworkManager service
+4. Full network stack restart (kill dhclient/wpa_supplicant, restart services)
+5. Auto-reboot (if enabled and node is idle)
+
+**View logs:**
+```bash
+journalctl -u chiba-network-watchdog -f          # Follow live
+journalctl -u chiba-network-watchdog -n 100      # Last 100 lines
+journalctl -u chiba-network-watchdog --since "1 hour ago"
+```
+
+**Enable persistent logs** (survive reboots - recommended for debugging):
+```bash
+sudo mkdir -p /var/log/journal
+sudo systemd-tmpfiles --create --prefix /var/log/journal
+sudo systemctl restart systemd-journald
+```
+
+### Auto-Reboot Feature
+
+When enabled, the watchdog will reboot the Pi as a last resort if:
+- Network has been down for ~10 minutes (20 consecutive failures)
+- All software recovery attempts have failed
+- Node is idle (not playing content)
+
+**Safeguards:**
+- Only reboots if node is idle (checks `/status` endpoint)
+- 1 hour minimum cooldown between reboots
+- Max 3 consecutive reboots before giving up (prevents reboot loops)
+- Reboot counter resets when network recovers
+
+**Toggle auto-reboot (run ON the Pi):**
+```bash
+./chiba/scripts/auto-reboot.sh on      # Enable
+./chiba/scripts/auto-reboot.sh off     # Disable
+./chiba/scripts/auto-reboot.sh         # Check status
+./chiba/scripts/auto-reboot.sh reset   # Reset counter after manual fix
+```
+
+**Deploy to nodes:**
+```bash
+# Copy updated scripts
+scp scripts/network-watchdog.sh scripts/auto-reboot.sh pi@<pi-ip>:~/chiba/scripts/
+
+# Enable on node
+ssh pi@<pi-ip> "~/chiba/scripts/auto-reboot.sh on && sudo systemctl restart chiba-network-watchdog"
+```
