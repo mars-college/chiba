@@ -161,11 +161,11 @@ export const MIGRATIONS = [
   `DELETE FROM light_state;`,
   `DELETE FROM lights;`,
   `INSERT INTO lights (id, name, ip_address) VALUES
-    ('gw1', 'Gallery West 1', '100.124.2.208'),
-    ('gw2', 'Gallery West 2', '100.124.2.207'),
-    ('ge1', 'Gallery East 1', '100.124.2.209'),
+    ('gw1', 'Gallery West 1', '100.124.2.207'),
+    ('gw2', 'Gallery West 2', '100.124.2.115'),
+    ('ge1', 'Gallery East 1', '100.124.2.208'),
     ('ge2', 'Gallery East 2', '100.124.2.114'),
-    ('a', 'Auditorium', '100.124.2.115');`,
+    ('a', 'Auditorium', '100.124.2.209');`,
 
   // Add Max Bright preset
   `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES

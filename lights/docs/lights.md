@@ -7,7 +7,7 @@ Control Govee lights via the LAN API using simple CLI commands.
 No dependencies required - uses Python standard library only.
 
 ```bash
-cd /Users/gene/Dev/chiba/ha
+cd /Users/gene/Dev/chiba/lights
 python lights.py --help
 ```
 
@@ -41,11 +41,11 @@ The lighting system consists of 5 Govee H7039 string lights across 3 zones:
 
 | Code | Full Name | Location | IP Address |
 |------|-----------|----------|------------|
-| `gw1` | Gallery West 1 | Gallery, west side | 100.124.2.208 |
-| `gw2` | Gallery West 2 | Gallery, west side | 100.124.2.207 |
-| `ge1` | Gallery East 1 | Gallery, east side | 100.124.2.209 |
+| `gw1` | Gallery West 1 | Gallery, west side | 100.124.2.207 |
+| `gw2` | Gallery West 2 | Gallery, west side | 100.124.2.115 |
+| `ge1` | Gallery East 1 | Gallery, east side | 100.124.2.208 |
 | `ge2` | Gallery East 2 | Gallery, east side | 100.124.2.114 |
-| `a` | Auditorium | Auditorium | 100.124.2.115 |
+| `a` | Auditorium | Auditorium | 100.124.2.209 |
 | `all` | All Lights | All zones | (all 5 lights) |
 
 ---
@@ -320,7 +320,7 @@ curl http://localhost:8080/api/lights
     {
       "id": "gw1",
       "name": "Gallery West 1",
-      "ipAddress": "100.124.2.208",
+      "ipAddress": "100.124.2.207",
       "port": 4003,
       "state": {
         "power": true,

@@ -4,11 +4,11 @@
 
 | Code | Name | IP |
 |------|------|-----|
-| gw1 | Gallery West 1 | 100.124.2.208 |
-| gw2 | Gallery West 2 | 100.124.2.207 |
-| ge1 | Gallery East 1 | 100.124.2.209 |
+| gw1 | Gallery West 1 | 100.124.2.207 |
+| gw2 | Gallery West 2 | 100.124.2.115 |
+| ge1 | Gallery East 1 | 100.124.2.208 |
 | ge2 | Gallery East 2 | 100.124.2.114 |
-| a | Auditorium | 100.124.2.115 |
+| a | Auditorium | 100.124.2.209 |
 | all | All lights | - |
 
 ## Quick Commands
