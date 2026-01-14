@@ -159,6 +159,8 @@ States include: mode, currentContent, playlist, index, loop, shuffle, paused, vo
 | `scripts/rename.sh` | Rename a node via API (usage: `./rename.sh <host> <name>`) |
 | `scripts/rotate.sh` | Rotate display via API (usage: `./rotate.sh <host> <0\|90\|180\|270>`) |
 | `scripts/rotate-display.sh` | Run ON a Pi to rotate its own display locally |
+| `scripts/network-watchdog.sh` | Network recovery daemon (runs as systemd service) |
+| `scripts/auto-reboot.sh` | Toggle auto-reboot feature on/off (run ON Pi) |
 
 ## Development
 

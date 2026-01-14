@@ -21,6 +21,15 @@ FAILURE_THRESHOLD=${FAILURE_THRESHOLD:-3}   # Consecutive failures before action
 PING_TIMEOUT=${PING_TIMEOUT:-5}             # Ping timeout in seconds
 LOG_PREFIX="[network-watchdog]"
 
+# Auto-reboot configuration
+AUTO_REBOOT_FLAG="/tmp/chiba-auto-reboot-enabled"
+REBOOT_FAILURE_THRESHOLD=${REBOOT_FAILURE_THRESHOLD:-20}  # ~10 min of failures before reboot
+REBOOT_COOLDOWN=${REBOOT_COOLDOWN:-3600}                  # Min 1 hour between reboots
+REBOOT_TRACKING_FILE="/var/tmp/chiba-last-reboot"         # Persists across script restarts
+MAX_CONSECUTIVE_REBOOTS=${MAX_CONSECUTIVE_REBOOTS:-3}     # Give up after this many
+REBOOT_COUNT_FILE="/var/tmp/chiba-reboot-count"           # Track consecutive reboots
+NODE_PORT=${NODE_PORT:-8080}                              # Chiba node port
+
 # State
 failure_count=0
 last_recovery_time=0
@@ -188,6 +197,112 @@ recover_full_restart() {
     return 0
 }
 
+# =============================================================================
+# Auto-reboot functionality (Recovery Level 5)
+# =============================================================================
+
+# Check if auto-reboot is enabled
+is_auto_reboot_enabled() {
+    [ -f "$AUTO_REBOOT_FLAG" ]
+}
+
+# Check if node is idle (not playing anything)
+is_node_idle() {
+    # Try to query the node's status endpoint
+    local response
+    response=$(curl -s --connect-timeout 2 "http://localhost:${NODE_PORT}/status" 2>/dev/null)
+
+    if [ -z "$response" ]; then
+        # Can't reach node server - assume idle (server might be down)
+        log "Cannot reach node server, assuming idle"
+        return 0
+    fi
+
+    # Extract playback mode from JSON response
+    # Expected: {"success":true,"data":{"playback":{"mode":"off",...},...}}
+    local mode
+    mode=$(echo "$response" | grep -o '"mode":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+    if [ "$mode" = "off" ]; then
+        return 0  # Idle
+    else
+        log "Node is playing (mode: $mode), not safe to reboot"
+        return 1  # Not idle
+    fi
+}
+
+# Get time of last reboot (0 if never)
+get_last_reboot_time() {
+    if [ -f "$REBOOT_TRACKING_FILE" ]; then
+        cat "$REBOOT_TRACKING_FILE"
+    else
+        echo 0
+    fi
+}
+
+# Get consecutive reboot count
+get_reboot_count() {
+    if [ -f "$REBOOT_COUNT_FILE" ]; then
+        cat "$REBOOT_COUNT_FILE"
+    else
+        echo 0
+    fi
+}
+
+# Reset reboot count (call when network recovers)
+reset_reboot_count() {
+    rm -f "$REBOOT_COUNT_FILE" 2>/dev/null || true
+}
+
+# Recovery Level 5: Auto-reboot (last resort)
+recover_reboot() {
+    if ! is_auto_reboot_enabled; then
+        log "Auto-reboot not enabled (touch $AUTO_REBOOT_FLAG to enable)"
+        return 1
+    fi
+
+    # Check cooldown
+    local current_time=$(date +%s)
+    local last_reboot=$(get_last_reboot_time)
+    local time_since_reboot=$((current_time - last_reboot))
+
+    if [ $time_since_reboot -lt $REBOOT_COOLDOWN ]; then
+        log "Reboot cooldown active (${time_since_reboot}s < ${REBOOT_COOLDOWN}s), waiting..."
+        return 1
+    fi
+
+    # Check consecutive reboot limit
+    local reboot_count=$(get_reboot_count)
+    if [ $reboot_count -ge $MAX_CONSECUTIVE_REBOOTS ]; then
+        log_error "Max consecutive reboots ($MAX_CONSECUTIVE_REBOOTS) reached without recovery"
+        log_error "Manual intervention required. Reset with: rm $REBOOT_COUNT_FILE"
+        return 1
+    fi
+
+    # Check if node is idle
+    if ! is_node_idle; then
+        log "Skipping reboot - content is playing"
+        return 1
+    fi
+
+    # All checks passed - perform reboot
+    log "Recovery L5: AUTO-REBOOT - All recovery attempts exhausted"
+    log "Reboot #$((reboot_count + 1)) of max $MAX_CONSECUTIVE_REBOOTS"
+
+    # Update tracking files
+    echo "$current_time" > "$REBOOT_TRACKING_FILE"
+    echo $((reboot_count + 1)) > "$REBOOT_COUNT_FILE"
+
+    # Give a moment for logs to flush
+    sleep 2
+
+    # Reboot!
+    sudo reboot
+
+    # Should never reach here
+    exit 0
+}
+
 # Main recovery function - tries progressively more aggressive fixes
 attempt_recovery() {
     local current_time=$(date +%s)
@@ -211,8 +326,16 @@ attempt_recovery() {
         3)
             recover_restart_networkmanager
             ;;
-        *)
+        4)
             recover_full_restart
+            ;;
+        *)
+            # Level 5+: Try full restart again, then consider reboot
+            recover_full_restart
+            # If we've been failing long enough, try auto-reboot
+            if [ $failure_count -ge $REBOOT_FAILURE_THRESHOLD ]; then
+                recover_reboot
+            fi
             ;;
     esac
 
@@ -254,6 +377,13 @@ main() {
     log "Starting network watchdog"
     log "Check interval: ${CHECK_INTERVAL}s, Failure threshold: $FAILURE_THRESHOLD"
 
+    # Show auto-reboot status
+    if is_auto_reboot_enabled; then
+        log "Auto-reboot: ENABLED (after $REBOOT_FAILURE_THRESHOLD failures, max $MAX_CONSECUTIVE_REBOOTS reboots)"
+    else
+        log "Auto-reboot: disabled (touch $AUTO_REBOOT_FLAG to enable)"
+    fi
+
     # Initial status
     local ip=$(get_ip)
     local ssid=$(get_connected_ssid)
@@ -266,6 +396,8 @@ main() {
                 ip=$(get_ip)
                 ssid=$(get_connected_ssid)
                 log "Online - IP: $ip, SSID: ${ssid:-wired}"
+                # Reset reboot count since we recovered successfully
+                reset_reboot_count
             fi
             failure_count=0
         else
