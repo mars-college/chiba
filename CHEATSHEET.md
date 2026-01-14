@@ -209,6 +209,23 @@ sudo systemctl status chiba-node
 journalctl -u chiba-node -f        # view logs
 ```
 
+### Network watchdog & auto-reboot (on Pi)
+
+```bash
+# View watchdog logs
+journalctl -u chiba-network-watchdog -f        # follow live
+journalctl -u chiba-network-watchdog -n 100    # last 100 lines
+
+# Toggle auto-reboot (reboots Pi if network down ~10min and idle)
+./chiba/scripts/auto-reboot.sh on      # enable
+./chiba/scripts/auto-reboot.sh off     # disable
+./chiba/scripts/auto-reboot.sh         # check status
+./chiba/scripts/auto-reboot.sh reset   # reset counter after manual fix
+
+# Enable persistent logs (survive reboots)
+sudo mkdir -p /var/log/journal && sudo systemctl restart systemd-journald
+```
+
 ## 6. Reference
 
 ### Ports
@@ -263,3 +280,5 @@ LOG_LEVEL=info
 | `scripts/rotate-display.sh` | Rotate display locally (run on Pi) |
 | `scripts/upgrade-controller.sh` | Upgrade controller or nodes |
 | `scripts/upgrade-node.sh` | Upgrade node directly (run on Pi) |
+| `scripts/network-watchdog.sh` | Network recovery daemon (systemd service) |
+| `scripts/auto-reboot.sh` | Toggle auto-reboot on/off (run on Pi) |
