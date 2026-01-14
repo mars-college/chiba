@@ -71,6 +71,7 @@ import {
   handleContentEnded,
   handleIntroComplete,
   appendItems,
+  restoreFromResumeState,
 } from './services/playback.js';
 import { getTaskQueue, type TaskSource } from './services/task-queue.js';
 
@@ -1596,6 +1597,13 @@ function sendStateToController(playback: PlaybackState): void {
 export function startServer(port = DEFAULT_PORT): http.Server {
   // Load configuration
   loadConfig();
+
+  // Restore playback from resume state (power-cut recovery)
+  // This resumes whatever was playing before the power cut
+  const resumed = restoreFromResumeState();
+  if (resumed) {
+    logger.info('Playback restored from resume state');
+  }
 
   // Set up playback state change callback to notify controller
   playbackManager.onStateChange(sendStateToController);

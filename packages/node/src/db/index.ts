@@ -114,6 +114,20 @@ function runMigrations(): void {
       CREATE INDEX IF NOT EXISTS idx_playlists_updated ON playlists(updated_at DESC);
     `);
   }
+
+  // Check if resume_state table exists
+  const resumeTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='resume_state'").get();
+  if (!resumeTable) {
+    logger.info('Running migration: creating resume_state table');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS resume_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        playlist_id TEXT,
+        url TEXT,
+        updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+      );
+    `);
+  }
 }
 
 /**
@@ -356,4 +370,58 @@ export function markPlaylistPlayed(id: string): void {
   database
     .prepare('UPDATE playlists SET last_played_at = ? WHERE id = ?')
     .run(Date.now(), id);
+}
+
+// ============================================================================
+// Resume State Functions
+// ============================================================================
+
+export interface ResumeState {
+  playlistId?: string;
+  url?: string;
+}
+
+/**
+ * Save the current resume state.
+ * Call this when starting playback to enable resume-on-restart.
+ */
+export function saveResumeState(state: ResumeState): void {
+  const database = getDatabase();
+  database
+    .prepare(
+      `INSERT OR REPLACE INTO resume_state (id, playlist_id, url, updated_at)
+       VALUES (1, ?, ?, ?)`
+    )
+    .run(state.playlistId ?? null, state.url ?? null, Date.now());
+  logger.debug('Resume state saved', { playlistId: state.playlistId, url: state.url });
+}
+
+/**
+ * Get the current resume state.
+ * Returns null if no resume state is saved.
+ */
+export function getResumeState(): ResumeState | null {
+  const database = getDatabase();
+  const row = database
+    .prepare('SELECT playlist_id, url FROM resume_state WHERE id = 1')
+    .get() as { playlist_id: string | null; url: string | null } | undefined;
+
+  if (!row || (!row.playlist_id && !row.url)) {
+    return null;
+  }
+
+  return {
+    playlistId: row.playlist_id ?? undefined,
+    url: row.url ?? undefined,
+  };
+}
+
+/**
+ * Clear the resume state.
+ * Call this when playback is explicitly stopped.
+ */
+export function clearResumeState(): void {
+  const database = getDatabase();
+  database.prepare('DELETE FROM resume_state WHERE id = 1').run();
+  logger.debug('Resume state cleared');
 }

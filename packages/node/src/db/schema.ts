@@ -84,6 +84,15 @@ CREATE TABLE IF NOT EXISTS playlists (
 
 -- Index for recent playlists
 CREATE INDEX IF NOT EXISTS idx_playlists_updated ON playlists(updated_at DESC);
+
+-- Resume state for power-cut recovery
+-- Tracks what was playing so it can be restored on restart
+CREATE TABLE IF NOT EXISTS resume_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),  -- Single row only
+  playlist_id TEXT,                        -- Active playlist ID (if any)
+  url TEXT,                                -- Active URL for iframe mode (if any)
+  updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+);
 `;
 
 /**

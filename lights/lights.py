@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import colorsys
+import concurrent.futures
 import json
 import socket
 import sys
@@ -147,21 +148,49 @@ def parse_hsb(hsb_str: str) -> tuple[float, float, float]:
     return h, s, b
 
 
+def run_parallel(targets: list[tuple[str, str]], func, *args) -> list[tuple[str, any]]:
+    """Run a function on multiple targets in parallel.
+
+    Args:
+        targets: List of (name, ip) tuples
+        func: Function to call with (ip, *args)
+        *args: Additional arguments to pass to func
+
+    Returns:
+        List of (name, result) tuples
+    """
+    results = []
+
+    def task(name, ip):
+        result = func(ip, *args)
+        return name, result
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(targets)) as executor:
+        futures = [executor.submit(task, name, ip) for name, ip in targets]
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
+
+    # Sort by original order
+    order = {name: i for i, (name, _) in enumerate(targets)}
+    results.sort(key=lambda x: order.get(x[0], 0))
+    return results
+
+
 # --- CLI Handlers ---
 
 def cmd_on(args) -> None:
     """Handle 'on' command."""
     targets = resolve_targets(args.targets)
-    for name, ip in targets:
-        turn_on(ip)
+    run_parallel(targets, lambda ip: send_command(ip, "turn", {"value": 1}))
+    for name, _ in targets:
         print(f"{name}: on")
 
 
 def cmd_off(args) -> None:
     """Handle 'off' command."""
     targets = resolve_targets(args.targets)
-    for name, ip in targets:
-        turn_off(ip)
+    run_parallel(targets, lambda ip: send_command(ip, "turn", {"value": 0}))
+    for name, _ in targets:
         print(f"{name}: off")
 
 
@@ -169,68 +198,91 @@ def cmd_color(args) -> None:
     """Handle 'color' command."""
     # Parse color from preset, --rgb, or --hsb
     r, g, b = None, None, None
+    target_list = list(args.targets)
+
+    # Check if last target is actually a color preset
+    preset = args.preset
+    if not preset and not args.rgb and not args.hsb:
+        if target_list and target_list[-1] in COLORS:
+            preset = target_list.pop()
 
     if args.rgb:
         r, g, b = parse_rgb(args.rgb)
     elif args.hsb:
         h, s, bri = parse_hsb(args.hsb)
         r, g, b = hsb_to_rgb(h, s, bri)
-    elif args.preset:
-        if args.preset in COLORS:
-            r, g, b = COLORS[args.preset]
+    elif preset:
+        if preset in COLORS:
+            r, g, b = COLORS[preset]
         else:
-            print(f"Unknown color preset: {args.preset}", file=sys.stderr)
+            print(f"Unknown color preset: {preset}", file=sys.stderr)
             print(f"Available: {', '.join(COLORS.keys())}", file=sys.stderr)
             sys.exit(1)
     else:
         print("Must specify color preset, --rgb, or --hsb", file=sys.stderr)
         sys.exit(1)
 
-    targets = resolve_targets(args.targets)
-    for name, ip in targets:
-        turn_on(ip)  # Ensure light is on
-        set_color(ip, r, g, b)
+    def set_color_on(ip):
+        send_command(ip, "turn", {"value": 1})
+        send_command(ip, "colorwc", {"color": {"r": r, "g": g, "b": b}, "colorTemInKelvin": 0})
+
+    targets = resolve_targets(target_list)
+    run_parallel(targets, set_color_on)
+    for name, _ in targets:
         print(f"{name}: rgb({r},{g},{b})")
 
 
 def cmd_brightness(args) -> None:
     """Handle 'brightness' command."""
     targets = resolve_targets(args.targets)
-    value = max(0, min(100, args.value))
-    for name, ip in targets:
-        set_brightness(ip, value)
+    value = max(1, min(100, args.value))
+    run_parallel(targets, lambda ip: send_command(ip, "brightness", {"value": value}))
+    for name, _ in targets:
         print(f"{name}: brightness {value}%")
 
 
 def cmd_temp(args) -> None:
     """Handle 'temp' command."""
     kelvin = None
+    target_list = list(args.targets)
+
+    # Check if last target is actually a temp preset
+    preset = args.preset
+    if not preset and not args.kelvin:
+        if target_list and target_list[-1] in TEMPS:
+            preset = target_list.pop()
 
     if args.kelvin:
         kelvin = args.kelvin
-    elif args.preset:
-        if args.preset in TEMPS:
-            kelvin = TEMPS[args.preset]
+    elif preset:
+        if preset in TEMPS:
+            kelvin = TEMPS[preset]
         else:
-            print(f"Unknown temp preset: {args.preset}", file=sys.stderr)
+            print(f"Unknown temp preset: {preset}", file=sys.stderr)
             print(f"Available: {', '.join(TEMPS.keys())}", file=sys.stderr)
             sys.exit(1)
     else:
         print("Must specify temp preset or --kelvin", file=sys.stderr)
         sys.exit(1)
 
-    targets = resolve_targets(args.targets)
-    for name, ip in targets:
-        turn_on(ip)  # Ensure light is on
-        set_temp(ip, kelvin)
+    kelvin = max(2000, min(9000, kelvin))
+
+    def set_temp_on(ip):
+        send_command(ip, "turn", {"value": 1})
+        send_command(ip, "colorwc", {"color": {"r": 0, "g": 0, "b": 0}, "colorTemInKelvin": kelvin})
+
+    targets = resolve_targets(target_list)
+    run_parallel(targets, set_temp_on)
+    for name, _ in targets:
         print(f"{name}: {kelvin}K")
 
 
 def cmd_status(args) -> None:
     """Handle 'status' command."""
     targets = resolve_targets(args.targets)
-    for name, ip in targets:
-        status = get_status(ip)
+    results = run_parallel(targets, get_status)
+
+    for name, status in results:
         if status:
             on_off = "ON" if status.get("onOff") else "OFF"
             brightness = status.get("brightness", "?")

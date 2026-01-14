@@ -31,7 +31,7 @@ import { getVolume, setVolume } from './volume.js';
 import { markAsPlayed, getContentByFilename, downloadAndCache } from './content-cache.js';
 import { isYouTubeUrl, downloadYouTube } from './youtube.js';
 import { downloadCreation as downloadEdenCreation, syncCollection as syncEdenCollection } from './eden.js';
-import { savePlaylist, markPlaylistPlayed } from '../db/index.js';
+import { savePlaylist, markPlaylistPlayed, saveResumeState, clearResumeState, getResumeState, getPlaylist } from '../db/index.js';
 
 const logger = createLogger('node', 'playback');
 
@@ -56,6 +56,45 @@ class PlaybackManager {
    */
   onStateChange(callback: (state: PlaybackState) => void): void {
     this.stateChangeCallback = callback;
+  }
+
+  /**
+   * Restore playback from saved resume state (for power-cut recovery).
+   * Returns true if playback was restored, false if no resume state or idle.
+   */
+  restoreFromResumeState(): boolean {
+    try {
+      const resumeState = getResumeState();
+      if (!resumeState) {
+        logger.debug('No resume state found');
+        return false;
+      }
+
+      if (resumeState.playlistId) {
+        const playlist = getPlaylist(resumeState.playlistId);
+        if (playlist) {
+          logger.info('Restoring playlist playback after restart', {
+            playlistId: playlist.id,
+            playlistName: playlist.name,
+            itemCount: playlist.items.length,
+          });
+          // Start from beginning (as per user's requirement)
+          this.playPlaylist(playlist, 0);
+          return true;
+        } else {
+          logger.warn('Resume playlist not found in database', { playlistId: resumeState.playlistId });
+          clearResumeState();
+        }
+      } else if (resumeState.url) {
+        logger.info('Restoring URL playback after restart', { url: resumeState.url });
+        this.playUrl(resumeState.url);
+        return true;
+      }
+    } catch (err) {
+      logger.error('Failed to restore from resume state', err as Error);
+    }
+
+    return false;
   }
 
   /**
@@ -381,6 +420,8 @@ class PlaybackManager {
       try {
         savePlaylist(playlist);
         markPlaylistPlayed(playlist.id);
+        // Save resume state so we can resume after power cut
+        saveResumeState({ playlistId: playlist.id });
       } catch (err) {
         logger.warn('Failed to save playlist to database', { error: (err as Error).message });
       }
@@ -662,6 +703,14 @@ class PlaybackManager {
    */
   playUrl(url: string): void {
     logger.info('Playing URL', { url });
+
+    // Save resume state so we can resume after power cut
+    try {
+      saveResumeState({ url });
+    } catch (err) {
+      logger.warn('Failed to save resume state', { error: (err as Error).message });
+    }
+
     this.transition('url', {
       currentUrl: url,
       currentContent: undefined,
@@ -675,6 +724,14 @@ class PlaybackManager {
    */
   stop(): void {
     logger.info('Stopping playback');
+
+    // Clear resume state - explicit stop means don't resume on restart
+    try {
+      clearResumeState();
+    } catch (err) {
+      logger.warn('Failed to clear resume state', { error: (err as Error).message });
+    }
+
     this.transition('off', {
       currentContent: undefined,
       currentUrl: undefined,
@@ -955,3 +1012,4 @@ export const appendItems = (
   items: PlaylistItem[],
   options?: { name?: string; loop?: boolean; showIntros?: boolean }
 ) => playbackManager.appendItems(items, options);
+export const restoreFromResumeState = () => playbackManager.restoreFromResumeState();

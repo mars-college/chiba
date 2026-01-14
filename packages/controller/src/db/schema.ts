@@ -156,4 +156,18 @@ export const MIGRATIONS = [
     ('preset-all-on', 'All On', 1, '[{"lightId":"*","power":true,"brightness":100}]'),
     ('preset-warm-dim', 'Warm Dim', 1, '[{"lightId":"*","power":true,"hue":30,"saturation":80,"brightness":30}]'),
     ('preset-cool-bright', 'Cool Bright', 1, '[{"lightId":"*","power":true,"hue":200,"saturation":50,"brightness":100}]');`,
+
+  // Migration: Update lights to correct IPs and add all 5 lights
+  `DELETE FROM light_state;`,
+  `DELETE FROM lights;`,
+  `INSERT INTO lights (id, name, ip_address) VALUES
+    ('gw1', 'Gallery West 1', '100.124.2.208'),
+    ('gw2', 'Gallery West 2', '100.124.2.207'),
+    ('ge1', 'Gallery East 1', '100.124.2.209'),
+    ('ge2', 'Gallery East 2', '100.124.2.114'),
+    ('a', 'Auditorium', '100.124.2.115');`,
+
+  // Add Max Bright preset
+  `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
+    ('preset-max-bright', 'Max Bright', 1, '[{"lightId":"*","power":true,"hue":0,"saturation":0,"brightness":100}]');`,
 ];
