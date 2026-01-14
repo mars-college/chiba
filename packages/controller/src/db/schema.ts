@@ -170,4 +170,8 @@ export const MIGRATIONS = [
   // Add Max Bright preset
   `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
     ('preset-max-bright', 'Max Bright', 1, '[{"lightId":"*","power":true,"hue":0,"saturation":0,"brightness":100}]');`,
+
+  // Add Warm Bright preset (maximum brightness warm white/yellow - like incandescent)
+  `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
+    ('preset-warm-bright', 'Warm Bright', 1, '[{"lightId":"*","power":true,"hue":35,"saturation":40,"brightness":100}]');`,
 ];

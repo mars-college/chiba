@@ -465,6 +465,7 @@ curl -X DELETE http://localhost:8080/api/presets/my-custom-preset \
 | `preset-warm-dim` | Warm Dim | Warm orange at 30% brightness |
 | `preset-cool-bright` | Cool Bright | Cool blue-white at 100% |
 | `preset-max-bright` | Max Bright | Pure white at 100% (maximum output) |
+| `preset-warm-bright` | Warm Bright | Warm yellow/white at 100% (incandescent-like) |
 
 ### Light IDs
 

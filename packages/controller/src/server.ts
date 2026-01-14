@@ -1743,6 +1743,36 @@ async function handleRequest(
   // Light Control Endpoints
   // ============================================================================
 
+  // Control all lights - POST /api/lights/all/control
+  // NOTE: Must come BEFORE the single-light handler to avoid regex matching "all" as an ID
+  if (method === 'POST' && url.pathname === '/api/lights/all/control') {
+    const body = await readJsonBody<LightControlRequest>(req);
+    if (!body) {
+      sendError(res, 'Invalid JSON body');
+      return;
+    }
+
+    const lights = getAllLights();
+    const results: Array<{ lightId: string; success: boolean; error?: string }> = [];
+
+    logger.info('Control all lights', { body, count: lights.length });
+
+    // Control all lights in parallel
+    await Promise.all(
+      lights.map(async (light) => {
+        try {
+          await controlLight(light, body);
+          results.push({ lightId: light.id, success: true });
+        } catch (err) {
+          results.push({ lightId: light.id, success: false, error: (err as Error).message });
+        }
+      })
+    );
+
+    sendJson(res, { success: true, data: { results } });
+    return;
+  }
+
   // Control a single light - POST /api/lights/:id/control
   if (method === 'POST' && url.pathname.match(/^\/api\/lights\/[^/]+\/control$/)) {
     const lightId = url.pathname.split('/')[3];
@@ -1772,32 +1802,6 @@ async function handleRequest(
       logger.error('Failed to control light', err as Error, { lightId });
       sendError(res, `Light control failed: ${(err as Error).message}`, 500);
     }
-    return;
-  }
-
-  // Control all lights - POST /api/lights/all/control
-  if (method === 'POST' && url.pathname === '/api/lights/all/control') {
-    const body = await readJsonBody<LightControlRequest>(req);
-    if (!body) {
-      sendError(res, 'Invalid JSON body');
-      return;
-    }
-
-    const lights = getAllLights();
-    const results: Array<{ lightId: string; success: boolean; error?: string }> = [];
-
-    logger.info('Control all lights', { body, count: lights.length });
-
-    for (const light of lights) {
-      try {
-        await controlLight(light, body);
-        results.push({ lightId: light.id, success: true });
-      } catch (err) {
-        results.push({ lightId: light.id, success: false, error: (err as Error).message });
-      }
-    }
-
-    sendJson(res, { success: true, data: { results } });
     return;
   }
 
