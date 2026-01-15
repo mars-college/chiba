@@ -167,9 +167,9 @@ export const MIGRATIONS = [
     ('ge2', 'Gallery East 2', '100.124.2.114'),
     ('a', 'Auditorium', '100.124.2.209');`,
 
-  // Add Max Bright preset (warm 3000K at full brightness)
+  // Add Max Bright preset (4000K warm white at full brightness)
   `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
-    ('preset-max-bright', 'Max Bright', 1, '[{"lightId":"*","power":true,"kelvin":3000,"brightness":100}]');`,
+    ('preset-max-bright', 'Max Bright', 1, '[{"lightId":"*","power":true,"kelvin":3500,"brightness":100}]');`,
 
   // Add Warm Bright preset (maximum brightness warm white/yellow - like incandescent)
   `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
@@ -185,6 +185,6 @@ export const MIGRATIONS = [
     ('ge2', 'Gallery East 2', '100.128.3.229'),
     ('a', 'Auditorium', '100.128.3.223');`,
 
-  // Update Max Bright preset to use 3000K instead of yellow HSB
-  `UPDATE light_presets SET settings = '[{"lightId":"*","power":true,"kelvin":3000,"brightness":100}]' WHERE id = 'preset-max-bright';`,
+  // Update Max Bright preset to use 4000K warm white
+  `UPDATE light_presets SET settings = '[{"lightId":"*","power":true,"kelvin":3500,"brightness":100}]' WHERE id = 'preset-max-bright';`,
 ];

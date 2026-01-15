@@ -45,6 +45,7 @@ export interface PresetLightSetting {
   hue?: number;
   saturation?: number;
   brightness?: number;
+  kelvin?: number; // 2000-9000, color temperature (mutually exclusive with hue/saturation)
 }
 
 /**
@@ -67,6 +68,7 @@ export interface LightControlRequest {
   hue?: number; // 0-360
   saturation?: number; // 0-100
   brightness?: number; // 0-100
+  kelvin?: number; // 2000-9000, color temperature (mutually exclusive with hue/saturation)
 }
 
 /**

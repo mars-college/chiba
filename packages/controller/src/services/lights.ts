@@ -141,6 +141,17 @@ export async function setLightColor(
 }
 
 /**
+ * Set light color temperature in Kelvin.
+ */
+export async function setLightTemperature(light: Light, kelvin: number): Promise<void> {
+  logger.info('Setting light temperature', { lightId: light.id, kelvin });
+  await sendGoveeCommand(light.ipAddress, light.port, 'colorwc', {
+    color: { r: 0, g: 0, b: 0 },
+    colorTemInKelvin: Math.max(2000, Math.min(9000, kelvin)),
+  });
+}
+
+/**
  * Apply a control request to a light.
  * Returns the updated state.
  */
@@ -177,7 +188,14 @@ export async function controlLight(
   const saturation = request.saturation ?? currentState.saturation;
   const brightness = request.brightness ?? currentState.brightness;
 
-  if (request.hue !== undefined || request.saturation !== undefined) {
+  if (request.kelvin !== undefined) {
+    // Color temperature mode - use kelvin
+    await setLightTemperature(light, request.kelvin);
+    // Also set brightness if specified
+    if (request.brightness !== undefined) {
+      await setLightBrightness(light, brightness);
+    }
+  } else if (request.hue !== undefined || request.saturation !== undefined) {
     // Color change - use colorwc which sets RGB
     await setLightColor(light, hue, saturation, brightness);
   } else if (request.brightness !== undefined) {
