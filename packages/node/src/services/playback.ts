@@ -248,6 +248,7 @@ class PlaybackManager {
       currentContent: content,
       introMetadata: undefined,
       paused: false,
+      playbackGeneration: this.state.playbackGeneration + 1,
     });
 
     // Images always auto-advance - playlist next() handles looping at boundaries

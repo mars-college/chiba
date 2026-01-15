@@ -127,7 +127,7 @@ export default function App() {
   ) : null;
 
   // Render based on playback mode
-  const { mode, currentContent, currentUrl, introMetadata, paused, volume } = playbackState;
+  const { mode, currentContent, currentUrl, introMetadata, paused, volume, playbackGeneration } = playbackState;
 
   switch (mode) {
     case 'video':
@@ -143,6 +143,7 @@ export default function App() {
         <div className="player-container">
           {downloadOverlay}
           <VideoPlayer
+            key={playbackGeneration}
             content={currentContent}
             paused={paused}
             volume={volume}

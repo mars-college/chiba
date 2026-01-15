@@ -46,6 +46,8 @@ export interface PlaybackState {
   position?: number;
   /** Intro screen currently being shown */
   introMetadata?: ContentMetadata;
+  /** Increments each time content starts playing (used by player to detect loops) */
+  playbackGeneration: number;
 }
 
 /**
@@ -61,6 +63,7 @@ export const DEFAULT_PLAYBACK_STATE: PlaybackState = {
   imageDuration: DEFAULT_IMAGE_DURATION,
   showIntros: true,
   introDuration: DEFAULT_INTRO_DURATION,
+  playbackGeneration: 0,
 };
 
 /**
