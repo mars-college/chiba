@@ -202,15 +202,15 @@ describe('playback service', () => {
       expect(getPlaybackState().playlist).toBeUndefined();
     });
 
-    it('should preserve loop setting when playing playlist', () => {
-      // Loop is controlled independently via setLoop(), not from playlist object
+    it('should apply playlist loop setting to state', () => {
+      // When a playlist is played, its loop setting should be applied
       playbackManager.setLoop(false);
       const loopPlaylist = { ...samplePlaylist, loop: true };
 
       playPlaylist(loopPlaylist);
 
-      // Loop setting should be preserved (not taken from playlist)
-      expect(getPlaybackState().loop).toBe(false);
+      // Loop setting should come from the playlist
+      expect(getPlaybackState().loop).toBe(true);
     });
   });
 

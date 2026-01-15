@@ -429,7 +429,8 @@ class PlaybackManager {
 
     this.state.playlist = playlist;
     this.state.playlistIndex = startIndex;
-    // Preserve user's loop/shuffle preferences (don't override from playlist)
+    // Apply playlist's loop setting to state so next() honors it
+    this.state.loop = playlist.loop;
 
     // Regenerate shuffle order for new playlist if shuffle is enabled
     if (this.state.shuffle && playlist.items.length > 1) {
