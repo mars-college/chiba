@@ -179,9 +179,8 @@ export const MIGRATIONS = [
   `DELETE FROM light_state;`,
   `DELETE FROM lights;`,
   `INSERT INTO lights (id, name, ip_address) VALUES
-    ('gw1', 'Gallery West 1', '100.128.3.229'),
-    ('gw2', 'Gallery West 2', '100.128.3.224'),
-    ('ge1', 'Gallery East 1', '100.128.3.225'),
-    ('ge2', 'Gallery East 2', '100.128.3.223'),
-    ('a', 'Auditorium', '100.124.2.209');`,
+    ('gw1', 'Gallery West 1', '100.128.3.225'),
+    ('ge1', 'Gallery East 1', '100.128.3.73'),
+    ('ge2', 'Gallery East 2', '100.128.3.229'),
+    ('a', 'Auditorium', '100.128.3.223');`,
 ];
