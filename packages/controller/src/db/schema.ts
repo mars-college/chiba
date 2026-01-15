@@ -167,11 +167,21 @@ export const MIGRATIONS = [
     ('ge2', 'Gallery East 2', '100.124.2.114'),
     ('a', 'Auditorium', '100.124.2.209');`,
 
-  // Add Max Bright preset
+  // Add Max Bright preset (bright yellow)
   `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
-    ('preset-max-bright', 'Max Bright', 1, '[{"lightId":"*","power":true,"hue":0,"saturation":0,"brightness":100}]');`,
+    ('preset-max-bright', 'Max Bright', 1, '[{"lightId":"*","power":true,"hue":50,"saturation":100,"brightness":100}]');`,
 
   // Add Warm Bright preset (maximum brightness warm white/yellow - like incandescent)
   `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
     ('preset-warm-bright', 'Warm Bright', 1, '[{"lightId":"*","power":true,"hue":35,"saturation":40,"brightness":100}]');`,
+
+  // Migration: Update lights to new IPs (Jan 2026 - lights changed addresses)
+  `DELETE FROM light_state;`,
+  `DELETE FROM lights;`,
+  `INSERT INTO lights (id, name, ip_address) VALUES
+    ('gw1', 'Gallery West 1', '100.128.3.229'),
+    ('gw2', 'Gallery West 2', '100.128.3.224'),
+    ('ge1', 'Gallery East 1', '100.128.3.225'),
+    ('ge2', 'Gallery East 2', '100.128.3.223'),
+    ('a', 'Auditorium', '100.124.2.209');`,
 ];
