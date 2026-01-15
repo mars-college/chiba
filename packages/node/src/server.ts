@@ -706,6 +706,11 @@ async function handleRequest(
         const db = (body?.db as 'PROD' | 'STAGE') || 'PROD';
         const contentName = body?.name as string | undefined;
 
+        // Apply loop setting immediately if provided (affects all play paths)
+        if (body?.loop !== undefined) {
+          playbackManager.setLoop(body.loop as boolean);
+        }
+
         const taskQueue = getTaskQueue();
 
         // Eden single creation by ID - async with playAfter
@@ -756,10 +761,6 @@ async function handleRequest(
           if (!content) {
             sendError(res, `File not found in cache: ${filenameToPlay}`, 404);
             return;
-          }
-          // If loop is explicitly provided, set it via API (loop is now a playlist-level setting)
-          if (body?.loop !== undefined) {
-            playbackManager.setLoop(body.loop as boolean);
           }
           playContent(content, { showIntro: body?.showIntro === true });
           sendJson(res, { success: true, data: { state: playbackManager.getState() } });
