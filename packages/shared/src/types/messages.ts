@@ -141,6 +141,8 @@ export interface NodeDownloadProgressMessage {
   downloadedBytes?: number;
   /** Human-readable status message */
   message?: string;
+  /** Content name being downloaded (e.g., YouTube video title) */
+  name?: string;
   /** Result data on completion */
   result?: TaskResult;
   /** Error details if status is 'error' */
@@ -285,7 +287,7 @@ export interface NodeToPlayerDownloadProgressMessage {
   /** Item name being downloaded */
   name?: string;
   /** Download status */
-  status: 'downloading' | 'processing' | 'completed' | 'error';
+  status: 'queued' | 'started' | 'downloading' | 'processing' | 'completed' | 'error';
 }
 
 /**

@@ -1,13 +1,14 @@
 /**
  * YouTube download service using yt-dlp.
- * Downloads videos with quality capping at 1080p.
+ * Downloads videos with quality priority: 1080p > 720p > best available.
+ * This prevents downloading 4K+ videos that are too large for Pi displays.
  */
 
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { createLogger, YOUTUBE_MAX_HEIGHT } from '@chiba/shared';
+import { createLogger } from '@chiba/shared';
 import type { Content, ContentMetadata } from '@chiba/shared';
 import { getDatabase, generateId } from '../db/index.js';
 import { getMediaDir } from './content-cache.js';
@@ -31,6 +32,7 @@ export interface YouTubeProgress {
   progress: number;
   status: 'downloading' | 'processing' | 'complete' | 'error';
   message?: string;
+  name?: string;
 }
 
 export type YouTubeProgressCallback = (progress: YouTubeProgress) => void;
@@ -222,16 +224,26 @@ export async function downloadYouTube(
       };
     }
 
+    // Get display name for progress (prefer provided name, then fetched title)
+    const displayName = name || finalMetadata?.title;
+
     onProgress?.({
       hash: urlHash,
       progress: 0,
       status: 'downloading',
       message: 'Starting download...',
+      name: displayName,
     });
 
-    // yt-dlp arguments for best quality up to 1080p
+    // yt-dlp arguments: prefer 1080p, then 720p, with capped fallbacks
+    // Format priority:
+    // 1. Best video up to 1080p + best audio (separate streams)
+    // 2. Best video up to 720p + best audio (if 1080p unavailable)
+    // 3. Best combined format up to 1080p
+    // 4. Best combined format up to 720p
+    // 5. Absolute best (only if nothing else works)
     const args = [
-      '-f', `bestvideo[height<=${YOUTUBE_MAX_HEIGHT}]+bestaudio/best[height<=${YOUTUBE_MAX_HEIGHT}]/best`,
+      '-f', 'bestvideo[height<=1080]+bestaudio/bestvideo[height<=720]+bestaudio/best[height<=1080]/best[height<=720]/best',
       '--merge-output-format', 'mp4',
       '-o', outputTemplate,
       '--no-playlist',
@@ -272,6 +284,7 @@ export async function downloadYouTube(
               progress,
               status: 'downloading',
               message: `Downloading: ${progress.toFixed(1)}%`,
+              name: displayName,
             });
           }
         }
@@ -293,6 +306,7 @@ export async function downloadYouTube(
           progress: 0,
           status: 'error',
           message: stderr || 'Download failed',
+          name: displayName,
         });
         reject(new Error(`yt-dlp failed: ${stderr || 'Unknown error'}`));
         return;
@@ -350,6 +364,7 @@ export async function downloadYouTube(
         progress: 100,
         status: 'complete',
         message: 'Download complete',
+        name: displayName,
       });
 
       resolve({ content, alreadyCached: false });
@@ -362,6 +377,7 @@ export async function downloadYouTube(
         progress: 0,
         status: 'error',
         message: `Failed to start yt-dlp: ${err.message}. Is yt-dlp installed?`,
+        name: displayName,
       });
       reject(new Error(`Failed to start yt-dlp: ${err.message}. Is yt-dlp installed?`));
     });

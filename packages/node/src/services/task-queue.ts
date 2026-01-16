@@ -294,6 +294,7 @@ export class TaskQueue {
               progress: progress.progress,
               hash: progress.hash || undefined,
               message: progress.message,
+              name: progress.name,
             });
           },
         });
@@ -323,6 +324,7 @@ export class TaskQueue {
                 progress: progress.progress,
                 hash: progress.hash || undefined,
                 message: progress.message,
+                name: progress.name,
               });
             },
           });

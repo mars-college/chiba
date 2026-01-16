@@ -957,6 +957,24 @@ class PlaybackManager {
   }
 
   /**
+   * Forward download progress to all connected players.
+   * Used to show download progress on the player screen during async downloads.
+   */
+  forwardDownloadProgress(progress: {
+    progress: number;
+    status: 'queued' | 'started' | 'downloading' | 'processing' | 'completed' | 'error';
+    message?: string;
+    name?: string;
+  }): void {
+    this.sendDownloadProgress({
+      progress: progress.progress,
+      status: progress.status,
+      message: progress.message,
+      name: progress.name,
+    });
+  }
+
+  /**
    * Handle content ended event from player.
    * Loop setting ONLY applies to playlists, not single items.
    */
@@ -1015,3 +1033,9 @@ export const appendItems = (
   options?: { name?: string; loop?: boolean; showIntros?: boolean }
 ) => playbackManager.appendItems(items, options);
 export const restoreFromResumeState = () => playbackManager.restoreFromResumeState();
+export const forwardDownloadProgress = (progress: {
+  progress: number;
+  status: 'queued' | 'started' | 'downloading' | 'processing' | 'completed' | 'error';
+  message?: string;
+  name?: string;
+}) => playbackManager.forwardDownloadProgress(progress);

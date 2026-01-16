@@ -72,6 +72,7 @@ import {
   handleIntroComplete,
   appendItems,
   restoreFromResumeState,
+  forwardDownloadProgress,
 } from './services/playback.js';
 import { getTaskQueue, type TaskSource } from './services/task-queue.js';
 
@@ -1613,10 +1614,19 @@ export function startServer(port = DEFAULT_PORT): http.Server {
   const taskQueue = getTaskQueue();
   taskQueue.setNodeId(state.config.id);
   taskQueue.setProgressCallback((msg) => {
+    // Forward to controller
     if (state.controllerWs?.readyState === WebSocket.OPEN) {
       state.controllerWs.send(JSON.stringify(msg));
       logger.debug('Task progress sent to controller', { taskId: msg.taskId, status: msg.status });
     }
+
+    // Also forward to player so it shows progress overlay
+    forwardDownloadProgress({
+      progress: msg.progress,
+      status: msg.status,
+      message: msg.message,
+      name: msg.name,
+    });
   });
   taskQueue.setPlayCallback((result) => {
     // When a task with playAfter completes, start playback
