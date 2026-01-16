@@ -155,6 +155,7 @@ States include: mode, currentContent, playlist, index, loop, shuffle, paused, vo
 | `scripts/setup-node.sh` | Full Pi setup (packages, audio, kiosk, systemd) |
 | `scripts/find-pis.sh` | Discover Pis by mDNS hostname |
 | `scripts/upgrade-controller.sh` | Run ON controller to upgrade it |
+| `scripts/setup-ngrok.sh` | Setup ngrok tunnel for public controller access (run ON controller) |
 | `scripts/upgrade-node.sh` | Run ON a Pi node to upgrade it (soft/hard modes) |
 | `scripts/rename.sh` | Rename a node via API (usage: `./rename.sh <host> <name>`) |
 | `scripts/rotate.sh` | Rotate display via API (usage: `./rotate.sh <host> <0\|90\|180\|270>`) |
