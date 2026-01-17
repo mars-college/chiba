@@ -85,19 +85,19 @@ function syncLightsFromConfig(database: Database.Database): void {
   const { lights, port } = LIGHTS_CONFIG;
   const now = Date.now();
 
-  const upsert = database.prepare(`
+  // Clear and re-insert to avoid UNIQUE constraint issues when IPs are reassigned
+  const clearLights = database.prepare(`DELETE FROM lights`);
+  const clearState = database.prepare(`DELETE FROM light_state`);
+  const insert = database.prepare(`
     INSERT INTO lights (id, name, ip_address, port, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      ip_address = excluded.ip_address,
-      port = excluded.port,
-      updated_at = excluded.updated_at
   `);
 
   const transaction = database.transaction(() => {
+    clearState.run();
+    clearLights.run();
     for (const light of lights) {
-      upsert.run(light.id, light.name, light.ip, port, now, now);
+      insert.run(light.id, light.name, light.ip, port, now, now);
     }
   });
 
