@@ -19,11 +19,11 @@ GOVEE_PORT = 4003
 
 # Light configuration
 LIGHTS = {
-    "gw1": "100.128.2.181",  # Gallery West 1
-    "gw2": "100.128.2.146",  # Gallery West 2
-    "ge1": "100.128.2.160",   # Gallery East 1
-    "ge2": "100.128.2.183",  # Gallery East 2
-    "a": "100.128.2.182",    # Auditorium
+    "gw1": "100.128.2.183",  # Gallery West 1
+    "gw2": "100.128.2.182",  # Gallery West 2
+    "ge1": "100.128.2.146",   # Gallery East 1
+    "ge2": "100.128.2.181",  # Gallery East 2
+    "a": "100.128.2.160",    # Auditorium
 }
 
 # Color presets (RGB)
