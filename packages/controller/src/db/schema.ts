@@ -92,9 +92,6 @@ CREATE TABLE IF NOT EXISTS lights (
   updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
 );
 
--- Index for looking up lights by device_id
-CREATE INDEX IF NOT EXISTS idx_lights_device_id ON lights(device_id);
-
 -- Current light state (ephemeral)
 CREATE TABLE IF NOT EXISTS light_state (
   light_id TEXT PRIMARY KEY REFERENCES lights(id) ON DELETE CASCADE,
