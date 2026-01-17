@@ -1,0 +1,21 @@
+[Unit]
+Description=Chiba Controller - Digital Signage Central Server
+After=network.target
+
+[Service]
+Type=simple
+User=gene
+WorkingDirectory=/home/gene/chiba
+Environment="PATH=/home/gene/.nvm/versions/node/v20.19.1/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/gene/chiba/.env
+ExecStart=/home/gene/.nvm/versions/node/v20.19.1/bin/node packages/controller/dist/server.js
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=chiba-controller
+
+[Install]
+WantedBy=multi-user.target
