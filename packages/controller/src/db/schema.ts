@@ -139,6 +139,10 @@ DROP TABLE IF EXISTS lights;
 /**
  * Migrations to apply to existing databases.
  * Each migration is a SQL statement that may fail if already applied.
+ *
+ * NOTE: Lights are now synced from packages/shared/src/config/lights.json on every
+ * startup (see db/index.ts syncLightsFromConfig). The light migrations below are
+ * kept for compatibility but are superseded by the config sync.
  */
 export const MIGRATIONS = [
   // Add name column to content table

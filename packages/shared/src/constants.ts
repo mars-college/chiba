@@ -2,6 +2,14 @@
  * Constants for Chiba digital signage system.
  */
 
+import lightsConfig from './config/lights.json' with { type: 'json' };
+
+/**
+ * Govee lights configuration - single source of truth.
+ * Edit packages/shared/src/config/lights.json to update.
+ */
+export const LIGHTS_CONFIG = lightsConfig;
+
 /**
  * Default port for HTTP servers.
  */

@@ -12,19 +12,38 @@ import argparse
 import colorsys
 import concurrent.futures
 import json
+import os
 import socket
 import sys
 
-GOVEE_PORT = 4003
+# Load lights config from shared source of truth
+_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..", "packages", "shared", "src", "config", "lights.json"
+)
 
-# Light configuration
-LIGHTS = {
-    "gw1": "100.128.2.183",  # Gallery West 1
-    "gw2": "100.128.2.182",  # Gallery West 2
-    "ge1": "100.128.2.146",   # Gallery East 1
-    "ge2": "100.128.2.181",  # Gallery East 2
-    "a": "100.128.2.160",    # Auditorium
-}
+def _load_config():
+    """Load lights configuration from shared JSON config."""
+    try:
+        with open(_CONFIG_PATH) as f:
+            config = json.load(f)
+        return {
+            light["id"]: light["ip"]
+            for light in config["lights"]
+        }, config.get("port", 4003)
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        print(f"Warning: Could not load lights config from {_CONFIG_PATH}: {e}", file=sys.stderr)
+        print("Using fallback configuration.", file=sys.stderr)
+        # Fallback in case config file is missing
+        return {
+            "gw1": "100.128.2.183",
+            "gw2": "100.128.2.182",
+            "ge1": "100.128.2.146",
+            "ge2": "100.128.2.181",
+            "a": "100.128.2.160",
+        }, 4003
+
+LIGHTS, GOVEE_PORT = _load_config()
 
 # Color presets (RGB)
 COLORS = {
