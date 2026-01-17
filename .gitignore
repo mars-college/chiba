@@ -1,3 +1,6 @@
+# Separate controllers
+scripts/*-controller.service
+
 # Dependencies
 node_modules/
 
@@ -7,6 +10,7 @@ build/
 
 # Environment
 .env
+.env.*
 .env.local
 .env.*.local
 

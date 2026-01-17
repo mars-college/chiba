@@ -88,15 +88,23 @@ export function discoverLights(timeout = DEFAULT_TIMEOUT): Promise<DiscoveredLig
 
           if (response.msg?.cmd === 'scan' && response.msg?.data) {
             const { ip, device, sku } = response.msg.data;
+            const lightIp = ip || rinfo.address;
+
+            // Filter by subnet if GOVEE_SUBNET is configured
+            const subnetFilter = process.env.GOVEE_SUBNET;
+            if (subnetFilter && !lightIp.startsWith(subnetFilter)) {
+              logger.debug('Ignoring light outside subnet', { ip: lightIp, filter: subnetFilter });
+              return;
+            }
 
             if (device && sku) {
               // Use device ID as key to deduplicate
               discovered.set(device, {
-                ip: ip || rinfo.address,
+                ip: lightIp,
                 deviceId: device,
                 sku,
               });
-              logger.debug('Discovered light', { ip: ip || rinfo.address, deviceId: device, sku });
+              logger.debug('Discovered light', { ip: lightIp, deviceId: device, sku });
             }
           }
         } catch (err) {
