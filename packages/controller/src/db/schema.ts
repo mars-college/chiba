@@ -83,12 +83,17 @@ CREATE INDEX IF NOT EXISTS idx_node_content_hash ON node_content(content_hash);
 CREATE TABLE IF NOT EXISTS lights (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  ip_address TEXT NOT NULL UNIQUE,
+  ip_address TEXT NOT NULL,
   port INTEGER DEFAULT 4003,
+  device_id TEXT UNIQUE,
+  sku TEXT,
   device_type TEXT,
   created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
   updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
 );
+
+-- Index for looking up lights by device_id
+CREATE INDEX IF NOT EXISTS idx_lights_device_id ON lights(device_id);
 
 -- Current light state (ephemeral)
 CREATE TABLE IF NOT EXISTS light_state (
@@ -140,9 +145,9 @@ DROP TABLE IF EXISTS lights;
  * Migrations to apply to existing databases.
  * Each migration is a SQL statement that may fail if already applied.
  *
- * NOTE: Lights are now synced from packages/shared/src/config/lights.json on every
- * startup (see db/index.ts syncLightsFromConfig). The light migrations below are
- * kept for compatibility but are superseded by the config sync.
+ * NOTE: Lights are now discovered via LAN multicast (POST /api/lights/discover)
+ * rather than synced from a static config file. The light migrations below are
+ * kept for compatibility with existing installations.
  */
 export const MIGRATIONS = [
   // Add name column to content table
@@ -191,4 +196,26 @@ export const MIGRATIONS = [
 
   // Update Max Bright preset to use 4000K warm white
   `UPDATE light_presets SET settings = '[{"lightId":"*","power":true,"kelvin":3500,"brightness":100}]' WHERE id = 'preset-max-bright';`,
+
+  // Migration: Add device_id and sku columns to lights table for auto-discovery
+  `ALTER TABLE lights ADD COLUMN device_id TEXT UNIQUE;`,
+  `ALTER TABLE lights ADD COLUMN sku TEXT;`,
+
+  // Remove UNIQUE constraint from ip_address (IPs can change via DHCP)
+  // SQLite doesn't support dropping constraints, so we create a new table
+  `CREATE TABLE IF NOT EXISTS lights_new (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    ip_address TEXT NOT NULL,
+    port INTEGER DEFAULT 4003,
+    device_id TEXT UNIQUE,
+    sku TEXT,
+    device_type TEXT,
+    created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+  );`,
+  `INSERT OR IGNORE INTO lights_new SELECT id, name, ip_address, port, device_id, sku, device_type, created_at, updated_at FROM lights;`,
+  `DROP TABLE IF EXISTS lights;`,
+  `ALTER TABLE lights_new RENAME TO lights;`,
+  `CREATE INDEX IF NOT EXISTS idx_lights_device_id ON lights(device_id);`,
 ];

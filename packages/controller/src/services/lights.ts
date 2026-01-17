@@ -269,6 +269,8 @@ export function getLightById(lightId: string): Light | null {
         name: string;
         ip_address: string;
         port: number;
+        device_id: string | null;
+        sku: string | null;
         device_type: string | null;
         created_at: number;
         updated_at: number;
@@ -282,6 +284,8 @@ export function getLightById(lightId: string): Light | null {
     name: row.name,
     ipAddress: row.ip_address,
     port: row.port,
+    deviceId: row.device_id ?? undefined,
+    sku: row.sku ?? undefined,
     deviceType: row.device_type ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -298,6 +302,8 @@ export function getAllLights(): Light[] {
     name: string;
     ip_address: string;
     port: number;
+    device_id: string | null;
+    sku: string | null;
     device_type: string | null;
     created_at: number;
     updated_at: number;
@@ -308,8 +314,43 @@ export function getAllLights(): Light[] {
     name: row.name,
     ipAddress: row.ip_address,
     port: row.port,
+    deviceId: row.device_id ?? undefined,
+    sku: row.sku ?? undefined,
     deviceType: row.device_type ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
+}
+
+/**
+ * Rename a light.
+ */
+export function renameLight(lightId: string, newName: string): Light | null {
+  const db = getDatabase();
+  const now = Date.now();
+
+  const existing = db.prepare('SELECT id FROM lights WHERE id = ?').get(lightId);
+  if (!existing) return null;
+
+  db.prepare('UPDATE lights SET name = ?, updated_at = ? WHERE id = ?').run(newName, now, lightId);
+
+  return getLightById(lightId);
+}
+
+/**
+ * Delete a light and its state.
+ */
+export function deleteLight(lightId: string): boolean {
+  const db = getDatabase();
+
+  const existing = db.prepare('SELECT id FROM lights WHERE id = ?').get(lightId);
+  if (!existing) return false;
+
+  // Delete light state first (cascade should handle this, but be explicit)
+  db.prepare('DELETE FROM light_state WHERE light_id = ?').run(lightId);
+
+  // Delete the light
+  db.prepare('DELETE FROM lights WHERE id = ?').run(lightId);
+
+  return true;
 }

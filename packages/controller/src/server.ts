@@ -40,7 +40,10 @@ import {
   controlLight,
   getAllLights,
   getLightById,
+  renameLight,
+  deleteLight,
 } from './services/lights.js';
+import { runDiscovery } from './services/discovery.js';
 import { handleUpload, getUploadPath } from './services/uploads.js';
 import type {
   LightWithState,
@@ -48,6 +51,7 @@ import type {
   LightControlRequest,
   CreatePresetRequest,
   PresetLightSetting,
+  DiscoveryResult,
 } from '@chiba/shared';
 
 // Load .env from project root
@@ -301,6 +305,9 @@ async function handleRequest(
             'GET /api/eden/parse?url=...',
             // Lights
             'GET /api/lights',
+            'POST /api/lights/discover',
+            'PUT /api/lights/:id',
+            'DELETE /api/lights/:id',
             'POST /api/lights/:id/control',
             'POST /api/lights/all/control',
             'GET /api/presets',
@@ -447,6 +454,8 @@ async function handleRequest(
           name: string;
           ip_address: string;
           port: number;
+          device_id: string | null;
+          sku: string | null;
           device_type: string | null;
           created_at: number;
           updated_at: number;
@@ -462,6 +471,8 @@ async function handleRequest(
           name: row.name,
           ipAddress: row.ip_address,
           port: row.port,
+          deviceId: row.device_id ?? undefined,
+          sku: row.sku ?? undefined,
           deviceType: row.device_type ?? undefined,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
@@ -1742,6 +1753,75 @@ async function handleRequest(
   // ============================================================================
   // Light Control Endpoints
   // ============================================================================
+
+  // Discover lights - POST /api/lights/discover
+  if (method === 'POST' && url.pathname === '/api/lights/discover') {
+    const body = await readJsonBody<{ timeout?: number }>(req);
+    const timeout = body?.timeout ?? 5000;
+
+    logger.info('Starting light discovery', { timeout });
+
+    try {
+      const result: DiscoveryResult = await runDiscovery(timeout);
+      sendJson(res, { success: true, data: result });
+    } catch (err) {
+      logger.error('Light discovery failed', err as Error);
+      sendError(res, `Discovery failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
+  // Rename a light - PUT /api/lights/:id
+  if (method === 'PUT' && url.pathname.match(/^\/api\/lights\/[^/]+$/) && !url.pathname.includes('/control')) {
+    const lightId = url.pathname.split('/')[3];
+    if (!lightId) {
+      sendError(res, 'Missing light ID');
+      return;
+    }
+
+    const body = await readJsonBody<{ name?: string }>(req);
+    if (!body?.name?.trim()) {
+      sendError(res, 'Name is required');
+      return;
+    }
+
+    try {
+      const updated = renameLight(lightId, body.name.trim());
+      if (!updated) {
+        sendError(res, 'Light not found', 404);
+        return;
+      }
+      logger.info('Light renamed', { id: lightId, name: body.name.trim() });
+      sendJson(res, { success: true, data: updated });
+    } catch (err) {
+      logger.error('Failed to rename light', err as Error);
+      sendError(res, `Rename failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
+  // Delete a light - DELETE /api/lights/:id
+  if (method === 'DELETE' && url.pathname.match(/^\/api\/lights\/[^/]+$/)) {
+    const lightId = url.pathname.split('/')[3];
+    if (!lightId) {
+      sendError(res, 'Missing light ID');
+      return;
+    }
+
+    try {
+      const deleted = deleteLight(lightId);
+      if (!deleted) {
+        sendError(res, 'Light not found', 404);
+        return;
+      }
+      logger.info('Light deleted', { id: lightId });
+      sendJson(res, { success: true, message: 'Light deleted' });
+    } catch (err) {
+      logger.error('Failed to delete light', err as Error);
+      sendError(res, `Delete failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
 
   // Control all lights - POST /api/lights/all/control
   // NOTE: Must come BEFORE the single-light handler to avoid regex matching "all" as an ID

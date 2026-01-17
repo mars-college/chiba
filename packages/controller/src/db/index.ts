@@ -5,7 +5,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
-import { createLogger, LIGHTS_CONFIG } from '@chiba/shared';
+import { createLogger } from '@chiba/shared';
 import { SCHEMA, CLEAR_EPHEMERAL, DROP_ALL, MIGRATIONS } from './schema.js';
 
 const logger = createLogger('controller', 'db');
@@ -71,38 +71,7 @@ export function initDatabase(dbPath?: string): Database.Database {
   db.exec(CLEAR_EPHEMERAL);
   logger.debug('Ephemeral data cleared');
 
-  // Sync lights from shared config (single source of truth)
-  syncLightsFromConfig(db);
-
   return db;
-}
-
-/**
- * Sync lights from shared config.
- * This runs on every startup to ensure lights are always up-to-date.
- */
-function syncLightsFromConfig(database: Database.Database): void {
-  const { lights, port } = LIGHTS_CONFIG;
-  const now = Date.now();
-
-  const upsert = database.prepare(`
-    INSERT INTO lights (id, name, ip_address, port, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      ip_address = excluded.ip_address,
-      port = excluded.port,
-      updated_at = excluded.updated_at
-  `);
-
-  const transaction = database.transaction(() => {
-    for (const light of lights) {
-      upsert.run(light.id, light.name, light.ip, port, now, now);
-    }
-  });
-
-  transaction();
-  logger.info('Synced lights from config', { count: lights.length });
 }
 
 /**

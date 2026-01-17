@@ -10,9 +10,30 @@ export interface Light {
   name: string;
   ipAddress: string;
   port: number;
+  deviceId?: string;
+  sku?: string;
   deviceType?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * A light discovered via LAN multicast scan.
+ */
+export interface DiscoveredLight {
+  ip: string;
+  deviceId: string;
+  sku: string;
+}
+
+/**
+ * Result of a discovery scan operation.
+ */
+export interface DiscoveryResult {
+  discovered: number;
+  added: number;
+  updated: number;
+  lights: DiscoveredLight[];
 }
 
 /**

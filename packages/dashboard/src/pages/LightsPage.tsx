@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { LightWithState, LightPreset, LightControlRequest, PresetLightSetting } from '@chiba/shared';
-import { apiGet, apiPost, apiDelete } from '../hooks/useApi';
+import type { LightWithState, LightPreset, LightControlRequest, PresetLightSetting, DiscoveryResult } from '@chiba/shared';
+import { apiGet, apiPost, apiDelete, apiPut } from '../hooks/useApi';
 import { LightCard } from '../components/LightCard';
 import { PresetCard } from '../components/PresetCard';
 import { CreatePresetModal } from '../components/CreatePresetModal';
@@ -12,6 +12,10 @@ export function LightsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreatePreset, setShowCreatePreset] = useState(false);
   const [controllingAll, setControllingAll] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
+  const [renamingLight, setRenamingLight] = useState<LightWithState | null>(null);
+  const [newLightName, setNewLightName] = useState('');
 
   const fetchLights = useCallback(async () => {
     try {
@@ -90,6 +94,51 @@ export function LightsPage() {
     }
   };
 
+  const handleDiscover = async () => {
+    setDiscovering(true);
+    setDiscoveryResult(null);
+    setError(null);
+    try {
+      const response = await apiPost<{ success: boolean; data: DiscoveryResult }>('/lights/discover', { timeout: 5000 });
+      setDiscoveryResult(response.data);
+      await fetchLights();
+    } catch (err) {
+      console.error('Failed to discover lights:', err);
+      setError(err instanceof Error ? err.message : 'Failed to discover lights');
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const handleRename = async () => {
+    if (!renamingLight || !newLightName.trim()) return;
+    try {
+      await apiPut(`/lights/${renamingLight.id}`, { name: newLightName.trim() });
+      setRenamingLight(null);
+      setNewLightName('');
+      await fetchLights();
+    } catch (err) {
+      console.error('Failed to rename light:', err);
+      throw err;
+    }
+  };
+
+  const handleDelete = async (lightId: string, lightName: string) => {
+    if (!confirm(`Delete light "${lightName}"? This cannot be undone.`)) return;
+    try {
+      await apiDelete(`/lights/${lightId}`);
+      await fetchLights();
+    } catch (err) {
+      console.error('Failed to delete light:', err);
+      throw err;
+    }
+  };
+
+  const openRenameModal = (light: LightWithState) => {
+    setRenamingLight(light);
+    setNewLightName(light.name);
+  };
+
   if (loading) {
     return (
       <div className="loading-container">
@@ -108,6 +157,13 @@ export function LightsPage() {
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             className="btn btn-secondary"
+            onClick={handleDiscover}
+            disabled={discovering}
+          >
+            {discovering ? 'Scanning...' : 'Discover Lights'}
+          </button>
+          <button
+            className="btn btn-secondary"
             onClick={() => handleControlAll({ power: false })}
             disabled={controllingAll}
           >
@@ -122,6 +178,20 @@ export function LightsPage() {
           </button>
         </div>
       </div>
+
+      {discoveryResult && (
+        <div className="alert alert-success" style={{ marginBottom: '24px' }}>
+          Found {discoveryResult.discovered} light{discoveryResult.discovered !== 1 ? 's' : ''}.
+          {discoveryResult.added > 0 && ` Added ${discoveryResult.added} new.`}
+          {discoveryResult.updated > 0 && ` Updated ${discoveryResult.updated}.`}
+          <button
+            style={{ marginLeft: '12px', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+            onClick={() => setDiscoveryResult(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="alert alert-error" style={{ marginBottom: '24px' }}>
@@ -148,9 +218,9 @@ export function LightsPage() {
               <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
             </svg>
           </div>
-          <h3 className="empty-state-title">No lights configured</h3>
+          <h3 className="empty-state-title">No lights found</h3>
           <p className="empty-state-description">
-            Add lights to the database to control them from here.
+            Click "Discover Lights" to scan for Govee lights on your network.
           </p>
         </div>
       ) : (
@@ -160,6 +230,8 @@ export function LightsPage() {
               key={light.id}
               light={light}
               onControl={(request) => handleControlLight(light.id, request)}
+              onRename={() => openRenameModal(light)}
+              onDelete={() => handleDelete(light.id, light.name)}
             />
           ))}
         </div>
@@ -203,6 +275,47 @@ export function LightsPage() {
           onClose={() => setShowCreatePreset(false)}
           onCreate={handleCreatePreset}
         />
+      )}
+
+      {/* Rename Light Modal */}
+      {renamingLight && (
+        <div className="modal-backdrop" onClick={() => setRenamingLight(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Rename Light</h2>
+              <button className="modal-close" onClick={() => setRenamingLight(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label className="form-label">Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={newLightName}
+                  onChange={(e) => setNewLightName(e.target.value)}
+                  placeholder="Enter light name"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRename();
+                    if (e.key === 'Escape') setRenamingLight(null);
+                  }}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setRenamingLight(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleRename}
+                disabled={!newLightName.trim()}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

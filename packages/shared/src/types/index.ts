@@ -141,4 +141,6 @@ export type {
   LightPreset,
   LightControlRequest,
   CreatePresetRequest,
+  DiscoveredLight,
+  DiscoveryResult,
 } from './lights.js';
