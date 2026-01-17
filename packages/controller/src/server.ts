@@ -273,7 +273,7 @@ async function handleRequest(
     switch (url.pathname) {
       case '/api/info':
         sendJson(res, {
-          name: 'chiba-controller',
+          name: process.env.INSTANCE_NAME || 'chiba-controller',
           version: VERSION,
           endpoints: [
             'GET /api/info',
