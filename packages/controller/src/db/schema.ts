@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS light_state (
   hue INTEGER DEFAULT 0,
   saturation INTEGER DEFAULT 100,
   brightness INTEGER DEFAULT 100,
+  kelvin INTEGER,
   updated_at INTEGER
 );
 
@@ -215,4 +216,7 @@ export const MIGRATIONS = [
   `DROP TABLE IF EXISTS lights;`,
   `ALTER TABLE lights_new RENAME TO lights;`,
   `CREATE INDEX IF NOT EXISTS idx_lights_device_id ON lights(device_id);`,
+
+  // Add kelvin column to light_state for temperature mode tracking
+  `ALTER TABLE light_state ADD COLUMN kelvin INTEGER;`,
 ];

@@ -45,6 +45,7 @@ export interface LightState {
   hue: number; // 0-360
   saturation: number; // 0-100
   brightness: number; // 0-100
+  kelvin?: number; // 2000-9000, if set the light is in temperature mode
   updatedAt: number;
 }
 

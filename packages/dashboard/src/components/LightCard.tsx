@@ -9,11 +9,13 @@ interface LightCardProps {
 }
 
 export function LightCard({ light, onControl, onRename, onDelete }: LightCardProps) {
-  const [mode, setMode] = useState<'color' | 'temperature'>('color');
+  // Determine initial mode based on whether kelvin is set in state
+  const initialMode = light.state?.kelvin ? 'temperature' : 'color';
+  const [mode, setMode] = useState<'color' | 'temperature'>(initialMode);
   const [hue, setHue] = useState(light.state?.hue ?? 0);
   const [saturation, setSaturation] = useState(light.state?.saturation ?? 100);
   const [brightness, setBrightness] = useState(light.state?.brightness ?? 100);
-  const [kelvin, setKelvin] = useState(4000);
+  const [kelvin, setKelvin] = useState(light.state?.kelvin ?? 4000);
   const [isPowered, setIsPowered] = useState(light.state?.power ?? false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -24,6 +26,12 @@ export function LightCard({ light, onControl, onRename, onDelete }: LightCardPro
       setSaturation(light.state.saturation);
       setBrightness(light.state.brightness);
       setIsPowered(light.state.power);
+      if (light.state.kelvin) {
+        setKelvin(light.state.kelvin);
+        setMode('temperature');
+      } else {
+        setMode('color');
+      }
     }
   }, [light.state]);
 
@@ -123,10 +131,10 @@ export function LightCard({ light, onControl, onRename, onDelete }: LightCardPro
           )}
           {onDelete && (
             <button
-              className="btn btn-sm btn-ghost"
+              className="btn btn-sm"
               onClick={onDelete}
               title="Delete"
-              style={{ padding: '4px 6px', color: 'var(--color-error)' }}
+              style={{ padding: '4px 6px', background: 'var(--color-error)', color: 'white' }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="3,6 5,6 21,6" />

@@ -170,11 +170,12 @@ export async function controlLight(
         hue: number;
         saturation: number;
         brightness: number;
+        kelvin: number | null;
       }
     | undefined;
 
   if (!currentState) {
-    currentState = { power: 0, hue: 0, saturation: 100, brightness: 100 };
+    currentState = { power: 0, hue: 0, saturation: 100, brightness: 100, kelvin: null };
   }
 
   // Apply power if specified
@@ -187,16 +188,20 @@ export async function controlLight(
   const hue = request.hue ?? currentState.hue;
   const saturation = request.saturation ?? currentState.saturation;
   const brightness = request.brightness ?? currentState.brightness;
+  let kelvin: number | undefined = currentState.kelvin ?? undefined;
 
   if (request.kelvin !== undefined) {
     // Color temperature mode - use kelvin
     await setLightTemperature(light, request.kelvin);
+    kelvin = request.kelvin;
     // Also set brightness if specified
     if (request.brightness !== undefined) {
       await setLightBrightness(light, brightness);
     }
   } else if (request.hue !== undefined || request.saturation !== undefined) {
     // Color change - use colorwc which sets RGB
+    // Clear kelvin since we're now in color mode
+    kelvin = undefined;
     await setLightColor(light, hue, saturation, brightness);
   } else if (request.brightness !== undefined) {
     // Brightness only change
@@ -207,16 +212,17 @@ export async function controlLight(
   const now = Date.now();
   db.prepare(
     `
-    INSERT INTO light_state (light_id, power, hue, saturation, brightness, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO light_state (light_id, power, hue, saturation, brightness, kelvin, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(light_id) DO UPDATE SET
       power = excluded.power,
       hue = excluded.hue,
       saturation = excluded.saturation,
       brightness = excluded.brightness,
+      kelvin = excluded.kelvin,
       updated_at = excluded.updated_at
   `
-  ).run(light.id, currentState.power, hue, saturation, brightness, now);
+  ).run(light.id, currentState.power, hue, saturation, brightness, kelvin ?? null, now);
 
   return {
     lightId: light.id,
@@ -224,8 +230,48 @@ export async function controlLight(
     hue,
     saturation,
     brightness,
+    kelvin,
     updatedAt: now,
   };
+}
+
+/**
+ * Convert RGB to HSB.
+ */
+export function rgbToHsb(
+  r: number,
+  g: number,
+  b: number
+): { h: number; s: number; b: number } {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const diff = max - min;
+
+  let h = 0;
+  const s = max === 0 ? 0 : (diff / max) * 100;
+  const br = max * 100;
+
+  if (diff !== 0) {
+    switch (max) {
+      case r:
+        h = ((g - b) / diff) % 6;
+        break;
+      case g:
+        h = (b - r) / diff + 2;
+        break;
+      case b:
+        h = (r - g) / diff + 4;
+        break;
+    }
+    h = Math.round(h * 60);
+    if (h < 0) h += 360;
+  }
+
+  return { h, s: Math.round(s), b: Math.round(br) };
 }
 
 /**
@@ -256,6 +302,128 @@ export async function probeLightStatus(light: Light): Promise<boolean> {
       }
     });
   });
+}
+
+interface GoveeDevStatusResponse {
+  msg: {
+    cmd: string;
+    data: {
+      onOff: number;
+      brightness: number;
+      color: { r: number; g: number; b: number };
+      colorTemInKelvin: number;
+    };
+  };
+}
+
+/**
+ * Query actual light state via UDP devStatus command.
+ * Returns null if light is unreachable.
+ */
+export async function queryLightState(light: Light): Promise<LightState | null> {
+  return new Promise((resolve) => {
+    const socket = dgram.createSocket('udp4');
+    const message = JSON.stringify({ msg: { cmd: 'devStatus', data: {} } });
+
+    const timeout = setTimeout(() => {
+      socket.close();
+      resolve(null);
+    }, UDP_TIMEOUT);
+
+    socket.on('message', (msg) => {
+      clearTimeout(timeout);
+      socket.close();
+
+      try {
+        const response = JSON.parse(msg.toString()) as GoveeDevStatusResponse;
+        const data = response.msg?.data;
+
+        if (!data) {
+          resolve(null);
+          return;
+        }
+
+        const now = Date.now();
+        const kelvin = data.colorTemInKelvin || 0;
+
+        // If kelvin is set, light is in temperature mode
+        // Otherwise convert RGB to HSB
+        let hue = 0;
+        let saturation = 100;
+        let brightness = data.brightness ?? 100;
+
+        if (kelvin === 0 && data.color) {
+          const hsb = rgbToHsb(data.color.r, data.color.g, data.color.b);
+          hue = hsb.h;
+          saturation = hsb.s;
+          // Use brightness from response, not derived from color
+        }
+
+        resolve({
+          lightId: light.id,
+          power: Boolean(data.onOff),
+          hue,
+          saturation,
+          brightness,
+          kelvin: kelvin > 0 ? kelvin : undefined,
+          updatedAt: now,
+        });
+      } catch {
+        resolve(null);
+      }
+    });
+
+    socket.send(message, light.port, light.ipAddress, (err) => {
+      if (err) {
+        clearTimeout(timeout);
+        socket.close();
+        resolve(null);
+      }
+    });
+  });
+}
+
+/**
+ * Query and persist light state. Updates the database with fresh state.
+ */
+export async function refreshLightState(light: Light): Promise<LightState | null> {
+  const state = await queryLightState(light);
+
+  if (state) {
+    const db = getDatabase();
+    db.prepare(
+      `
+      INSERT INTO light_state (light_id, power, hue, saturation, brightness, kelvin, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(light_id) DO UPDATE SET
+        power = excluded.power,
+        hue = excluded.hue,
+        saturation = excluded.saturation,
+        brightness = excluded.brightness,
+        kelvin = excluded.kelvin,
+        updated_at = excluded.updated_at
+    `
+    ).run(light.id, state.power ? 1 : 0, state.hue, state.saturation, state.brightness, state.kelvin ?? null, state.updatedAt);
+  }
+
+  return state;
+}
+
+/**
+ * Refresh states for all lights in parallel.
+ */
+export async function refreshAllLightStates(): Promise<Map<string, LightState | null>> {
+  const lights = getAllLights();
+  const results = new Map<string, LightState | null>();
+
+  await Promise.all(
+    lights.map(async (light) => {
+      const state = await refreshLightState(light);
+      results.set(light.id, state);
+    })
+  );
+
+  return results;
 }
 
 /**

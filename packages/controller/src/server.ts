@@ -42,6 +42,7 @@ import {
   getLightById,
   renameLight,
   deleteLight,
+  refreshAllLightStates,
 } from './services/lights.js';
 import { runDiscovery } from './services/discovery.js';
 import { handleUpload, getUploadPath } from './services/uploads.js';
@@ -442,10 +443,13 @@ async function handleRequest(
       }
 
       case '/api/lights': {
-        // Get all lights with their states
+        // Refresh states from actual lights (queries each light via UDP)
+        const reachabilityMap = await refreshAllLightStates();
+
+        // Get all lights with their updated states from database
         const db = getDatabase();
         const rows = db.prepare(`
-          SELECT l.*, ls.power, ls.hue, ls.saturation, ls.brightness, ls.updated_at as state_updated_at
+          SELECT l.*, ls.power, ls.hue, ls.saturation, ls.brightness, ls.kelvin, ls.updated_at as state_updated_at
           FROM lights l
           LEFT JOIN light_state ls ON l.id = ls.light_id
           ORDER BY l.name
@@ -463,6 +467,7 @@ async function handleRequest(
           hue: number | null;
           saturation: number | null;
           brightness: number | null;
+          kelvin: number | null;
           state_updated_at: number | null;
         }>;
 
@@ -482,9 +487,10 @@ async function handleRequest(
             hue: row.hue ?? 0,
             saturation: row.saturation ?? 100,
             brightness: row.brightness ?? 100,
+            kelvin: row.kelvin ?? undefined,
             updatedAt: row.state_updated_at ?? 0,
           } : null,
-          reachable: true,
+          reachable: reachabilityMap.get(row.id) !== null,
         }));
 
         sendJson(res, { success: true, data: lightsWithState });

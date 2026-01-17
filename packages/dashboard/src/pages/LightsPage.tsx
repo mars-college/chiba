@@ -279,7 +279,7 @@ export function LightsPage() {
 
       {/* Rename Light Modal */}
       {renamingLight && (
-        <div className="modal-backdrop" onClick={() => setRenamingLight(null)}>
+        <div className="modal-overlay" onClick={() => setRenamingLight(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Rename Light</h2>
