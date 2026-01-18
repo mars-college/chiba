@@ -134,7 +134,7 @@ export function LightCard({ light, onControl, onRename, onDelete }: LightCardPro
               className="btn btn-sm"
               onClick={onDelete}
               title="Delete"
-              style={{ padding: '4px 6px', background: 'var(--color-error)', color: 'white' }}
+              style={{ padding: '4px 6px', backgroundColor: 'var(--error)', color: 'white' }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="3,6 5,6 21,6" />
