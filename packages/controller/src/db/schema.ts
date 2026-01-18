@@ -174,13 +174,13 @@ export const MIGRATIONS = [
     ('ge2', 'Gallery East 2', '100.124.2.181'),
     ('a', 'Auditorium', '100.124.2.160');`,
 
-  // Add Max Bright preset (4000K warm white at full brightness)
+  // Add Max Bright preset (cool white at max brightness)
   `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
-    ('preset-max-bright', 'Max Bright', 1, '[{"lightId":"*","power":true,"kelvin":3500,"brightness":100}]');`,
+    ('preset-max-bright', 'Max Bright', 1, '[{"lightId":"*","power":true,"kelvin":6500,"brightness":100}]');`,
 
-  // Add Warm Bright preset (maximum brightness warm white/yellow - like incandescent)
+  // Add Warm Bright preset (warm white 3250K at full brightness)
   `INSERT OR IGNORE INTO light_presets (id, name, is_predefined, settings) VALUES
-    ('preset-warm-bright', 'Warm Bright', 1, '[{"lightId":"*","power":true,"hue":35,"saturation":40,"brightness":100}]');`,
+    ('preset-warm-bright', 'Warm Bright', 1, '[{"lightId":"*","power":true,"kelvin":3250,"brightness":100}]');`,
 
   // Migration: Update lights to new IPs (Jan 2026 - lights changed addresses)
   `DELETE FROM light_state;`,
@@ -192,8 +192,10 @@ export const MIGRATIONS = [
     ('ge2', 'Gallery East 2', '100.128.2.183'),
     ('a', 'Auditorium', '100.128.2.182');`,
 
-  // Update Max Bright preset to use 4000K warm white
-  `UPDATE light_presets SET settings = '[{"lightId":"*","power":true,"kelvin":3500,"brightness":100}]' WHERE id = 'preset-max-bright';`,
+  // Update presets to use kelvin-based white temperatures
+  `UPDATE light_presets SET settings = '[{"lightId":"*","power":true,"kelvin":6500,"brightness":100}]' WHERE id = 'preset-max-bright';`,
+  `UPDATE light_presets SET settings = '[{"lightId":"*","power":true,"kelvin":3250,"brightness":100}]' WHERE id = 'preset-warm-bright';`,
+  `UPDATE light_presets SET settings = '[{"lightId":"*","power":true,"kelvin":3250,"brightness":30}]' WHERE id = 'preset-warm-dim';`,
 
   // Migration: Add device_id and sku columns to lights table for auto-discovery
   `ALTER TABLE lights ADD COLUMN device_id TEXT UNIQUE;`,
