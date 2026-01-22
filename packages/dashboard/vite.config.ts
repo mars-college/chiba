@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+// Controller port for dev proxy (default: 24422 for chiba)
+const controllerPort = process.env.CONTROLLER_PORT || '24422';
+const controllerTarget = `http://localhost:${controllerPort}`;
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -8,11 +12,11 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: controllerTarget,
         changeOrigin: true,
       },
       '/ws': {
-        target: 'http://localhost:8080',
+        target: controllerTarget,
         ws: true,
         changeOrigin: true,
       },

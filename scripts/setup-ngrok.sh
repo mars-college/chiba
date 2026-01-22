@@ -12,6 +12,7 @@ set -e
 
 NGROK_AUTHTOKEN=""
 NGROK_DOMAIN=""
+NGROK_PORT=""
 REMOVE=false
 
 while [ $# -gt 0 ]; do
@@ -32,6 +33,14 @@ while [ $# -gt 0 ]; do
             NGROK_DOMAIN="$2"
             shift 2
             ;;
+        --port=*)
+            NGROK_PORT="${1#*=}"
+            shift
+            ;;
+        --port)
+            NGROK_PORT="$2"
+            shift 2
+            ;;
         --remove)
             REMOVE=true
             shift
@@ -42,10 +51,11 @@ while [ $# -gt 0 ]; do
             echo "Options:"
             echo "  --token     Your ngrok authtoken (from dashboard.ngrok.com)"
             echo "  --domain    Static domain (e.g., your-app.ngrok-free.app)"
+            echo "  --port      Controller port (default: 24422)"
             echo "  --remove    Remove ngrok service"
             echo ""
             echo "Example:"
-            echo "  $0 --token XXX --domain myapp.ngrok-free.app"
+            echo "  $0 --token XXX --domain myapp.ngrok-free.app --port 24422"
             exit 0
             ;;
         *)
@@ -73,11 +83,15 @@ if [ -z "$NGROK_AUTHTOKEN" ] || [ -z "$NGROK_DOMAIN" ]; then
     exit 1
 fi
 
+# Default port for chiba controller
+NGROK_PORT="${NGROK_PORT:-24422}"
+
 echo "==========================================="
 echo "  ngrok Setup for Chiba Controller"
 echo "==========================================="
 echo ""
 echo "Domain: $NGROK_DOMAIN"
+echo "Port:   $NGROK_PORT"
 echo ""
 
 # Check if ngrok is installed
@@ -129,7 +143,7 @@ Wants=network-online.target
 Type=simple
 User=$(whoami)
 Environment=HOME=$HOME
-ExecStart=/usr/local/bin/ngrok http 8080 --domain=$NGROK_DOMAIN
+ExecStart=/usr/local/bin/ngrok http $NGROK_PORT --domain=$NGROK_DOMAIN
 Restart=always
 RestartSec=10
 
