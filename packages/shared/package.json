@@ -24,7 +24,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/config dist/",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
