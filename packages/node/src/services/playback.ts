@@ -216,10 +216,11 @@ class PlaybackManager {
   /**
    * Create a single-item playlist from content.
    * This allows all playback to go through the unified playlist path.
+   * Uses a proper UUID so it gets saved to the database like regular playlists.
    */
   private createSingleItemPlaylist(content: Content, showIntro: boolean): Playlist {
     return {
-      id: `single_${content.hash}_${Date.now()}`,
+      id: crypto.randomUUID(),
       name: content.name || content.filename,
       items: [{
         id: `item_${content.hash}`,
@@ -245,26 +246,24 @@ class PlaybackManager {
     logger.info('Playing content', { filename: content.filename, type: content.type });
     markAsPlayed(content.hash);
 
-    // Save resume state for single content so it recovers on reboot
-    try {
-      saveResumeState({ contentHash: content.hash });
-    } catch (err) {
-      logger.warn('Failed to save resume state for content', { error: (err as Error).message });
-    }
-
     // Create single-item playlist - loop/shuffle/duration settings are preserved
+    // The playlist will be saved to DB in startPlaylistPlayback() with resume state
     const playlist = this.createSingleItemPlaylist(content, showIntro);
     this.playPlaylist(playlist, 0);
   }
 
   /**
    * Start actual content playback (after intro if shown).
-   * All content is now played via playlists, so images always auto-advance.
+   * All content is now played via playlists, so images auto-advance to next item.
+   * Exception: Single-item playlists with loop - content stays on screen indefinitely.
    */
   private startContentPlayback(content: Content): void {
     // Detect actual content type from filename extension (don't trust content.type which may be stale)
     const actualType = getContentType(content.filename) ?? content.type;
     const mode: PlaybackMode = actualType === 'video' ? 'video' : 'image';
+
+    // Check if this is a single-item playlist with loop (content should stay indefinitely)
+    const isSingleItemLoop = this.state.playlist?.items.length === 1 && this.state.loop;
 
     this.transition(mode, {
       currentContent: content,
@@ -273,13 +272,19 @@ class PlaybackManager {
       playbackGeneration: this.state.playbackGeneration + 1,
     });
 
-    // Images always auto-advance - playlist next() handles looping at boundaries
     if (actualType === 'image') {
-      this.imageTimer = setTimeout(() => {
-        this.handleContentEnded();
-      }, this.state.imageDuration);
+      if (isSingleItemLoop) {
+        // Single image with loop - stay on screen indefinitely, no timer
+        logger.debug('Single image with loop - displaying indefinitely');
+      } else {
+        // Multi-item playlist or no loop - auto-advance after duration
+        this.imageTimer = setTimeout(() => {
+          this.handleContentEnded();
+        }, this.state.imageDuration);
+      }
     }
     // Videos: wait for 'ended' event from player
+    // For single-item video with loop, handleContentEnded will restart without intro
   }
 
   /**
@@ -438,16 +443,14 @@ class PlaybackManager {
    * Internal: Start playlist playback after preloading is complete.
    */
   private startPlaylistPlayback(playlist: Playlist, startIndex: number): void {
-    // Save playlist to database (skip transient single-item playlists)
-    if (!playlist.id.startsWith('single_')) {
-      try {
-        savePlaylist(playlist);
-        markPlaylistPlayed(playlist.id);
-        // Save resume state so we can resume after power cut
-        saveResumeState({ playlistId: playlist.id });
-      } catch (err) {
-        logger.warn('Failed to save playlist to database', { error: (err as Error).message });
-      }
+    // Save playlist to database for resume and dashboard display
+    try {
+      savePlaylist(playlist);
+      markPlaylistPlayed(playlist.id);
+      // Save resume state so we can resume after power cut
+      saveResumeState({ playlistId: playlist.id });
+    } catch (err) {
+      logger.warn('Failed to save playlist to database', { error: (err as Error).message });
     }
 
     this.state.playlist = playlist;
@@ -998,17 +1001,29 @@ class PlaybackManager {
 
   /**
    * Handle content ended event from player.
-   * Loop setting ONLY applies to playlists, not single items.
+   * For single-item playlists with loop, don't go through intro again - just loop the content.
    */
   handleContentEnded(): void {
     logger.debug('Content ended');
 
     if (this.state.playlist) {
-      // Advance to next item in playlist
+      // Check if this is a single-item playlist with loop enabled
+      if (this.state.playlist.items.length === 1 && this.state.loop) {
+        // Single-item playlist with loop - restart content directly without intro
+        const content = this.state.currentContent;
+        if (content) {
+          logger.info('Looping single-item playlist without intro');
+          // Restart content playback directly (skips intro on subsequent loops)
+          this.startContentPlayback(content);
+          return;
+        }
+      }
+
+      // Multi-item playlist or no loop - advance to next item
       // At end of playlist, next() checks loop to decide whether to restart
       this.next();
     } else {
-      // Single item ended - always stop (loop only applies to playlists)
+      // No playlist - stop playback
       this.stop();
     }
   }
