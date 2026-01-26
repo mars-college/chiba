@@ -3,7 +3,8 @@
  */
 
 import dgram from 'dgram';
-import { createLogger, loadLightsConfig } from '@chiba/shared';
+import { createLogger } from '@chiba/shared';
+import { loadLightsConfig } from '@chiba/shared/utils/config';
 import type { Light, LightState, LightControlRequest } from '@chiba/shared';
 import { getDatabase } from '../db/index.js';
 

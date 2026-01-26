@@ -18,6 +18,10 @@
       "types": "./dist/utils/index.d.ts",
       "import": "./dist/utils/index.js"
     },
+    "./utils/config": {
+      "types": "./dist/utils/config.d.ts",
+      "import": "./dist/utils/config.js"
+    },
     "./test-fixtures": {
       "types": "./dist/test-fixtures.d.ts",
       "import": "./dist/test-fixtures.js"
