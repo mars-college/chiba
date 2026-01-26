@@ -3,7 +3,7 @@
  */
 
 import dgram from 'dgram';
-import { createLogger } from '@chiba/shared';
+import { createLogger, loadLightsConfig } from '@chiba/shared';
 import type { Light, LightState, LightControlRequest } from '@chiba/shared';
 import { getDatabase } from '../db/index.js';
 
@@ -521,4 +521,74 @@ export function deleteLight(lightId: string): boolean {
   db.prepare('DELETE FROM lights WHERE id = ?').run(lightId);
 
   return true;
+}
+
+/**
+ * Sync lights from the config file (lights.json) to the database.
+ * - Adds new lights that don't exist
+ * - Updates IP addresses for existing lights
+ * - Does NOT remove lights that are in DB but not in config (preserves discovered lights)
+ *
+ * @returns Counts of added and updated lights
+ */
+export function syncLightsFromConfig(): { added: number; updated: number; total: number } {
+  const config = loadLightsConfig();
+
+  if (!config) {
+    logger.warn('Could not load lights config - skipping sync');
+    return { added: 0, updated: 0, total: 0 };
+  }
+
+  const db = getDatabase();
+  const now = Date.now();
+  let added = 0;
+  let updated = 0;
+
+  const findById = db.prepare('SELECT id, name, ip_address FROM lights WHERE id = ?');
+  const updateLight = db.prepare(`
+    UPDATE lights SET name = ?, ip_address = ?, port = ?, updated_at = ?
+    WHERE id = ?
+  `);
+  const insertLight = db.prepare(`
+    INSERT INTO lights (id, name, ip_address, port, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  const transaction = db.transaction(() => {
+    for (const light of config.lights) {
+      const existing = findById.get(light.id) as {
+        id: string;
+        name: string;
+        ip_address: string;
+      } | undefined;
+
+      if (existing) {
+        // Update if name or IP changed
+        if (existing.name !== light.name || existing.ip_address !== light.ip) {
+          updateLight.run(light.name, light.ip, config.port, now, light.id);
+          logger.info('Updated light from config', {
+            id: light.id,
+            name: light.name,
+            oldIp: existing.ip_address,
+            newIp: light.ip,
+          });
+          updated++;
+        }
+      } else {
+        // Insert new light
+        insertLight.run(light.id, light.name, light.ip, config.port, now, now);
+        logger.info('Added light from config', {
+          id: light.id,
+          name: light.name,
+          ip: light.ip,
+        });
+        added++;
+      }
+    }
+  });
+
+  transaction();
+
+  logger.info('Lights sync completed', { added, updated, total: config.lights.length });
+  return { added, updated, total: config.lights.length };
 }

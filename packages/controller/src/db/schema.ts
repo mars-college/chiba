@@ -221,4 +221,16 @@ export const MIGRATIONS = [
 
   // Add kelvin column to light_state for temperature mode tracking
   `ALTER TABLE light_state ADD COLUMN kelvin INTEGER;`,
+
+  // Migration: Sync lights with config (Jan 2026 - added Mezzanine and Mimos)
+  `DELETE FROM light_state;`,
+  `DELETE FROM lights;`,
+  `INSERT INTO lights (id, name, ip_address) VALUES
+    ('gw1', 'Gallery West 1', '100.128.2.183'),
+    ('gw2', 'Gallery West 2', '100.128.2.182'),
+    ('ge1', 'Gallery East 1', '100.128.2.146'),
+    ('ge2', 'Gallery East 2', '100.128.2.181'),
+    ('a', 'Auditorium', '100.128.2.160'),
+    ('mz', 'Mezzanine', '100.128.0.223'),
+    ('mm', 'Mimos', '100.128.0.226');`,
 ];

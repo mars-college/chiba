@@ -124,9 +124,19 @@ function runMigrations(): void {
         id INTEGER PRIMARY KEY CHECK (id = 1),
         playlist_id TEXT,
         url TEXT,
+        content_hash TEXT,
         updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
       );
     `);
+  } else {
+    // Check if resume_state.content_hash column exists
+    const resumeColumns = db.prepare("PRAGMA table_info(resume_state)").all() as Array<{ name: string }>;
+    const hasContentHashColumn = resumeColumns.some(col => col.name === 'content_hash');
+
+    if (!hasContentHashColumn) {
+      logger.info('Running migration: adding content_hash column to resume_state');
+      db.exec('ALTER TABLE resume_state ADD COLUMN content_hash TEXT');
+    }
   }
 }
 
@@ -379,6 +389,7 @@ export function markPlaylistPlayed(id: string): void {
 export interface ResumeState {
   playlistId?: string;
   url?: string;
+  contentHash?: string;
 }
 
 /**
@@ -389,11 +400,11 @@ export function saveResumeState(state: ResumeState): void {
   const database = getDatabase();
   database
     .prepare(
-      `INSERT OR REPLACE INTO resume_state (id, playlist_id, url, updated_at)
-       VALUES (1, ?, ?, ?)`
+      `INSERT OR REPLACE INTO resume_state (id, playlist_id, url, content_hash, updated_at)
+       VALUES (1, ?, ?, ?, ?)`
     )
-    .run(state.playlistId ?? null, state.url ?? null, Date.now());
-  logger.debug('Resume state saved', { playlistId: state.playlistId, url: state.url });
+    .run(state.playlistId ?? null, state.url ?? null, state.contentHash ?? null, Date.now());
+  logger.debug('Resume state saved', { playlistId: state.playlistId, url: state.url, contentHash: state.contentHash });
 }
 
 /**
@@ -403,16 +414,17 @@ export function saveResumeState(state: ResumeState): void {
 export function getResumeState(): ResumeState | null {
   const database = getDatabase();
   const row = database
-    .prepare('SELECT playlist_id, url FROM resume_state WHERE id = 1')
-    .get() as { playlist_id: string | null; url: string | null } | undefined;
+    .prepare('SELECT playlist_id, url, content_hash FROM resume_state WHERE id = 1')
+    .get() as { playlist_id: string | null; url: string | null; content_hash: string | null } | undefined;
 
-  if (!row || (!row.playlist_id && !row.url)) {
+  if (!row || (!row.playlist_id && !row.url && !row.content_hash)) {
     return null;
   }
 
   return {
     playlistId: row.playlist_id ?? undefined,
     url: row.url ?? undefined,
+    contentHash: row.content_hash ?? undefined,
   };
 }
 

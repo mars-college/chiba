@@ -28,7 +28,7 @@ import type {
 } from '@chiba/shared';
 import { WebSocket } from 'ws';
 import { getVolume, setVolume } from './volume.js';
-import { markAsPlayed, getContentByFilename, downloadAndCache } from './content-cache.js';
+import { markAsPlayed, getContentByFilename, downloadAndCache, getExistingContent } from './content-cache.js';
 import { isYouTubeUrl, downloadYouTube } from './youtube.js';
 import { downloadCreation as downloadEdenCreation, syncCollection as syncEdenCollection } from './eden.js';
 import { savePlaylist, markPlaylistPlayed, saveResumeState, clearResumeState, getResumeState, getPlaylist } from '../db/index.js';
@@ -83,6 +83,21 @@ class PlaybackManager {
           return true;
         } else {
           logger.warn('Resume playlist not found in database', { playlistId: resumeState.playlistId });
+          clearResumeState();
+        }
+      } else if (resumeState.contentHash) {
+        // Single content playback - look up by hash
+        const content = getExistingContent(resumeState.contentHash);
+        if (content) {
+          logger.info('Restoring single content playback after restart', {
+            hash: content.hash,
+            filename: content.filename,
+            name: content.name,
+          });
+          this.playContent(content);
+          return true;
+        } else {
+          logger.warn('Resume content not found in cache', { contentHash: resumeState.contentHash });
           clearResumeState();
         }
       } else if (resumeState.url) {
@@ -229,6 +244,13 @@ class PlaybackManager {
 
     logger.info('Playing content', { filename: content.filename, type: content.type });
     markAsPlayed(content.hash);
+
+    // Save resume state for single content so it recovers on reboot
+    try {
+      saveResumeState({ contentHash: content.hash });
+    } catch (err) {
+      logger.warn('Failed to save resume state for content', { error: (err as Error).message });
+    }
 
     // Create single-item playlist - loop/shuffle/duration settings are preserved
     const playlist = this.createSingleItemPlaylist(content, showIntro);

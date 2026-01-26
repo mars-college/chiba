@@ -100,3 +100,20 @@ export interface CreatePresetRequest {
   name: string;
   settings: PresetLightSetting[];
 }
+
+/**
+ * Light entry in the config file (lights.json).
+ */
+export interface LightConfigEntry {
+  id: string;
+  name: string;
+  ip: string;
+}
+
+/**
+ * Structure of the lights.json config file.
+ */
+export interface LightsConfig {
+  lights: LightConfigEntry[];
+  port: number;
+}

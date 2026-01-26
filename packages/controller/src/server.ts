@@ -43,6 +43,7 @@ import {
   renameLight,
   deleteLight,
   refreshAllLightStates,
+  syncLightsFromConfig,
 } from './services/lights.js';
 import { runDiscovery } from './services/discovery.js';
 import { handleUpload, getUploadPath } from './services/uploads.js';
@@ -1777,6 +1778,20 @@ async function handleRequest(
     return;
   }
 
+  // Sync lights from config - POST /api/lights/sync
+  if (method === 'POST' && url.pathname === '/api/lights/sync') {
+    logger.info('Syncing lights from config');
+
+    try {
+      const result = syncLightsFromConfig();
+      sendJson(res, { success: true, data: result });
+    } catch (err) {
+      logger.error('Light sync failed', err as Error);
+      sendError(res, `Sync failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
   // Rename a light - PUT /api/lights/:id
   if (method === 'PUT' && url.pathname.match(/^\/api\/lights\/[^/]+$/) && !url.pathname.includes('/control')) {
     const lightId = url.pathname.split('/')[3];
@@ -2484,6 +2499,9 @@ function broadcastToDashboards(message: ControllerToDashboardMessage): void {
 export function startServer(port = DEFAULT_PORT): http.Server {
   // Initialize database
   initDatabase();
+
+  // Sync lights from config file (lights.json)
+  syncLightsFromConfig();
 
   // Create HTTP server
   const server = http.createServer((req, res) => {

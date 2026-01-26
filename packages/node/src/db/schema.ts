@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS resume_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),  -- Single row only
   playlist_id TEXT,                        -- Active playlist ID (if any)
   url TEXT,                                -- Active URL for iframe mode (if any)
+  content_hash TEXT,                       -- Active single content hash (if any)
   updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
 );
 `;
