@@ -1762,14 +1762,16 @@ async function handleRequest(
   // ============================================================================
 
   // Discover lights - POST /api/lights/discover
+  // Pass { subnet: "100.128.0" } to scan a specific subnet via unicast UDP
   if (method === 'POST' && url.pathname === '/api/lights/discover') {
-    const body = await readJsonBody<{ timeout?: number }>(req);
+    const body = await readJsonBody<{ timeout?: number; subnet?: string }>(req);
     const timeout = body?.timeout ?? 5000;
+    const subnet = body?.subnet;
 
-    logger.info('Starting light discovery', { timeout });
+    logger.info('Starting light discovery', { timeout, subnet });
 
     try {
-      const result: DiscoveryResult = await runDiscovery(timeout);
+      const result: DiscoveryResult = await runDiscovery(timeout, subnet);
       sendJson(res, { success: true, data: result });
     } catch (err) {
       logger.error('Light discovery failed', err as Error);
