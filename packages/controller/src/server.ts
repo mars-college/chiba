@@ -45,7 +45,7 @@ import {
   refreshAllLightStates,
   syncLightsFromConfig,
 } from './services/lights.js';
-import { runDiscovery } from './services/discovery.js';
+import { runDiscovery, startAutoDiscovery, stopAutoDiscovery } from './services/discovery.js';
 import { handleUpload, getUploadPath } from './services/uploads.js';
 import type {
   LightWithState,
@@ -1792,6 +1792,46 @@ async function handleRequest(
     return;
   }
 
+  // Import discovered lights - POST /api/lights/import
+  // Allows importing discovery results from external tools (e.g., Python script)
+  if (method === 'POST' && url.pathname === '/api/lights/import') {
+    const body = await readJsonBody<{ lights: Array<{ ip: string; deviceId: string; sku: string }> }>(req);
+
+    if (!body?.lights || !Array.isArray(body.lights)) {
+      sendError(res, 'lights array is required');
+      return;
+    }
+
+    // Validate each light has required fields
+    for (const light of body.lights) {
+      if (!light.ip || !light.deviceId || !light.sku) {
+        sendError(res, 'Each light must have ip, deviceId, and sku');
+        return;
+      }
+    }
+
+    logger.info('Importing discovered lights', { count: body.lights.length });
+
+    try {
+      // Import using syncDiscoveredLights from discovery service
+      const { syncDiscoveredLights } = await import('./services/discovery.js');
+      const { added, updated } = syncDiscoveredLights(body.lights);
+
+      sendJson(res, {
+        success: true,
+        data: {
+          imported: body.lights.length,
+          added,
+          updated,
+        },
+      });
+    } catch (err) {
+      logger.error('Light import failed', err as Error);
+      sendError(res, `Import failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
   // Rename a light - PUT /api/lights/:id
   if (method === 'PUT' && url.pathname.match(/^\/api\/lights\/[^/]+$/) && !url.pathname.includes('/control')) {
     const lightId = url.pathname.split('/')[3];
@@ -2503,6 +2543,9 @@ export function startServer(port = DEFAULT_PORT): http.Server {
   // Sync lights from config file (lights.json)
   syncLightsFromConfig();
 
+  // Start auto-discovery for lights (runs every 30 minutes)
+  startAutoDiscovery();
+
   // Create HTTP server
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch((error) => {
@@ -2548,6 +2591,7 @@ export function startServer(port = DEFAULT_PORT): http.Server {
   const shutdown = () => {
     logger.info('Shutting down...');
     stopNodeTimeoutCheck();
+    stopAutoDiscovery();
     closeDatabase();
     server.close();
     process.exit(0);

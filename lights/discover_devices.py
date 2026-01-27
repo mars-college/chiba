@@ -293,6 +293,17 @@ Examples:
         default=50,
         help="Number of concurrent workers for subnet scan (default: 50)",
     )
+    parser.add_argument(
+        "--json",
+        "-j",
+        action="store_true",
+        help="Output JSON for import into controller (use with --scan)",
+    )
+    parser.add_argument(
+        "--import-url",
+        type=str,
+        help="Controller URL to import discovered lights (e.g., http://localhost:8080)",
+    )
 
     args = parser.parse_args()
 
@@ -341,6 +352,40 @@ Examples:
 
     print(f"Found {len(devices)} device(s)")
 
+    # Prepare import-ready format
+    import_lights = []
+    for d in devices:
+        if d.get("device") and d.get("sku"):
+            import_lights.append({
+                "ip": d["ip"],
+                "deviceId": d["device"],
+                "sku": d["sku"],
+            })
+
+    # JSON output for import
+    if args.json:
+        print(json.dumps({"lights": import_lights}, indent=2))
+        return
+
+    # Import to controller
+    if args.import_url and import_lights:
+        import urllib.request
+        import_url = args.import_url.rstrip("/") + "/api/lights/import"
+        print(f"\nImporting {len(import_lights)} lights to {import_url}...")
+        try:
+            req = urllib.request.Request(
+                import_url,
+                data=json.dumps({"lights": import_lights}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode())
+                print(f"  Success: added={result['data']['added']}, updated={result['data']['updated']}")
+        except Exception as e:
+            print(f"  Error: {e}")
+        return
+
     if devices:
         print("\nGovee device IPs (add to lights.py):")
         for d in devices:
@@ -353,6 +398,13 @@ Examples:
                 extra.append(f"MAC: {mac}")
             extra_str = f"  # {', '.join(extra)}" if extra else ""
             print(f"  \"{d['ip']}\",{extra_str}")
+
+        # Show import command
+        if import_lights:
+            print("\nTo import into controller:")
+            print(f"  ./discover_devices.py --scan --import-url http://localhost:8080")
+            print("  # or")
+            print(f"  ./discover_devices.py --scan --json | curl -X POST -H 'Content-Type: application/json' -d @- http://localhost:8080/api/lights/import")
 
 
 if __name__ == "__main__":

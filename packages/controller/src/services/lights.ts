@@ -528,6 +528,7 @@ export function deleteLight(lightId: string): boolean {
  * Sync lights from the config file (lights.json) to the database.
  * - Adds new lights that don't exist
  * - Updates IP addresses for existing lights
+ * - Stores deviceId for matching across IP changes
  * - Does NOT remove lights that are in DB but not in config (preserves discovered lights)
  *
  * @returns Counts of added and updated lights
@@ -545,14 +546,14 @@ export function syncLightsFromConfig(): { added: number; updated: number; total:
   let added = 0;
   let updated = 0;
 
-  const findById = db.prepare('SELECT id, name, ip_address FROM lights WHERE id = ?');
+  const findById = db.prepare('SELECT id, name, ip_address, device_id FROM lights WHERE id = ?');
   const updateLight = db.prepare(`
-    UPDATE lights SET name = ?, ip_address = ?, port = ?, updated_at = ?
+    UPDATE lights SET name = ?, ip_address = ?, port = ?, device_id = COALESCE(?, device_id), updated_at = ?
     WHERE id = ?
   `);
   const insertLight = db.prepare(`
-    INSERT INTO lights (id, name, ip_address, port, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO lights (id, name, ip_address, port, device_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   const transaction = db.transaction(() => {
@@ -561,27 +562,31 @@ export function syncLightsFromConfig(): { added: number; updated: number; total:
         id: string;
         name: string;
         ip_address: string;
+        device_id: string | null;
       } | undefined;
 
       if (existing) {
-        // Update if name or IP changed
-        if (existing.name !== light.name || existing.ip_address !== light.ip) {
-          updateLight.run(light.name, light.ip, config.port, now, light.id);
+        // Update if name, IP, or deviceId changed
+        const deviceIdChanged = light.deviceId && existing.device_id !== light.deviceId;
+        if (existing.name !== light.name || existing.ip_address !== light.ip || deviceIdChanged) {
+          updateLight.run(light.name, light.ip, config.port, light.deviceId || null, now, light.id);
           logger.info('Updated light from config', {
             id: light.id,
             name: light.name,
             oldIp: existing.ip_address,
             newIp: light.ip,
+            deviceId: light.deviceId,
           });
           updated++;
         }
       } else {
         // Insert new light
-        insertLight.run(light.id, light.name, light.ip, config.port, now, now);
+        insertLight.run(light.id, light.name, light.ip, config.port, light.deviceId || null, now, now);
         logger.info('Added light from config', {
           id: light.id,
           name: light.name,
           ip: light.ip,
+          deviceId: light.deviceId,
         });
         added++;
       }

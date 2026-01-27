@@ -108,6 +108,7 @@ export interface LightConfigEntry {
   id: string;
   name: string;
   ip: string;
+  deviceId?: string; // Stable device ID (MAC-like) for tracking across IP changes
 }
 
 /**
