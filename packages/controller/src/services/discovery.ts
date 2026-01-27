@@ -58,41 +58,61 @@ interface GoveeScanResponse {
 
 /**
  * Send a single multicast scan request.
+ * Matches the Python implementation: sends to multicast with TTL=2 and also broadcasts.
  */
 function sendScanRequest(): void {
-  const sendSocket = dgram.createSocket('udp4');
-
+  // Send to multicast address with proper TTL
+  // Need to bind first before setting socket options
+  const sendSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
   sendSocket.on('error', (err) => {
-    logger.error('Send socket error', err);
-    sendSocket.close();
+    logger.debug('Send socket error', { error: err.message });
+    try { sendSocket.close(); } catch { /* ignore */ }
   });
 
-  // Send to multicast address
-  sendSocket.send(SCAN_MESSAGE, SCAN_PORT, MULTICAST_ADDRESS, (err) => {
-    if (err) {
-      logger.error('Failed to send scan message', err);
-    } else {
-      logger.debug('Scan message sent', { address: MULTICAST_ADDRESS, port: SCAN_PORT });
+  // Bind to any port, then set multicast TTL and send
+  sendSocket.bind(0, () => {
+    try {
+      sendSocket.setMulticastTTL(2);
+    } catch (err) {
+      logger.debug('Could not set multicast TTL', { error: (err as Error).message });
     }
-    sendSocket.close();
+
+    sendSocket.send(SCAN_MESSAGE, SCAN_PORT, MULTICAST_ADDRESS, (err) => {
+      if (err) {
+        logger.debug('Failed to send multicast scan', { error: err.message });
+      } else {
+        logger.debug('Multicast scan sent', { address: MULTICAST_ADDRESS, port: SCAN_PORT });
+      }
+      try { sendSocket.close(); } catch { /* ignore */ }
+    });
   });
 
-  // Also try broadcast as fallback
-  try {
-    const bcastSocket = dgram.createSocket('udp4');
-    bcastSocket.on('error', () => bcastSocket.close());
-    bcastSocket.setBroadcast(true);
-    bcastSocket.send(SCAN_MESSAGE, SCAN_PORT, '255.255.255.255', () => {
-      bcastSocket.close();
+  // Also send broadcast (like Python script does)
+  const bcastSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  bcastSocket.on('error', () => {
+    try { bcastSocket.close(); } catch { /* ignore */ }
+  });
+
+  bcastSocket.bind(0, () => {
+    try {
+      bcastSocket.setBroadcast(true);
+    } catch {
+      // Ignore broadcast setup errors
+    }
+    bcastSocket.send(SCAN_MESSAGE, SCAN_PORT, '255.255.255.255', (err) => {
+      if (err) {
+        logger.debug('Failed to send broadcast scan', { error: err.message });
+      } else {
+        logger.debug('Broadcast scan sent');
+      }
+      try { bcastSocket.close(); } catch { /* ignore */ }
     });
-  } catch {
-    // Ignore broadcast errors
-  }
+  });
 }
 
 /**
  * Discover Govee lights on the local network via multicast scan.
- * Sends multiple scan attempts for better reliability.
+ * Matches Python implementation: joins multicast group, sends multiple attempts.
  *
  * @param timeout - How long to wait for responses in milliseconds
  * @returns Array of discovered lights
@@ -105,6 +125,12 @@ export function discoverLights(timeout = DEFAULT_TIMEOUT): Promise<DiscoveredLig
     const cleanup = () => {
       if (socket) {
         try {
+          // Leave multicast group before closing
+          socket.dropMembership(MULTICAST_ADDRESS);
+        } catch {
+          // Ignore - might not have joined
+        }
+        try {
           socket.close();
         } catch {
           // Ignore close errors
@@ -114,7 +140,7 @@ export function discoverLights(timeout = DEFAULT_TIMEOUT): Promise<DiscoveredLig
     };
 
     try {
-      // Create UDP socket for receiving responses
+      // Create UDP socket for receiving responses (match Python: reuseAddr + reusePort equivalent)
       socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
       socket.on('error', (err) => {
@@ -146,7 +172,7 @@ export function discoverLights(timeout = DEFAULT_TIMEOUT): Promise<DiscoveredLig
                   deviceId: device,
                   sku,
                 });
-                logger.debug('Discovered light via multicast', { ip: lightIp, deviceId: device, sku });
+                logger.info('Discovered light', { ip: lightIp, deviceId: device, sku });
               }
             }
           }
@@ -155,11 +181,20 @@ export function discoverLights(timeout = DEFAULT_TIMEOUT): Promise<DiscoveredLig
         }
       });
 
-      // Bind to the response port
-      socket.bind(RESPONSE_PORT, () => {
+      // Bind to the response port on all interfaces ('' = INADDR_ANY, like Python)
+      socket.bind(RESPONSE_PORT, '', () => {
         logger.info('Discovery socket bound', { port: RESPONSE_PORT });
 
+        // Join multicast group to receive responses (like Python script)
+        try {
+          socket!.addMembership(MULTICAST_ADDRESS);
+          logger.debug('Joined multicast group', { address: MULTICAST_ADDRESS });
+        } catch (err) {
+          logger.warn('Could not join multicast group', { error: (err as Error).message });
+        }
+
         // Send multiple scan requests for better reliability
+        logger.info('Sending scan requests', { attempts: SCAN_ATTEMPTS, timeout });
         sendScanRequest();
         for (let i = 1; i < SCAN_ATTEMPTS; i++) {
           setTimeout(() => sendScanRequest(), i * SCAN_ATTEMPT_DELAY);
