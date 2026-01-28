@@ -428,27 +428,40 @@ export async function refreshAllLightStates(): Promise<Map<string, LightState | 
 }
 
 /**
- * Get a light by ID from database.
+ * Common short code aliases for lights.
+ * Maps short codes to name patterns (case-insensitive prefix match).
+ */
+const LIGHT_ALIASES: Record<string, string> = {
+  'gw1': 'Gallery West 1',
+  'gw2': 'Gallery West 2',
+  'ge1': 'Gallery East 1',
+  'ge2': 'Gallery East 2',
+  'a': 'Auditorium',
+  'aud': 'Auditorium',
+  'm': 'Mimos',
+  't': 'Terrace',
+};
+
+/**
+ * Get a light by ID, name, or alias from database.
+ * Searches in order: UUID, alias lookup, exact name match (case-insensitive).
  */
 export function getLightById(lightId: string): Light | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM lights WHERE id = ?').get(lightId) as
-    | {
-        id: string;
-        name: string;
-        ip_address: string;
-        port: number;
-        device_id: string | null;
-        sku: string | null;
-        device_type: string | null;
-        created_at: number;
-        updated_at: number;
-      }
-    | undefined;
 
-  if (!row) return null;
+  type LightRow = {
+    id: string;
+    name: string;
+    ip_address: string;
+    port: number;
+    device_id: string | null;
+    sku: string | null;
+    device_type: string | null;
+    created_at: number;
+    updated_at: number;
+  };
 
-  return {
+  const rowToLight = (row: LightRow): Light => ({
     id: row.id,
     name: row.name,
     ipAddress: row.ip_address,
@@ -458,7 +471,24 @@ export function getLightById(lightId: string): Light | null {
     deviceType: row.device_type ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
+  });
+
+  // 1. Try exact UUID match
+  const byId = db.prepare('SELECT * FROM lights WHERE id = ?').get(lightId) as LightRow | undefined;
+  if (byId) return rowToLight(byId);
+
+  // 2. Try alias lookup
+  const aliasName = LIGHT_ALIASES[lightId.toLowerCase()];
+  if (aliasName) {
+    const byAlias = db.prepare('SELECT * FROM lights WHERE LOWER(name) = LOWER(?)').get(aliasName) as LightRow | undefined;
+    if (byAlias) return rowToLight(byAlias);
+  }
+
+  // 3. Try exact name match (case-insensitive)
+  const byName = db.prepare('SELECT * FROM lights WHERE LOWER(name) = LOWER(?)').get(lightId) as LightRow | undefined;
+  if (byName) return rowToLight(byName);
+
+  return null;
 }
 
 /**

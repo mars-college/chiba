@@ -407,15 +407,18 @@ export function scanSubnet(
  * Sync discovered lights to the database.
  * - If a device_id is found, update the IP address
  * - If a device_id is not found, insert a new light
+ * - If prune is true, delete lights not found in discovery
  *
  * @param discovered - Array of discovered lights
- * @returns Counts of added and updated lights
+ * @param prune - If true, delete lights not found in discovery
+ * @returns Counts of added, updated, and pruned lights
  */
-export function syncDiscoveredLights(discovered: DiscoveredLight[]): { added: number; updated: number } {
+export function syncDiscoveredLights(discovered: DiscoveredLight[], prune = false): { added: number; updated: number; pruned: number } {
   const db = getDatabase();
   const now = Date.now();
   let added = 0;
   let updated = 0;
+  let pruned = 0;
 
   const findByDeviceId = db.prepare('SELECT id, name, ip_address FROM lights WHERE device_id = ?');
   const updateLight = db.prepare(`
@@ -426,6 +429,10 @@ export function syncDiscoveredLights(discovered: DiscoveredLight[]): { added: nu
     INSERT INTO lights (id, name, ip_address, port, device_id, sku, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
+  const deleteLight = db.prepare('DELETE FROM lights WHERE device_id = ?');
+  const getAllLights = db.prepare('SELECT id, name, device_id FROM lights WHERE device_id IS NOT NULL');
+
+  const discoveredDeviceIds = new Set(discovered.map(l => l.deviceId));
 
   const transaction = db.transaction(() => {
     for (const light of discovered) {
@@ -459,11 +466,23 @@ export function syncDiscoveredLights(discovered: DiscoveredLight[]): { added: nu
         added++;
       }
     }
+
+    // Prune lights not found in discovery
+    if (prune) {
+      const allLights = getAllLights.all() as Array<{ id: string; name: string; device_id: string }>;
+      for (const light of allLights) {
+        if (!discoveredDeviceIds.has(light.device_id)) {
+          deleteLight.run(light.device_id);
+          logger.info('Pruned light not found in discovery', { id: light.id, name: light.name, deviceId: light.device_id });
+          pruned++;
+        }
+      }
+    }
   });
 
   transaction();
 
-  return { added, updated };
+  return { added, updated, pruned };
 }
 
 /**
@@ -475,10 +494,11 @@ export function syncDiscoveredLights(discovered: DiscoveredLight[]): { added: nu
  *
  * @param timeout - How long to wait for responses in milliseconds
  * @param subnet - Optional subnet to scan (e.g., "100.128.0" for 100.128.0.1-254)
+ * @param prune - If true, delete lights not found in discovery
  * @returns Discovery result with counts
  */
-export async function runDiscovery(timeout = DEFAULT_TIMEOUT, subnet?: string): Promise<DiscoveryResult> {
-  logger.info('Starting light discovery', { timeout, subnet });
+export async function runDiscovery(timeout = DEFAULT_TIMEOUT, subnet?: string, prune = false): Promise<DiscoveryResult> {
+  logger.info('Starting light discovery', { timeout, subnet, prune });
 
   let initialLights: DiscoveredLight[] = [];
 
@@ -523,12 +543,13 @@ export async function runDiscovery(timeout = DEFAULT_TIMEOUT, subnet?: string): 
     }
   }
 
-  const { added, updated } = syncDiscoveredLights(allLights);
+  const { added, updated, pruned } = syncDiscoveredLights(allLights, prune);
 
   return {
     discovered: allLights.length,
     added,
     updated,
+    pruned,
     lights: allLights,
   };
 }

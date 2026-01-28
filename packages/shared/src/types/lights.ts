@@ -33,6 +33,7 @@ export interface DiscoveryResult {
   discovered: number;
   added: number;
   updated: number;
+  pruned?: number;
   lights: DiscoveredLight[];
 }
 
