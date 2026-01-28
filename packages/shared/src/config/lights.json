@@ -1,12 +1,12 @@
 {
     "lights": [
-        { "id": "gw1", "name": "Gallery West 1", "ip": "100.128.2.183" },
-        { "id": "gw2", "name": "Gallery West 2", "ip": "100.128.2.182" },
-        { "id": "ge1", "name": "Gallery East 1", "ip": "100.128.2.146" },
-        { "id": "ge2", "name": "Gallery East 2", "ip": "100.128.2.181" },
-        { "id": "a", "name": "Auditorium", "ip": "100.128.2.160" },
-        { "id": "mz", "name": "Mezzanine", "ip": "100.128.0.223" },
-        { "id": "mm", "name": "Mimos", "ip": "100.128.0.226" }
+        { "id": "a", "name": "Auditorium", "ip": "100.128.0.144", "deviceId": "0B:DC:DB:C3:43:86:79:2F" },
+        { "id": "ge1", "name": "Gallery East 1", "ip": "100.128.0.254", "deviceId": "37:C4:DA:C3:40:46:20:39" },
+        { "id": "ge2", "name": "Gallery East 2", "ip": "100.128.0.145", "deviceId": "0C:F1:DB:48:45:86:1B:61" },
+        { "id": "gw1", "name": "Gallery West 1", "ip": "100.128.0.255", "deviceId": "12:D9:DD:6E:06:06:5D:8C" },
+        { "id": "gw2", "name": "Gallery West 2", "ip": "100.128.0.149", "deviceId": "0E:97:DB:48:45:86:0D:3A" },
+        { "id": "mm", "name": "Mimos", "ip": "100.128.0.148", "deviceId": "0C:9B:DD:6E:04:06:56:27" },
+        { "id": "t", "name": "Terrace", "ip": "100.128.0.146", "deviceId": "0D:89:DD:6E:03:C6:7D:5F" }
     ],
     "port": 4003
 }

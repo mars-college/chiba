@@ -430,6 +430,8 @@ export async function refreshAllLightStates(): Promise<Map<string, LightState | 
 /**
  * Common short code aliases for lights.
  * Maps short codes to name patterns (case-insensitive prefix match).
+ * NOTE: The database uses these short codes as IDs directly (a, ge1, gw1, etc.)
+ * so this alias map is mainly for additional convenience aliases.
  */
 const LIGHT_ALIASES: Record<string, string> = {
   'gw1': 'Gallery West 1',
@@ -438,8 +440,12 @@ const LIGHT_ALIASES: Record<string, string> = {
   'ge2': 'Gallery East 2',
   'a': 'Auditorium',
   'aud': 'Auditorium',
+  'auditorium': 'Auditorium',
+  'mm': 'Mimos',
   'm': 'Mimos',
+  'mimos': 'Mimos',
   't': 'Terrace',
+  'terrace': 'Terrace',
 };
 
 /**
