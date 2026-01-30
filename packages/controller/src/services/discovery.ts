@@ -219,60 +219,74 @@ export function discoverLights(timeout = DEFAULT_TIMEOUT): Promise<DiscoveredLig
  * Directly probe a specific IP address to check if a Govee light is there.
  * This is useful when multicast doesn't work (e.g., across VLANs or Tailscale).
  *
+ * Uses unicast scan command to port 4001, listens for response on port 4002.
+ * Note: Govee lights ALWAYS respond to port 4002 regardless of source port.
+ *
  * @param ip - IP address to probe
  * @param timeout - Timeout in milliseconds
  * @returns Discovered light info or null if not found
  */
 export function probeLight(ip: string, timeout = PROBE_TIMEOUT): Promise<DiscoveredLight | null> {
   return new Promise((resolve) => {
-    const socket = dgram.createSocket('udp4');
-    const message = JSON.stringify({ msg: { cmd: 'devStatus', data: {} } });
+    // Govee lights always respond to port 4002, so we must listen there
+    const listenSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    let resolved = false;
+
+    const cleanup = () => {
+      if (!resolved) {
+        resolved = true;
+        try { listenSocket.close(); } catch { /* ignore */ }
+      }
+    };
 
     const timer = setTimeout(() => {
-      socket.close();
+      cleanup();
       resolve(null);
     }, timeout);
 
-    socket.on('error', () => {
+    listenSocket.on('error', (err) => {
+      logger.debug('Probe listen error', { ip, error: err.message });
       clearTimeout(timer);
-      socket.close();
+      cleanup();
       resolve(null);
     });
 
-    socket.on('message', (msg) => {
+    listenSocket.on('message', (msg, rinfo) => {
+      // Only accept response from the IP we probed
+      if (rinfo.address !== ip) return;
+
       clearTimeout(timer);
-      socket.close();
 
       try {
-        const response = JSON.parse(msg.toString()) as {
-          msg: {
-            cmd: string;
-            data: {
-              device?: string;
-              sku?: string;
-            };
-          };
-        };
+        const response = JSON.parse(msg.toString()) as GoveeScanResponse;
 
-        if (response.msg?.cmd === 'devStatus' && response.msg?.data) {
+        if (response.msg?.cmd === 'scan' && response.msg?.data) {
           const { device, sku } = response.msg.data;
+          const lightIp = response.msg.data.ip || ip;
           if (device && sku) {
-            resolve({ ip, deviceId: device, sku });
+            cleanup();
+            resolve({ ip: lightIp, deviceId: device, sku });
             return;
           }
         }
-        resolve(null);
       } catch {
-        resolve(null);
+        // Ignore parse errors
       }
     });
 
-    socket.send(message, DEFAULT_LIGHT_PORT, ip, (err) => {
-      if (err) {
-        clearTimeout(timer);
-        socket.close();
-        resolve(null);
-      }
+    // Must bind to port 4002 - Govee lights always respond there
+    listenSocket.bind(RESPONSE_PORT, () => {
+      // Send scan command to port 4001 (unicast, not multicast)
+      const sendSocket = dgram.createSocket('udp4');
+      sendSocket.send(SCAN_MESSAGE, SCAN_PORT, ip, (err) => {
+        sendSocket.close();
+        if (err) {
+          logger.debug('Probe send error', { ip, error: err.message });
+          clearTimeout(timer);
+          cleanup();
+          resolve(null);
+        }
+      });
     });
   });
 }
@@ -290,18 +304,121 @@ export async function probeLights(ips: string[], timeout = PROBE_TIMEOUT): Promi
 }
 
 /**
+ * Scan an entire subnet by probing all 254 IPs.
+ * This is useful when multicast doesn't work (e.g., across VLANs or different subnets).
+ *
+ * Since Govee lights always respond to port 4002, we use a single listener
+ * and send scans to all IPs, then collect responses.
+ *
+ * @param subnet - Subnet prefix (e.g., "100.128.0" for 100.128.0.1-254)
+ * @param timeout - Total timeout in ms (default: 5000)
+ * @returns Array of discovered lights
+ */
+export function scanSubnet(
+  subnet: string,
+  timeout = 5000
+): Promise<DiscoveredLight[]> {
+  return new Promise((resolve) => {
+    const discovered: Map<string, DiscoveredLight> = new Map();
+
+    // Generate all IPs in the /24 subnet
+    const ips: string[] = [];
+    for (let i = 1; i <= 254; i++) {
+      ips.push(`${subnet}.${i}`);
+    }
+
+    logger.info('Scanning subnet', { subnet, count: ips.length, timeout });
+
+    // Create listener on port 4002
+    const listenSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+
+    const cleanup = () => {
+      try { listenSocket.close(); } catch { /* ignore */ }
+    };
+
+    listenSocket.on('error', (err) => {
+      logger.error('Subnet scan listen error', err);
+      cleanup();
+      resolve([]);
+    });
+
+    listenSocket.on('message', (msg, rinfo) => {
+      try {
+        const response = JSON.parse(msg.toString()) as GoveeScanResponse;
+
+        if (response.msg?.cmd === 'scan' && response.msg?.data) {
+          const { device, sku, ip } = response.msg.data;
+          const lightIp = ip || rinfo.address;
+
+          if (device && sku && !discovered.has(device)) {
+            discovered.set(device, { ip: lightIp, deviceId: device, sku });
+            logger.info('Found light via subnet scan', { ip: lightIp, deviceId: device, sku });
+          }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    });
+
+    // Bind to port 4002 and start scanning
+    listenSocket.bind(RESPONSE_PORT, () => {
+      logger.debug('Subnet scan listening on port', { port: RESPONSE_PORT });
+
+      // Send scan to all IPs with small delays to avoid flooding
+      const sendSocket = dgram.createSocket('udp4');
+      let sent = 0;
+
+      const sendNext = () => {
+        if (sent >= ips.length) {
+          sendSocket.close();
+          return;
+        }
+
+        const ip = ips[sent];
+        sendSocket.send(SCAN_MESSAGE, SCAN_PORT, ip, (err) => {
+          if (err) {
+            logger.debug('Failed to send scan', { ip, error: err.message });
+          }
+        });
+        sent++;
+
+        // Small delay between sends (2ms = ~500 packets/sec)
+        if (sent < ips.length) {
+          setTimeout(sendNext, 2);
+        } else {
+          sendSocket.close();
+        }
+      };
+
+      sendNext();
+    });
+
+    // Wait for timeout then return results
+    setTimeout(() => {
+      cleanup();
+      const results = Array.from(discovered.values());
+      logger.info('Subnet scan completed', { subnet, found: results.length });
+      resolve(results);
+    }, timeout);
+  });
+}
+
+/**
  * Sync discovered lights to the database.
  * - If a device_id is found, update the IP address
  * - If a device_id is not found, insert a new light
+ * - If prune is true, delete lights not found in discovery
  *
  * @param discovered - Array of discovered lights
- * @returns Counts of added and updated lights
+ * @param prune - If true, delete lights not found in discovery
+ * @returns Counts of added, updated, and pruned lights
  */
-export function syncDiscoveredLights(discovered: DiscoveredLight[]): { added: number; updated: number } {
+export function syncDiscoveredLights(discovered: DiscoveredLight[], prune = false): { added: number; updated: number; pruned: number } {
   const db = getDatabase();
   const now = Date.now();
   let added = 0;
   let updated = 0;
+  let pruned = 0;
 
   const findByDeviceId = db.prepare('SELECT id, name, ip_address FROM lights WHERE device_id = ?');
   const updateLight = db.prepare(`
@@ -312,6 +429,10 @@ export function syncDiscoveredLights(discovered: DiscoveredLight[]): { added: nu
     INSERT INTO lights (id, name, ip_address, port, device_id, sku, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
+  const deleteLight = db.prepare('DELETE FROM lights WHERE device_id = ?');
+  const getAllLights = db.prepare('SELECT id, name, device_id FROM lights WHERE device_id IS NOT NULL');
+
+  const discoveredDeviceIds = new Set(discovered.map(l => l.deviceId));
 
   const transaction = db.transaction(() => {
     for (const light of discovered) {
@@ -345,30 +466,53 @@ export function syncDiscoveredLights(discovered: DiscoveredLight[]): { added: nu
         added++;
       }
     }
+
+    // Prune lights not found in discovery
+    if (prune) {
+      const allLights = getAllLights.all() as Array<{ id: string; name: string; device_id: string }>;
+      for (const light of allLights) {
+        if (!discoveredDeviceIds.has(light.device_id)) {
+          deleteLight.run(light.device_id);
+          logger.info('Pruned light not found in discovery', { id: light.id, name: light.name, deviceId: light.device_id });
+          pruned++;
+        }
+      }
+    }
   });
 
   transaction();
 
-  return { added, updated };
+  return { added, updated, pruned };
 }
 
 /**
  * Run a full discovery scan and sync results to the database.
  * Uses multiple methods for better reliability:
- * 1. Multicast scan (sends multiple requests)
- * 2. Direct probe of known lights that weren't found via multicast
+ * 1. Multicast scan (sends multiple requests) - skipped if subnet provided
+ * 2. Subnet scan via direct UDP probes (if subnet provided)
+ * 3. Direct probe of known lights that weren't found via multicast
  *
  * @param timeout - How long to wait for responses in milliseconds
+ * @param subnet - Optional subnet to scan (e.g., "100.128.0" for 100.128.0.1-254)
+ * @param prune - If true, delete lights not found in discovery
  * @returns Discovery result with counts
  */
-export async function runDiscovery(timeout = DEFAULT_TIMEOUT): Promise<DiscoveryResult> {
-  logger.info('Starting light discovery', { timeout });
+export async function runDiscovery(timeout = DEFAULT_TIMEOUT, subnet?: string, prune = false): Promise<DiscoveryResult> {
+  logger.info('Starting light discovery', { timeout, subnet, prune });
 
-  // Step 1: Multicast discovery
-  const multicastLights = await discoverLights(timeout);
-  const discoveredDeviceIds = new Set(multicastLights.map(l => l.deviceId));
+  let initialLights: DiscoveredLight[] = [];
 
-  logger.info('Multicast scan found lights', { count: multicastLights.length });
+  if (subnet) {
+    // Step 1a: Subnet scan via direct UDP probes
+    initialLights = await scanSubnet(subnet, PROBE_TIMEOUT);
+    logger.info('Subnet scan found lights', { count: initialLights.length });
+  } else {
+    // Step 1b: Multicast discovery (local subnet only)
+    initialLights = await discoverLights(timeout);
+    logger.info('Multicast scan found lights', { count: initialLights.length });
+  }
+
+  const discoveredDeviceIds = new Set(initialLights.map(l => l.deviceId));
 
   // Step 2: Get known lights from database that weren't found via multicast
   const db = getDatabase();
@@ -390,8 +534,8 @@ export async function runDiscovery(timeout = DEFAULT_TIMEOUT): Promise<Discovery
     logger.info('Direct probe found lights', { count: probedLights.length });
   }
 
-  // Combine results (multicast results take precedence for IP updates)
-  const allLights = [...multicastLights];
+  // Combine results (initial scan results take precedence for IP updates)
+  const allLights = [...initialLights];
   for (const probed of probedLights) {
     if (!discoveredDeviceIds.has(probed.deviceId)) {
       allLights.push(probed);
@@ -399,12 +543,13 @@ export async function runDiscovery(timeout = DEFAULT_TIMEOUT): Promise<Discovery
     }
   }
 
-  const { added, updated } = syncDiscoveredLights(allLights);
+  const { added, updated, pruned } = syncDiscoveredLights(allLights, prune);
 
   return {
     discovered: allLights.length,
     added,
     updated,
+    pruned,
     lights: allLights,
   };
 }

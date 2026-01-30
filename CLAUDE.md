@@ -417,3 +417,70 @@ scp scripts/network-watchdog.sh scripts/auto-reboot.sh pi@<pi-ip>:~/chiba/script
 # Enable on node
 ssh pi@<pi-ip> "~/chiba/scripts/auto-reboot.sh on && sudo systemctl restart chiba-network-watchdog"
 ```
+
+## Govee Lights
+
+The controller manages Govee LED lights via UDP LAN protocol (port 4003).
+
+### Current Lights
+
+| ID | Name | IP | Device ID |
+|----|------|-----|-----------|
+| `a` | Auditorium | 100.128.0.144 | 0B:DC:DB:C3:43:86:79:2F |
+| `ge1` | Gallery East 1 | 100.128.0.254 | 37:C4:DA:C3:40:46:20:39 |
+| `ge2` | Gallery East 2 | 100.128.0.145 | 0C:F1:DB:48:45:86:1B:61 |
+| `gw1` | Gallery West 1 | 100.128.0.255 | 12:D9:DD:6E:06:06:5D:8C |
+| `gw2` | Gallery West 2 | 100.128.0.149 | 0E:97:DB:48:45:86:0D:3A |
+| `mm` | Mimos | 100.128.0.148 | 0C:9B:DD:6E:04:06:56:27 |
+| `t` | Terrace | 100.128.0.146 | 0D:89:DD:6E:03:C6:7D:5F |
+
+### Updating Light IP Addresses
+
+When light IPs change (e.g., after network changes), update BOTH locations:
+
+**1. Config file** (`packages/shared/src/config/lights.json`):
+```json
+{ "id": "ge1", "name": "Gallery East 1", "ip": "NEW_IP_HERE", "deviceId": "..." }
+```
+
+**2. Database** (run on controller):
+```bash
+DB_PATH="/home/gene/chiba/packages/controller/data/controller.db"
+sqlite3 "$DB_PATH" "UPDATE lights SET ip_address = 'NEW_IP' WHERE id = 'ge1';"
+```
+
+**3. Copy config to dist and restart:**
+```bash
+cp packages/shared/src/config/lights.json packages/shared/dist/config/lights.json
+sudo systemctl restart chiba-controller
+```
+
+### Discovery & Import
+
+If multicast discovery fails (common across subnets/Tailscale), use manual import:
+
+```bash
+# Import discovered lights via API
+curl -X POST http://localhost:24422/api/lights/import \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lights": [
+      {"ip": "100.128.0.144", "deviceId": "0B:DC:DB:C3:43:86:79:2F", "sku": "H6061"}
+    ]
+  }'
+```
+
+### Light Control API
+
+```bash
+# Control by ID or name (case-insensitive)
+curl -X POST http://localhost:24422/api/lights/ge1/control \
+  -H "X-API-Key: $API_KEY" \
+  -d '{"power": true, "brightness": 80, "hue": 0, "saturation": 100}'
+
+# Control all lights
+curl -X POST http://localhost:24422/api/lights/all/control \
+  -H "X-API-Key: $API_KEY" \
+  -d '{"power": true, "brightness": 50}'
+```
