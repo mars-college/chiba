@@ -115,6 +115,7 @@ export const DEFAULT_CONFIG: Record<string, string> = {
   'node.friendly_name': 'unnamed-node',
   'controller.url': 'http://localhost:8080',
   'controller.api_key': '',
+  'kiosk.url': '',
   'player.intro_duration': '3000',
   'player.image_duration': '10000',
   'player.show_intros': 'true',
