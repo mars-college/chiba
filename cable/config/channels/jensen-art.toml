@@ -1,0 +1,27 @@
+id = "jensen-art"
+number = "134"
+name = "Jensen Art"
+call_sign = "ART"
+accent = "#88d6ff"
+description = "Interactive web experiments."
+
+[[program]]
+title = "Multi Phase Field"
+subtitle = "Interactive"
+tag = "ART"
+duration_slots = 1
+source = { type = "url", value = "https://multi-phase-field--jensenabler.replit.app/" }
+
+[[program]]
+title = "Spiral Evolve"
+subtitle = "Interactive"
+tag = "ART"
+duration_slots = 1
+source = { type = "url", value = "https://spiral-evolve--jensenabler.replit.app/" }
+
+[[program]]
+title = "Squiggle Evolve"
+subtitle = "Interactive"
+tag = "ART"
+duration_slots = 1
+source = { type = "url", value = "https://squiggle-evolve--jensenabler.replit.app/" }

@@ -1,0 +1,41 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overscroll-behavior: none;
+}
+
+:root {
+  font-family: "Alegreya Sans", "Segoe UI", sans-serif;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #0a0f1a;
+  color: #e9f2ff;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+img,
+svg,
+video {
+  max-width: 100%;
+  display: block;
+}
+
+button {
+  font: inherit;
+}

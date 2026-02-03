@@ -38,6 +38,7 @@ WIFI_PASSWORD=""
 DISPLAY_ROTATE="0"
 INSTALL_DIR="/home/pi/chiba"
 REPO_URL="https://github.com/mars-college/chiba.git"
+SKIP_GIT="0"
 
 while [ $# -gt 0 ]; do
     case $1 in
@@ -105,6 +106,10 @@ while [ $# -gt 0 ]; do
             INSTALL_DIR="$2"
             shift 2
             ;;
+        --skip-git)
+            SKIP_GIT="1"
+            shift
+            ;;
         --help|-h)
             echo "Usage: $0 --controller-url URL --node-name NAME [OPTIONS]"
             echo ""
@@ -119,6 +124,7 @@ while [ $# -gt 0 ]; do
             echo "  --wifi-password    WiFi network password"
             echo "  --display-rotate   Display rotation: 0, 90, 180, 270 (default: 0)"
             echo "  --install-dir      Installation directory (default: /home/pi/chiba)"
+            echo "  --skip-git         Do not clone/pull; use existing repo in install dir"
             exit 0
             ;;
         *)
@@ -253,15 +259,24 @@ fi
 
 echo "=== Setting up Chiba ==="
 # Clone or update repository
-if [ -d "$INSTALL_DIR" ]; then
-    echo "Repository exists, pulling latest..."
+if [ "$SKIP_GIT" = "1" ]; then
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "Error: --skip-git was set but $INSTALL_DIR does not exist."
+        exit 1
+    fi
+    echo "Skipping git update (using existing repo at $INSTALL_DIR)"
     cd "$INSTALL_DIR"
-    git fetch origin
-    git reset --hard origin/main
 else
-    echo "Cloning repository..."
-    git clone "$REPO_URL" "$INSTALL_DIR"
-    cd "$INSTALL_DIR"
+    if [ -d "$INSTALL_DIR" ]; then
+        echo "Repository exists, pulling latest..."
+        cd "$INSTALL_DIR"
+        git fetch origin
+        git reset --hard origin/main
+    else
+        echo "Cloning repository..."
+        git clone "$REPO_URL" "$INSTALL_DIR"
+        cd "$INSTALL_DIR"
+    fi
 fi
 
 # Create media directory
@@ -790,9 +805,13 @@ echo "Network watchdog is enabled - WiFi will auto-reconnect"
 echo "  Logs: journalctl -u chiba-network-watchdog -f"
 echo ""
 
-read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r </dev/tty
-echo
-case "$REPLY" in
-    [Nn]*) echo "Reboot when ready: sudo reboot" ;;
-    *) sudo reboot ;;
-esac
+if [ -t 0 ] && [ -t 1 ] && [ -e /dev/tty ]; then
+    read -p "Reboot now to start kiosk? (Y/n) " -n 1 -r </dev/tty
+    echo
+    case "$REPLY" in
+        [Nn]*) echo "Reboot when ready: sudo reboot" ;;
+        *) sudo reboot ;;
+    esac
+else
+    echo "Skipping reboot prompt (no TTY). Reboot manually if needed."
+fi
