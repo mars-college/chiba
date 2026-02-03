@@ -34,8 +34,8 @@ If you set `--remote-url`, the server will always generate QR codes pointing the
 ## What it does
 
 1) Installs or upgrades the Chiba node on the Pi  
-2) Clones/updates `chiba-cable` and installs deps  
-3) Creates systemd services:
+2) Updates the `chiba` repo (which now contains `cable/`) and installs deps  
+3) Creates systemd services (from `chiba/cable`):
    - `chiba-cable-server` (port 8787)
    - `chiba-cable-guide` (port 5173, `--host 0.0.0.0`)
 4) Sets kiosk URL to `http://localhost:5173/?screenId=<node-name>`

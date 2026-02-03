@@ -1,0 +1,24 @@
+id = "ai-village"
+number = "066"
+name = "AI Village 24/7"
+call_sign = "VLLG"
+accent = "#9fd6a6"
+description = "Live feed of the AI Village."
+
+[[program]]
+title = "AI Village"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "https://theaidigest.org/village" }
+
+[[program]]
+title = "AI Village"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "https://theaidigest.org/village" }
+
+[[program]]
+title = "AI Village"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "https://theaidigest.org/village" }

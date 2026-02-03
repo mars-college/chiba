@@ -1,0 +1,13 @@
+id = "code-lab"
+number = "133"
+name = "Code Lab"
+call_sign = "DEV"
+accent = "#b6ff8f"
+description = "Programming block and experiments."
+
+[[program]]
+title = "Nebula Relay"
+subtitle = "Generative Visualizer"
+tag = "LAB"
+duration_slots = 2
+source = { type = "url", value = "http://localhost:8790/?ws=ws://localhost:8787/ws&appId=gen-art" }

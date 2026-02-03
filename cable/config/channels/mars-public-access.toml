@@ -1,0 +1,39 @@
+id = "mars-public-access"
+number = "069"
+name = "Mars Public Access Network"
+call_sign = "MPAN"
+accent = "#ff9f6b"
+description = "Live transmission from the Mars Public Access Network."
+
+[[program]]
+title = "Mars Public Access Network"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/embed/mars-public-access" }
+
+[[program]]
+title = "Mars Public Access Network"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/embed/mars-public-access" }
+
+[[program]]
+title = "Mars Public Access Network"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/embed/mars-public-access" }
+
+[embed]
+mode = "iframe"
+url = "https://vdo.ninja/?view=QQA3g6X316&room=Mars_Public_Access_Network&pw=marscollege&scene&api=1"
+allow = "autoplay; fullscreen; camera; microphone"
+
+[embed.overlay]
+title = "Mars Public Access Network"
+subtitle = "Awaiting Broadcast"
+hint = "Scan to join and go live from Mars."
+qr = "https://vdo.ninja/?push=QQA3g6X316&room=Mars_Public_Access_Network&pw=marscollege"
+button = "Hide Info"
+show_delay_ms = 0
+hide_on_message = false
+mode = "corner"

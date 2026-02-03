@@ -1,0 +1,18 @@
+[server]
+host = "0.0.0.0"
+port = 8787
+# Optional: override QR base so the kiosk can run on localhost
+# remote_url = "http://100.128.0.213:5173"
+
+[library]
+roots = ["/Volumes/share"]
+
+[index]
+scan_interval_sec = 300
+full_scan_on_start = true
+
+[channels]
+manifest_dir = "channels"
+slot_minutes = 30
+slot_count = 6
+start_time = "16:00"

@@ -1,0 +1,228 @@
+{
+  "slotMinutes": 30,
+  "slotCount": 6,
+  "startTime": "16:00",
+  "channels": [
+    {
+      "id": "jensen-art",
+      "number": "042",
+      "name": "Jensen Art",
+      "callSign": "ART",
+      "description": "Interactive web experiments.",
+      "accent": "#88d6ff",
+      "programs": [
+        {
+          "title": "Multi Phase Field",
+          "subtitle": "Interactive",
+          "tag": "ART",
+          "url": "https://multi-phase-field--jensenabler.replit.app/",
+          "durationSlots": 1
+        },
+        {
+          "title": "Spiral Evolve",
+          "subtitle": "Interactive",
+          "tag": "ART",
+          "url": "https://spiral-evolve--jensenabler.replit.app/",
+          "durationSlots": 1
+        },
+        {
+          "title": "Squiggle Evolve",
+          "subtitle": "Interactive",
+          "tag": "ART",
+          "url": "https://squiggle-evolve--jensenabler.replit.app/",
+          "durationSlots": 1
+        }
+      ]
+    },
+    {
+      "id": "ai-village",
+      "number": "066",
+      "name": "AI Village 24/7",
+      "callSign": "VLLG",
+      "description": "Live feed of the AI Village.",
+      "accent": "#9fd6a6",
+      "programs": [
+        {
+          "title": "AI Village",
+          "subtitle": "Live",
+          "tag": "LIVE",
+          "url": "/village",
+          "durationSlots": 2
+        },
+        {
+          "title": "AI Village",
+          "subtitle": "Live",
+          "tag": "LIVE",
+          "url": "/village",
+          "durationSlots": 2
+        },
+        {
+          "title": "AI Village",
+          "subtitle": "Live",
+          "tag": "LIVE",
+          "url": "/village",
+          "durationSlots": 2
+        }
+      ]
+    },
+    {
+      "id": "code-lab",
+      "number": "133",
+      "name": "Code Lab",
+      "callSign": "DEV",
+      "description": "Programming block and experiments.",
+      "accent": "#b6ff8f",
+      "programs": [
+        {
+          "title": "Nebula Relay",
+          "subtitle": "Generative Visualizer",
+          "tag": "LAB",
+          "url": "http://localhost:8790/?ws=ws://localhost:8787/ws&appId=gen-art",
+          "durationSlots": 2
+        },
+        {
+          "title": "Compile Time",
+          "subtitle": "Build & Ship",
+          "tag": "DEV",
+          "durationSlots": 2
+        },
+        {
+          "title": "Night Shift",
+          "subtitle": "Debug Hour",
+          "tag": "DEV",
+          "durationSlots": 2
+        }
+      ]
+    },
+    {
+      "id": "city-news",
+      "number": "101",
+      "name": "City News",
+      "callSign": "NEWS",
+      "description": "Local and global headlines.",
+      "accent": "#7ee0ff",
+      "programs": [
+        { "title": "Morning Brief", "subtitle": "Top Stories", "tag": "NEWS", "url": "https://multi-phase-field--jensenabler.replit.app/", "durationSlots": 2 },
+        { "title": "Market Watch", "subtitle": "Business", "tag": "BIZ", "durationSlots": 2 },
+        { "title": "Evening Update", "subtitle": "Headlines", "tag": "NEWS", "durationSlots": 2 }
+      ]
+    },
+    {
+      "id": "coast-sports",
+      "number": "207",
+      "name": "Coast Sports",
+      "callSign": "SPRT",
+      "description": "Live scores and replays.",
+      "accent": "#7dffb3",
+      "programs": [
+        { "title": "Highlights", "subtitle": "Daily Recap", "tag": "SPORT", "url": "https://spiral-evolve--jensenabler.replit.app/", "durationSlots": 2 },
+        { "title": "Live Desk", "subtitle": "Studio", "tag": "LIVE", "durationSlots": 2 },
+        { "title": "Classic Game", "subtitle": "Replay", "tag": "RPT", "durationSlots": 2 }
+      ]
+    },
+    {
+      "id": "retro-cinema",
+      "number": "314",
+      "name": "Retro Cinema",
+      "callSign": "FILM",
+      "description": "Cult classics all night.",
+      "accent": "#ffc67a",
+      "programs": [
+        { "title": "Double Feature", "subtitle": "80s Action", "tag": "FILM", "url": "https://squiggle-evolve--jensenabler.replit.app/", "durationSlots": 3 },
+        { "title": "Director's Cut", "subtitle": "Spotlight", "tag": "FILM", "durationSlots": 2 },
+        { "title": "Trailer Loop", "subtitle": "Sneak Peek", "tag": "PROMO", "durationSlots": 1 }
+      ]
+    },
+    {
+      "id": "kids-quest",
+      "number": "405",
+      "name": "Kids Quest",
+      "callSign": "KIDS",
+      "description": "Animated adventures.",
+      "accent": "#ff9fe0",
+      "programs": [
+        { "title": "Adventure Club", "subtitle": "New Episode", "tag": "KIDS", "url": "https://multi-phase-field--jensenabler.replit.app/", "durationSlots": 2 },
+        { "title": "Science Lab", "subtitle": "DIY", "tag": "STEM", "durationSlots": 2 },
+        { "title": "Cartoon Hour", "subtitle": "Classics", "tag": "KIDS", "durationSlots": 2 }
+      ]
+    },
+    {
+      "id": "world-explorer",
+      "number": "512",
+      "name": "World Explorer",
+      "callSign": "TRVL",
+      "description": "Trips, tastes, and trails.",
+      "accent": "#9ad1ff",
+      "programs": [
+        { "title": "Midnight Atlas", "subtitle": "Travelogue", "tag": "TRVL", "url": "https://spiral-evolve--jensenabler.replit.app/", "durationSlots": 2 },
+        { "title": "Street Eats", "subtitle": "Food", "tag": "FOOD", "durationSlots": 2 },
+        { "title": "Hidden Trails", "subtitle": "Outdoors", "tag": "TRVL", "durationSlots": 2 }
+      ]
+    },
+    {
+      "id": "aurora-music",
+      "number": "618",
+      "name": "Aurora Music",
+      "callSign": "MUSC",
+      "description": "Live sets and mixes.",
+      "accent": "#9fffdd",
+      "programs": [
+        { "title": "Synthwave Set", "subtitle": "Live Mix", "tag": "MUSIC", "url": "https://squiggle-evolve--jensenabler.replit.app/", "durationSlots": 2 },
+        { "title": "Indie Spotlight", "subtitle": "Sessions", "tag": "LIVE", "durationSlots": 2 },
+        { "title": "Late Night Lofi", "subtitle": "Chill", "tag": "MIX", "durationSlots": 2 }
+      ]
+    },
+    {
+      "id": "history-vault",
+      "number": "707",
+      "name": "History Vault",
+      "callSign": "HIST",
+      "description": "Stories from the archives.",
+      "accent": "#d3a5ff",
+      "programs": [
+        { "title": "Artifact Files", "subtitle": "Excavations", "tag": "HIST", "url": "https://multi-phase-field--jensenabler.replit.app/", "durationSlots": 2 },
+        { "title": "War Room", "subtitle": "Strategy", "tag": "DOC", "durationSlots": 2 },
+        { "title": "Timeline", "subtitle": "Moments", "tag": "HIST", "durationSlots": 2 }
+      ]
+    },
+    {
+      "id": "science-lab",
+      "number": "808",
+      "name": "Science Lab",
+      "callSign": "SCI",
+      "description": "Experiments and discoveries.",
+      "accent": "#8fd4ff",
+      "programs": [
+        { "title": "Deep Space", "subtitle": "Cosmos", "tag": "SCI", "url": "https://spiral-evolve--jensenabler.replit.app/", "durationSlots": 2 },
+        { "title": "Bio Frontiers", "subtitle": "Labs", "tag": "SCI", "durationSlots": 2 },
+        { "title": "Tech Now", "subtitle": "Futures", "tag": "TECH", "durationSlots": 2 }
+      ]
+    },
+    {
+      "id": "food-market",
+      "number": "909",
+      "name": "Food Market",
+      "callSign": "FOOD",
+      "description": "Kitchen and street flavors.",
+      "accent": "#ffb184",
+      "programs": [
+        { "title": "Kitchen Rush", "subtitle": "Cook-Off", "tag": "FOOD", "url": "https://squiggle-evolve--jensenabler.replit.app/", "durationSlots": 2 },
+        { "title": "Open Market", "subtitle": "Fresh Picks", "tag": "FOOD", "durationSlots": 2 },
+        { "title": "Sweet Spot", "subtitle": "Desserts", "tag": "FOOD", "durationSlots": 2 }
+      ]
+    },
+    {
+      "id": "late-night",
+      "number": "990",
+      "name": "Late Night",
+      "callSign": "LATE",
+      "description": "After-hours talk and comedy.",
+      "accent": "#ff8bb5",
+      "programs": [
+        { "title": "After Hours", "subtitle": "Talk", "tag": "LATE", "url": "https://multi-phase-field--jensenabler.replit.app/", "durationSlots": 2 },
+        { "title": "Standup", "subtitle": "Comedy", "tag": "LIVE", "durationSlots": 2 },
+        { "title": "Neon Talks", "subtitle": "Interviews", "tag": "LATE", "durationSlots": 2 }
+      ]
+    }
+  ]
+}
