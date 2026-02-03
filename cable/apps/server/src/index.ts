@@ -1224,7 +1224,7 @@ app.all('/embed/:id/proxy/*', async (req, res) => {
     const upstream = await fetch(targetUrl, {
       method,
       headers,
-      body,
+      body: body as any,
       redirect: "follow",
     });
     res.status(upstream.status);

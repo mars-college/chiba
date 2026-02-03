@@ -54,7 +54,6 @@ export function RemoteView() {
   const [keyboardValue, setKeyboardValue] = useState("");
   const keyboardValueRef = useRef("");
   const isCompactMode = showAppPanel || showInputPanel;
-  const hasAnySpecial = hasAppControls || hasKeyboardMouse || hasMicControls;
 
   const startPad = useCallback((clientX: number, clientY: number) => {
     padLastRef.current = { x: clientX, y: clientY };
@@ -133,46 +132,6 @@ export function RemoteView() {
     padTapRef.current = null;
   }, []);
 
-  const handlePadTouchStart = useCallback(
-    (event: React.TouchEvent<HTMLDivElement>) => {
-      if ("PointerEvent" in window) return;
-      const touch = event.touches[0];
-      if (!touch) return;
-      event.preventDefault();
-      startPad(touch.clientX, touch.clientY);
-      log.debug("trackpad-touch", { phase: "start" });
-    },
-    [startPad]
-  );
-
-  const handlePadTouchMove = useCallback(
-    (event: React.TouchEvent<HTMLDivElement>) => {
-      if ("PointerEvent" in window) return;
-      const touch = event.touches[0];
-      if (!touch) return;
-      event.preventDefault();
-      movePad(touch.clientX, touch.clientY);
-    },
-    [movePad]
-  );
-
-  const handlePadTouchEnd = useCallback(
-    (event: React.TouchEvent<HTMLDivElement>) => {
-      if ("PointerEvent" in window) return;
-      const touch = event.changedTouches[0];
-      if (!touch) return;
-      event.preventDefault();
-      endPad(touch.clientX, touch.clientY);
-      log.debug("trackpad-touch", { phase: "end" });
-    },
-    [endPad]
-  );
-
-  const handlePadTouchCancel = useCallback(() => {
-    if ("PointerEvent" in window) return;
-    padLastRef.current = null;
-    padTapRef.current = null;
-  }, []);
 
   const handleKeyboardChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {

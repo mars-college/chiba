@@ -5,7 +5,6 @@ import { GuideGrid } from "../components/GuideGrid";
 import { GuideHeader } from "../components/GuideHeader";
 import { PlayerOverlay } from "../components/PlayerOverlay";
 import { VolumeHud } from "../components/VolumeHud";
-import type { MemoryStats } from "../components/DebugPanel";
 import { useGuideViewStore } from "../store/useGuideViewStore";
 
 export function GuideView() {

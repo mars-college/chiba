@@ -1453,7 +1453,7 @@ function App() {
       if (viewMode !== "guide") return;
       log.debug("remote-keyboard", {
         action: msg.action,
-        key: msg.key,
+        key: msg.action === "key" ? msg.key : undefined,
         playerOpen,
         hasKeyboardMouse,
       });
