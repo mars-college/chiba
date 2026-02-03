@@ -5,16 +5,28 @@ import type { RemoteMessage, RemoteStatus } from "../types/guide";
 
 const log = createLogger("remote-socket");
 
-export function useRemoteSocket(onMessage?: (msg: RemoteMessage) => void) {
+type RemoteSocketOptions = {
+  role?: string;
+};
+
+export function useRemoteSocket(
+  onMessage?: (msg: RemoteMessage) => void,
+  options: RemoteSocketOptions = {}
+) {
   const [status, setStatus] = useState<RemoteStatus>("connecting");
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const retryRef = useRef(0);
   const handlerRef = useRef(onMessage);
+  const roleRef = useRef(options.role);
 
   useEffect(() => {
     handlerRef.current = onMessage;
   }, [onMessage]);
+
+  useEffect(() => {
+    roleRef.current = options.role;
+  }, [options.role]);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,6 +43,21 @@ export function useRemoteSocket(onMessage?: (msg: RemoteMessage) => void) {
         retryRef.current = 0;
         setStatus("open");
         log.info("open");
+        const role = roleRef.current;
+        if (role) {
+          try {
+            socket.send(
+              JSON.stringify({
+                type: "hello",
+                role,
+                origin: window.location.origin,
+                path: window.location.pathname,
+              })
+            );
+          } catch {
+            // ignore hello failures
+          }
+        }
       });
       socket.addEventListener("close", () => {
         if (cancelled) return;

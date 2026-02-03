@@ -18,6 +18,7 @@ export function GuideView() {
     playerReady,
     playerSurfaceRef,
     remoteCursor,
+    hasKeyboardMouse,
     hasPreviewMedia,
     posterImageReady,
     setPosterImageReady,
@@ -123,6 +124,7 @@ export function GuideView() {
         setPlayerReady={setPlayerReady}
         surfaceRef={playerSurfaceRef}
         remoteCursor={remoteCursor}
+        forceCursor={hasKeyboardMouse}
       />
 
       <DebugPanel

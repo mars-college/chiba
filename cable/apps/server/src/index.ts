@@ -405,6 +405,7 @@ const buildEmbedPage = (embed: ChannelEmbedConfig, debug = false) => {
 const buildProxyPage = (
   html: string,
   embed: ChannelEmbedConfig,
+  embedId: string,
   debug?: { enabled: boolean; status?: number; url?: string }
 ) => {
   const selectors = embed.dismiss_selectors ?? [];
@@ -412,6 +413,9 @@ const buildProxyPage = (
     ? selectors.map((sel) => `${sel}{display:none !important; visibility:hidden !important;}`).join('')
     : '';
   const baseHref = embed.url ?? '';
+  const proxyPrefix = `/embed/${embedId}/proxy`;
+  const upstreamOrigin = embed.url ? new URL(embed.url).origin : '';
+  const upstreamHost = embed.url ? new URL(embed.url).host : '';
   const debugEnabled = Boolean(debug?.enabled);
   const debugStatus =
     typeof debug?.status === 'number' ? debug.status : 'unknown';
@@ -457,6 +461,7 @@ const buildProxyPage = (
       <script>
         (() => {
           const baseOrigin = window.location.origin;
+          const proxyBase = baseOrigin + window.location.pathname.replace(/\\/$/, '') + '/proxy';
           const normalizeUrlArg = (url) => {
             if (!url) return url;
             if (typeof url === 'string') return url;
@@ -467,6 +472,40 @@ const buildProxyPage = (
               return null;
             }
           };
+          const upstreamOrigin = ${JSON.stringify(upstreamOrigin)} || null;
+          const rewriteUrl = (input) => {
+            try {
+              const raw = normalizeUrlArg(input);
+              if (!raw) return input;
+              if (upstreamOrigin && typeof raw === 'string' && raw.startsWith('/')) {
+                return proxyBase + raw;
+              }
+              const resolved = new URL(raw, document.baseURI);
+              if (!upstreamOrigin) return input;
+              if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return input;
+              if (resolved.origin !== upstreamOrigin) return input;
+              return proxyBase + resolved.pathname + resolved.search + resolved.hash;
+            } catch {
+              return input;
+            }
+          };
+          try {
+            const locProto = Object.getPrototypeOf(window.location);
+            if (locProto?.assign) {
+              const originalAssign = locProto.assign;
+              locProto.assign = function (url) {
+                return originalAssign.call(this, rewriteUrl(url));
+              };
+            }
+            if (locProto?.replace) {
+              const originalReplace = locProto.replace;
+              locProto.replace = function (url) {
+                return originalReplace.call(this, rewriteUrl(url));
+              };
+            }
+          } catch {
+            // ignore location override failures
+          }
           const safeHistory = (original) => function (state, title, url) {
             try {
               const normalized = normalizeUrlArg(url);
@@ -493,6 +532,37 @@ const buildProxyPage = (
           } catch {
             // ignore history override failures
           }
+          try {
+            const originalFetch = window.fetch ? window.fetch.bind(window) : null;
+            if (originalFetch) {
+              window.fetch = (input, init) => {
+                if (input instanceof Request) {
+                  const rewrittenUrl = rewriteUrl(input.url);
+                  if (typeof rewrittenUrl === 'string' && rewrittenUrl !== input.url) {
+                    const nextRequest = new Request(rewrittenUrl, input);
+                    return originalFetch(nextRequest, init);
+                  }
+                  return originalFetch(input, init);
+                }
+                const rewritten = rewriteUrl(input);
+                if (rewritten !== input) {
+                  return originalFetch(rewritten, init);
+                }
+                return originalFetch(input, init);
+              };
+            }
+          } catch {
+            // ignore fetch override failures
+          }
+          try {
+            const originalOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+              const rewritten = rewriteUrl(url);
+              return originalOpen.call(this, method, rewritten, ...rest);
+            };
+          } catch {
+            // ignore xhr override failures
+          }
           const selectors = ${JSON.stringify(selectors)};
           const remove = () => {
             selectors.forEach((sel) => {
@@ -516,9 +586,46 @@ const buildProxyPage = (
         })();
       </script>
     `;
+  const rewriteAssetUrl = (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) return url;
+    if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('mailto:') || trimmed.startsWith('javascript:') || trimmed.startsWith('#')) {
+      return url;
+    }
+    if (trimmed.startsWith(proxyPrefix)) return url;
+    if (upstreamOrigin && trimmed.startsWith(upstreamOrigin)) {
+      return `${proxyPrefix}${trimmed.slice(upstreamOrigin.length)}`;
+    }
+    if (upstreamHost && trimmed.startsWith(`//${upstreamHost}`)) {
+      return `${proxyPrefix}${trimmed.slice(2 + upstreamHost.length)}`;
+    }
+    if (trimmed.startsWith('/')) {
+      return `${proxyPrefix}${trimmed}`;
+    }
+    return url;
+  };
+  const rewriteSrcset = (value: string) => {
+    return value
+      .split(',')
+      .map((part) => {
+        const [urlPart, descriptor] = part.trim().split(/\s+/, 2);
+        if (!urlPart) return part;
+        const rewritten = rewriteAssetUrl(urlPart);
+        return descriptor ? `${rewritten} ${descriptor}` : rewritten;
+      })
+      .join(', ');
+  };
   let output = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '');
   output = output.replace(/<base[^>]*>/gi, '');
-  const injection = `<base href="${baseHref}"/><style>${hideCss}${debugStyle}</style>${injectScript}${debugScript}`;
+  output = output.replace(/\s(src|href)=["']([^"']+)["']/gi, (match, attr, value) => {
+    const rewritten = rewriteAssetUrl(value);
+    return ` ${attr}="${rewritten}"`;
+  });
+  output = output.replace(/\s(srcset)=["']([^"']+)["']/gi, (match, attr, value) => {
+    const rewritten = rewriteSrcset(value);
+    return ` ${attr}="${rewritten}"`;
+  });
+  const injection = `<base href="${proxyPrefix}/"/><style>${hideCss}${debugStyle}</style>${injectScript}${debugScript}`;
   if (/<head[^>]*>/i.test(output)) {
     output = output.replace(/<head[^>]*>/i, (match) => `${match}${injection}`);
   } else {
@@ -692,9 +799,20 @@ app.get('/api/remote', (req, res) => {
         ? req.query.scheme[0].replace(':', '')
         : null;
   const baseUrl = getRemoteBaseUrl(req, { port, scheme });
-  const remoteUrl = `${baseUrl}/remote`;
+  const wsBaseUrl = getRemoteBaseUrl(req, { port: PORT, scheme });
+  let wsUrl = '';
+  try {
+    const wsParsed = new URL(wsBaseUrl);
+    wsParsed.protocol = wsParsed.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl = `${wsParsed.origin}/ws`;
+  } catch {
+    wsUrl = '';
+  }
+  const remoteUrl = wsUrl
+    ? `${baseUrl}/remote?ws=${encodeURIComponent(wsUrl)}`
+    : `${baseUrl}/remote`;
   const qrUrl = `${QR_BASE}${encodeURIComponent(remoteUrl)}`;
-  res.json({ baseUrl, remoteUrl, qrUrl });
+  res.json({ baseUrl, remoteUrl, qrUrl, wsUrl });
 });
 
 function isPathAllowed(target: string): boolean {
@@ -1004,6 +1122,63 @@ app.get('/village', (_req, res) => {
 </html>`);
 });
 
+app.all('/embed/:id/proxy/*', async (req, res) => {
+  const embed = getEmbedConfig(req.params.id);
+  if (!embed?.url) {
+    res.status(404).send('embed_not_found');
+    return;
+  }
+  const base = new URL(embed.url);
+  const prefix = `/embed/${req.params.id}/proxy`;
+  const rawSuffix = req.originalUrl.startsWith(prefix)
+    ? req.originalUrl.slice(prefix.length)
+    : req.originalUrl.replace(`/embed/${req.params.id}/proxy`, "");
+  const suffix = rawSuffix || "/";
+  const targetUrl = new URL(suffix, base);
+  const method = req.method.toUpperCase();
+  const headers = new Headers();
+  Object.entries(req.headers).forEach(([key, value]) => {
+    if (!value) return;
+    if (key.toLowerCase() === "host") return;
+    if (Array.isArray(value)) {
+      headers.set(key, value.join(","));
+    } else {
+      headers.set(key, value);
+    }
+  });
+  headers.set("User-Agent", "Mozilla/5.0 (ChibaCable)");
+  let body: Buffer | undefined;
+  if (method !== "GET" && method !== "HEAD") {
+    body = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on("end", () => resolve(Buffer.concat(chunks)));
+      req.on("error", reject);
+    });
+  }
+
+  try {
+    const upstream = await fetch(targetUrl, {
+      method,
+      headers,
+      body,
+      redirect: "follow",
+    });
+    res.status(upstream.status);
+    upstream.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (lower === "content-encoding") return;
+      if (lower === "content-length") return;
+      if (lower === "transfer-encoding") return;
+      res.setHeader(key, value);
+    });
+    const data = Buffer.from(await upstream.arrayBuffer());
+    res.send(data);
+  } catch (err) {
+    res.status(502).send(`embed_proxy_failed: ${(err as Error).message}`);
+  }
+});
+
 app.get('/embed/:id', async (req, res) => {
   const embed = getEmbedConfig(req.params.id);
   if (!embed?.url) {
@@ -1024,7 +1199,7 @@ app.get('/embed/:id', async (req, res) => {
       }
       res.setHeader('Content-Type', 'text/html');
       res.send(
-        buildProxyPage(html, embed, {
+        buildProxyPage(html, embed, req.params.id, {
           enabled: embedDebug,
           status: upstream.status,
           url: embed.url,
@@ -1172,19 +1347,12 @@ app.get('/roadmap', (_req, res) => {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Chiba Cable | Roadmap Channel 140</title>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Azeret+Mono:wght@300;400;500&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
       :root {
         color-scheme: dark;
-        --bg: #07090f;
-        --panel: rgba(12, 16, 26, 0.92);
-        --panel-2: rgba(10, 14, 22, 0.86);
-        --accent: #f3b24a;
-        --accent-2: #77c4cf;
-        --accent-3: #b7d88a;
-        --accent-4: #e9a1a8;
-        --glow: 0.6;
-        --scan-opacity: 0.08;
-        --ticker-duration: 26s;
+        --bg: #040506;
+        --ink: #f9f4ea;
+        --ink-soft: rgba(249, 244, 234, 0.6);
       }
       * {
         box-sizing: border-box;
@@ -1195,331 +1363,54 @@ app.get('/roadmap', (_req, res) => {
         background: var(--bg);
       }
       body {
-        font-family: "Azeret Mono", "Segoe UI", sans-serif;
-        color: #f2efe8;
+        font-family: "Press Start 2P", monospace;
+        color: var(--ink);
         display: grid;
         place-items: center;
-        padding: 24px;
+        padding: 0;
       }
-      .app {
-        width: min(1440px, 96vw);
-        height: min(860px, 92vh);
-        position: relative;
+      .stage {
+        width: 100vw;
+        height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #000;
       }
-      .screen {
+      .frame {
         position: relative;
+        width: min(1200px, 96vw);
+        aspect-ratio: 1024 / 666;
+        background: #000;
+        overflow: hidden;
+      }
+      .frame img {
         width: 100%;
         height: 100%;
-        border-radius: 22px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: linear-gradient(180deg, #0d111c 0%, #070a12 100%);
-        box-shadow:
-          0 24px 60px rgba(0, 0, 0, 0.6),
-          0 0 calc(20px * var(--glow)) rgba(243, 178, 74, 0.2);
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        gap: 18px;
-        padding: 22px 24px 58px;
+        object-fit: contain;
+        image-rendering: pixelated;
       }
-      .screen::before {
-        content: "";
+      .frame.glitch {
+        animation: glitch 0.5s linear;
+      }
+      .overlay {
         position: absolute;
         inset: 0;
-        background: repeating-linear-gradient(
-          180deg,
-          rgba(255, 255, 255, 0.05) 0,
-          rgba(255, 255, 255, 0.05) 1px,
-          rgba(0, 0, 0, 0) 2px,
-          rgba(0, 0, 0, 0) 6px
-        );
-        opacity: var(--scan-opacity);
-        mix-blend-mode: screen;
+        display: grid;
+        place-items: center;
         pointer-events: none;
-        z-index: 1;
+        padding-bottom: 12%;
       }
-      .screen.glitch {
-        animation: glitch 0.6s linear;
-      }
-      .screen > * {
-        position: relative;
-        z-index: 2;
-      }
-      .topbar {
-        display: grid;
-        grid-template-columns: 1.4fr 0.6fr 1.2fr;
-        gap: 16px;
-        align-items: center;
-        text-transform: uppercase;
-      }
-      .brand-title {
-        font-family: "Rajdhani", "Azeret Mono", sans-serif;
-        font-size: clamp(1.4rem, 2.4vw, 2.1rem);
-        letter-spacing: 0.18em;
-        color: #f6e3c2;
-      }
-      .brand-sub {
-        font-size: 0.68rem;
-        letter-spacing: 0.34em;
-        color: rgba(240, 220, 190, 0.55);
-        margin-top: 6px;
-      }
-      .channel-badge {
-        justify-self: center;
-        padding: 10px 16px;
-        border-radius: 14px;
-        background: rgba(12, 16, 24, 0.8);
-        border: 1px solid rgba(243, 178, 74, 0.35);
+      .title {
+        --title-size: clamp(1.2rem, 2.4vw, 2.8rem);
+        font-size: var(--title-size);
+        letter-spacing: 0.12em;
+        line-height: 1.35;
         text-align: center;
-      }
-      .channel-number {
-        font-family: "Rajdhani", "Azeret Mono", sans-serif;
-        font-size: 1.7rem;
-        letter-spacing: 0.14em;
-        font-weight: 600;
-      }
-      .channel-call {
-        font-size: 0.65rem;
-        letter-spacing: 0.34em;
-        color: rgba(240, 220, 190, 0.6);
-      }
-      .status {
-        display: grid;
-        gap: 6px;
-        justify-items: end;
-        font-size: 0.7rem;
-        letter-spacing: 0.18em;
-        color: rgba(230, 235, 245, 0.68);
-      }
-      .status-row {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-      }
-      .pill {
-        padding: 4px 10px;
-        border-radius: 999px;
-        font-size: 0.6rem;
-        letter-spacing: 0.3em;
-        background: rgba(12, 18, 32, 0.8);
-        border: 1px solid rgba(255, 255, 255, 0.16);
-      }
-      .pill.live {
-        color: #1b1207;
-        background: var(--accent);
-        border: 0;
-      }
-      .hero {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 24px;
-        padding: 16px 18px;
-        border-radius: 16px;
-        background: rgba(11, 15, 24, 0.7);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-      }
-      .hero-title {
-        font-family: "Rajdhani", "Azeret Mono", sans-serif;
-        font-size: clamp(1.5rem, 2.2vw, 2.3rem);
-        letter-spacing: 0.22em;
+        white-space: pre-line;
         text-transform: uppercase;
-      }
-      .hero-sub {
-        font-size: 0.78rem;
-        letter-spacing: 0.2em;
-        color: rgba(210, 220, 235, 0.6);
-        max-width: 420px;
-        text-transform: uppercase;
-      }
-      .main {
-        flex: 1;
-        display: grid;
-        grid-template-columns: 2.2fr 1fr;
-        gap: 18px;
-        min-height: 0;
-      }
-      .schedule-panel {
-        background: var(--panel);
-        border-radius: 18px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 18px;
-        display: grid;
-        gap: 16px;
-        min-height: 0;
-      }
-      .schedule {
-        display: grid;
-        grid-template-columns: 140px repeat(3, minmax(0, 1fr));
-        gap: 12px;
-        font-size: 0.8rem;
-      }
-      .schedule-header {
-        display: contents;
-        text-transform: uppercase;
-        letter-spacing: 0.24em;
-        color: rgba(240, 220, 190, 0.45);
-      }
-      .schedule-header .slot {
-        padding-bottom: 8px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      }
-      .schedule-row {
-        display: contents;
-        --row-accent: var(--accent);
-      }
-      .schedule-row[data-category="dev"] { --row-accent: var(--accent-3); }
-      .schedule-row[data-category="curatorial"] { --row-accent: var(--accent-2); }
-      .schedule-row[data-category="physical"] { --row-accent: var(--accent-4); }
-      .slot-label {
-        font-size: 0.72rem;
-        letter-spacing: 0.28em;
-        text-transform: uppercase;
-        align-self: center;
-        color: rgba(230, 235, 245, 0.6);
-      }
-      .slot-card {
-        position: relative;
-        padding: 16px 16px 18px 18px;
-        border-radius: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-left: 2px solid var(--row-accent);
-        background: rgba(9, 12, 18, 0.85);
-        min-height: 96px;
-        display: grid;
-        gap: 6px;
-      }
-      .slot-tag {
-        font-size: 0.55rem;
-        letter-spacing: 0.26em;
-        text-transform: uppercase;
-        color: var(--row-accent);
-      }
-      .slot-title {
-        font-family: "Rajdhani", "Azeret Mono", sans-serif;
-        font-size: 1rem;
-        letter-spacing: 0.08em;
-        font-weight: 600;
-      }
-      .slot-detail {
-        font-size: 0.7rem;
-        color: rgba(220, 230, 245, 0.62);
-        line-height: 1.4;
-      }
-      .side-panel {
-        display: grid;
-        gap: 14px;
-        min-height: 0;
-      }
-      .panel-card {
-        background: var(--panel-2);
-        border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 16px;
-        display: grid;
-        gap: 10px;
-      }
-      .panel-title {
-        font-size: 0.65rem;
-        letter-spacing: 0.32em;
-        text-transform: uppercase;
-        color: rgba(240, 220, 190, 0.55);
-      }
-      .note {
-        font-size: 0.78rem;
-        line-height: 1.5;
-      }
-      .note small {
-        color: rgba(255, 255, 255, 0.55);
-      }
-      .signal {
-        display: flex;
-        align-items: flex-end;
-        gap: 6px;
-        height: 46px;
-      }
-      .signal span {
-        flex: 1;
-        border-radius: 6px;
-        background: linear-gradient(180deg, rgba(243, 178, 74, 0.7), rgba(243, 178, 74, 0.2));
-        opacity: 0.7;
-        animation: pulse 2.6s ease-in-out infinite;
-      }
-      .signal span:nth-child(2) { animation-delay: 0.2s; }
-      .signal span:nth-child(3) { animation-delay: 0.4s; }
-      .signal span:nth-child(4) { animation-delay: 0.6s; }
-      .signal span:nth-child(5) { animation-delay: 0.8s; }
-      .signal-label {
-        font-size: 0.62rem;
-        letter-spacing: 0.24em;
-        text-transform: uppercase;
-        color: rgba(230, 235, 245, 0.55);
-      }
-      .remote-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        font-size: 0.6rem;
-        letter-spacing: 0.22em;
-        text-transform: uppercase;
-        background: rgba(7, 10, 16, 0.8);
-        border: 1px solid rgba(255, 255, 255, 0.16);
-      }
-      .ticker {
-        position: absolute;
-        left: 22px;
-        right: 22px;
-        bottom: 18px;
-        height: 26px;
-        border-radius: 999px;
-        background: rgba(7, 10, 16, 0.7);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        overflow: hidden;
-        display: flex;
-        align-items: center;
-        padding: 0 12px;
-      }
-      .ticker-track {
-        display: flex;
-        gap: 36px;
-        white-space: nowrap;
-        animation: ticker var(--ticker-duration) linear infinite;
-        font-size: 0.65rem;
-        letter-spacing: 0.26em;
-        text-transform: uppercase;
-      }
-      .ticker-track span {
-        color: rgba(240, 220, 190, 0.64);
-      }
-      .app[data-focus="dev"] .schedule-row:not([data-category="dev"]),
-      .app[data-focus="curatorial"] .schedule-row:not([data-category="curatorial"]),
-      .app[data-focus="physical"] .schedule-row:not([data-category="physical"]) {
-        opacity: 0.4;
-        filter: grayscale(0.6);
-      }
-      .app[data-layout="stack"] .schedule {
-        grid-template-columns: 1fr;
-      }
-      .app[data-layout="stack"] .schedule-header {
-        display: none;
-      }
-      .app[data-layout="stack"] .slot-label {
-        grid-column: 1 / -1;
-        padding-top: 12px;
-        font-size: 0.85rem;
-      }
-      .app[data-layout="stack"] .slot-card {
-        grid-column: 1 / -1;
-      }
-      @keyframes ticker {
-        0% { transform: translateX(0); }
-        100% { transform: translateX(-50%); }
-      }
-      @keyframes pulse {
-        0%, 100% { transform: scaleY(0.5); opacity: 0.4; }
-        50% { transform: scaleY(1); opacity: 0.9; }
+        color: var(--ink);
+        text-shadow: 0 3px 0 rgba(0, 0, 0, 0.6);
+        max-width: 82%;
       }
       @keyframes glitch {
         0% { transform: translate(0, 0); filter: hue-rotate(0deg); }
@@ -1529,325 +1420,170 @@ app.get('/roadmap', (_req, res) => {
         80% { transform: translate(1px, -2px); filter: hue-rotate(-6deg); }
         100% { transform: translate(0, 0); filter: hue-rotate(0deg); }
       }
-      @media (max-width: 980px) {
-        body {
-          padding: 12px;
+      @media (max-width: 900px) {
+        .frame {
+          width: 100vw;
         }
-        .screen {
-          padding: 18px 16px 56px;
-        }
-        .main {
-          grid-template-columns: 1fr;
-        }
-        .topbar {
-          grid-template-columns: 1fr;
-          text-align: center;
-        }
-        .status {
-          justify-items: center;
+        .title {
+          max-width: 90%;
         }
       }
     </style>
   </head>
   <body>
-    <div id="app" class="app" data-focus="all" data-layout="grid">
-      <div class="screen" id="screen">
-        <header class="topbar">
-          <div>
-            <div class="brand-title">Chiba Cable</div>
-            <div class="brand-sub">Roadmap Channel</div>
-          </div>
-          <div class="channel-badge">
-            <div class="channel-number">140</div>
-            <div class="channel-call">RMAP</div>
-          </div>
-          <div class="status">
-            <div class="status-row">
-              <span class="pill live">On Air</span>
-              <span id="ws-status">Remote: connecting</span>
-            </div>
-            <div class="status-row">
-              <span id="focus-status">Focus: all</span>
-              <span id="clock">--:--</span>
-            </div>
-          </div>
-        </header>
-
-        <section class="hero">
-          <div class="hero-title">Roadmap Transmission</div>
-          <div class="hero-sub">Signal view of what is next for Chiba Cable.</div>
-        </section>
-
-        <div class="main">
-          <section class="schedule-panel">
-            <div class="schedule">
-              <div class="schedule-header">
-                <div class="slot-label">Track</div>
-                <div class="slot">Now</div>
-                <div class="slot">Next</div>
-                <div class="slot">Later</div>
-              </div>
-
-              <div class="schedule-row" data-category="dev">
-                <div class="slot-label">Dev</div>
-                <div class="slot-card">
-                  <div class="slot-tag">Now</div>
-                  <div class="slot-title">Channel Editor Agent</div>
-                  <div class="slot-detail">Let Chiba edit listings, swap channels, and tune the grid live.</div>
-                </div>
-                <div class="slot-card">
-                  <div class="slot-tag">Next</div>
-                  <div class="slot-title">Bumpers & Commercials</div>
-                  <div class="slot-detail">Modular bumpers, stingers, sponsor breaks, and interstitials.</div>
-                </div>
-                <div class="slot-card">
-                  <div class="slot-tag">Later</div>
-                  <div class="slot-title">Class AV Streams</div>
-                  <div class="slot-detail">Connect live AV feeds for classes and workshops.</div>
-                </div>
-              </div>
-
-              <div class="schedule-row" data-category="curatorial">
-                <div class="slot-label">Curatorial</div>
-                <div class="slot-card">
-                  <div class="slot-tag">Now</div>
-                  <div class="slot-title">More Channels</div>
-                  <div class="slot-detail">Expand the lineup with new editorial and experimental lanes.</div>
-                </div>
-                <div class="slot-card">
-                  <div class="slot-tag">Next</div>
-                  <div class="slot-title">Curate the NAS</div>
-                  <div class="slot-detail">Tag, label, and surface hidden archives in the media vault.</div>
-                </div>
-                <div class="slot-card">
-                  <div class="slot-tag">Later</div>
-                  <div class="slot-title">Creative Rotations</div>
-                  <div class="slot-detail">Seasonal mixes, themed takeovers, guest curators.</div>
-                </div>
-              </div>
-
-              <div class="schedule-row" data-category="physical">
-                <div class="slot-label">Physical</div>
-                <div class="slot-card">
-                  <div class="slot-tag">Now</div>
-                  <div class="slot-title">Satellite Screens</div>
-                  <div class="slot-detail">Install Chiba Cable screens in kitchens and camp clubhouses.</div>
-                </div>
-                <div class="slot-card">
-                  <div class="slot-tag">Next</div>
-                  <div class="slot-title">Call-In Shows</div>
-                  <div class="slot-detail">Phone system integration for live call-ins and request lines.</div>
-                </div>
-                <div class="slot-card">
-                  <div class="slot-tag">Later</div>
-                  <div class="slot-title">Biennale Room</div>
-                  <div class="slot-detail">Set up a dedicated Chiba Cable room for the Biennale.</div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <aside class="side-panel">
-            <div class="panel-card">
-              <div class="panel-title">Studio Notes</div>
-              <div class="note">Weekly channel scans, editing passes, and clear lineup gaps.</div>
-              <div class="note">Add new "roadmap" promos between blocks.</div>
-              <div class="note"><small>Priority: build momentum with bumpers + remote control moments.</small></div>
-            </div>
-            <div class="panel-card">
-              <div class="panel-title">Signal Meter</div>
-              <div class="signal">
-                <span style="height: 28px"></span>
-                <span style="height: 36px"></span>
-                <span style="height: 42px"></span>
-                <span style="height: 32px"></span>
-                <span style="height: 46px"></span>
-              </div>
-              <div class="signal-label">140 • Roadmap</div>
-            </div>
-            <div class="panel-card">
-              <div class="panel-title">Phone Controls</div>
-              <div class="note">
-                <span class="remote-chip">/remote?app=roadmap</span>
-              </div>
-              <div class="note"><small>Focus, layout, scanlines, glow, glitch.</small></div>
-            </div>
-          </aside>
-        </div>
-
-        <div class="ticker" id="ticker">
-          <div class="ticker-track">
-            <span>Chiba Cable Roadmap • Channel 140 • Remote controls live • More channels incoming • Call-in shows + AV streams • Curate the NAS • Biennale buildout •</span>
-            <span>Chiba Cable Roadmap • Channel 140 • Remote controls live • More channels incoming • Call-in shows + AV streams • Curate the NAS • Biennale buildout •</span>
-          </div>
+    <div class="stage">
+      <div class="frame" id="image-shell">
+        <img id="frame" src="/assets/roadmap/remote-idle-1.jpg" alt="Roadmap teletext" />
+        <div class="overlay">
+          <div class="title" id="slide-title"></div>
         </div>
       </div>
     </div>
 
     <script>
-      const app = document.getElementById("app");
-      const screen = document.getElementById("screen");
-      const clock = document.getElementById("clock");
-      const focusStatus = document.getElementById("focus-status");
-      const wsStatus = document.getElementById("ws-status");
-      const ticker = document.getElementById("ticker");
-      const root = document.documentElement;
+      const frame = document.getElementById("frame");
+      const slideTitle = document.getElementById("slide-title");
+      const imageShell = document.getElementById("image-shell");
 
-      const controlSchema = [
-        {
-          id: "focus",
-          label: "Focus",
-          type: "select",
-          value: "all",
-          options: [
-            { value: "all", label: "All" },
-            { value: "dev", label: "Dev" },
-            { value: "curatorial", label: "Curatorial" },
-            { value: "physical", label: "Physical" },
-            { value: "cycle", label: "Cycle" },
-          ],
-        },
-        {
-          id: "layout",
-          label: "Layout",
-          type: "select",
-          value: "grid",
-          options: [
-            { value: "grid", label: "Grid" },
-            { value: "stack", label: "Stack" },
-          ],
-        },
-        {
-          id: "tempo",
-          label: "Tempo",
-          type: "range",
-          min: 1,
-          max: 10,
-          step: 1,
-          value: 6,
-        },
-        {
-          id: "scan",
-          label: "Scanlines",
-          type: "range",
-          min: 0,
-          max: 1,
-          step: 0.05,
-          value: 0.35,
-        },
-        {
-          id: "glow",
-          label: "Glow",
-          type: "range",
-          min: 0.6,
-          max: 1.6,
-          step: 0.05,
-          value: 1,
-        },
-        {
-          id: "ticker",
-          label: "Ticker",
-          type: "toggle",
-          value: true,
-        },
-        {
-          id: "glitch",
-          label: "Glitch",
-          type: "button",
-        },
-      ];
-
-      const state = {
-        focus: "all",
-        layout: "grid",
-        tempo: 6,
-        scan: 0.35,
-        glow: 1,
-        ticker: true,
+      const frames = {
+        idle: [
+          "/assets/roadmap/remote-idle-1.jpg",
+          "/assets/roadmap/remote-idle-2.jpg",
+        ],
+        anim: "/assets/roadmap/remote-anim-1.jpg",
       };
 
-      const cycleOrder = ["dev", "curatorial", "physical"];
-      let cycleTimer = null;
+      const slides = [
+        "ROADMAP",
+        "LET CHIBA CONTROL THE TV",
+        "BUMPERS / COMMERCIALS MODULE",
+        "AV STREAMS OF CLASSES",
+        "MORE CHANNELS! (I NEED HELP)",
+        "CURATE THE NAS",
+        "CHIBA CABLE SCREENS AROUND CAMP",
+        "CALL-IN SHOWS WITH PHONES",
+        "CALL THE TV STATION TO ADD FEATURES TO THE APP",
+        "CHIBA CABLE AT BIENNALE",
+      ];
 
-      function updateClock() {
-        const now = new Date();
-        const hours = String(now.getHours()).padStart(2, "0");
-        const minutes = String(now.getMinutes()).padStart(2, "0");
-        clock.textContent = hours + ":" + minutes;
+      const idleIntervalMs = 500;
+      const transitionMs = 840;
+      const typeIntervalMs = 38;
+
+      let idleTimer = null;
+      let transitionTimer = null;
+      let typeTimer = null;
+      let idleIndex = 0;
+      let slideIndex = 0;
+      let isTransitioning = false;
+
+      function wrapText(text, maxLen) {
+        const words = text.split(" ");
+        const lines = [];
+        let line = "";
+        words.forEach((word) => {
+          const next = line ? line + " " + word : word;
+          if (next.length > maxLen && line) {
+            lines.push(line);
+            line = word;
+          } else {
+            line = next;
+          }
+        });
+        if (line) lines.push(line);
+        return lines;
       }
 
-      function formatFocus(value) {
-        if (!value) return "All";
-        if (value === "all") return "All";
-        return value.charAt(0).toUpperCase() + value.slice(1);
+      function computeTitleSize(lines) {
+        const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
+        let size = 2.6;
+        if (longest <= 10) size = 3.0;
+        else if (longest <= 16) size = 2.5;
+        else if (longest <= 22) size = 2.0;
+        else if (longest <= 28) size = 1.6;
+        else size = 1.3;
+        if (lines.length >= 3) size *= 0.9;
+        return size.toFixed(2) + "rem";
       }
 
-      function setTickerSpeed() {
-        const duration = Math.max(10, 34 - state.tempo * 2.2);
-        root.style.setProperty("--ticker-duration", duration.toFixed(1) + "s");
-      }
-
-      function stopCycle() {
-        if (cycleTimer) {
-          clearInterval(cycleTimer);
-          cycleTimer = null;
+      function stopTyping() {
+        if (typeTimer) {
+          clearInterval(typeTimer);
+          typeTimer = null;
         }
       }
 
-      function startCycle() {
-        stopCycle();
+      function renderTitle(text) {
+        stopTyping();
+        const lines = wrapText(text, 22);
+        const fullText = lines.join("\\n");
+        slideTitle.style.setProperty("--title-size", computeTitleSize(lines));
+        slideTitle.textContent = "";
         let index = 0;
-        const interval = Math.max(1800, 8000 - state.tempo * 500);
-        const tick = () => {
-          const next = cycleOrder[index % cycleOrder.length];
-          app.dataset.focus = next;
-          focusStatus.textContent = "Focus: " + formatFocus(next) + " (cycle)";
+        typeTimer = setInterval(() => {
           index += 1;
-        };
-        tick();
-        cycleTimer = setInterval(tick, interval);
+          slideTitle.textContent = fullText.slice(0, index);
+          if (index >= fullText.length) {
+            stopTyping();
+          }
+        }, typeIntervalMs);
       }
 
-      function applyFocus() {
-        if (state.focus === "cycle") {
-          startCycle();
-          return;
+      function clampIndex(index) {
+        const count = slides.length;
+        return ((index % count) + count) % count;
+      }
+
+      function updateSlide(index) {
+        slideIndex = clampIndex(index);
+        renderTitle(slides[slideIndex]);
+      }
+
+      function stopIdle() {
+        if (idleTimer) {
+          clearInterval(idleTimer);
+          idleTimer = null;
         }
-        stopCycle();
-        app.dataset.focus = state.focus;
-        focusStatus.textContent = "Focus: " + formatFocus(state.focus);
       }
 
-      function applyState() {
-        app.dataset.layout = state.layout;
-        root.style.setProperty("--scan-opacity", state.scan.toFixed(2));
-        root.style.setProperty("--glow", state.glow.toFixed(2));
-        ticker.style.display = state.ticker ? "flex" : "none";
-        setTickerSpeed();
-        applyFocus();
+      function startIdle() {
+        stopIdle();
+        idleIndex = 0;
+        frame.src = frames.idle[idleIndex];
+        idleTimer = setInterval(() => {
+          idleIndex = (idleIndex + 1) % frames.idle.length;
+          frame.src = frames.idle[idleIndex];
+        }, idleIntervalMs);
+      }
+
+      function playTransition(nextIndex) {
+        if (isTransitioning) return;
+        isTransitioning = true;
+        stopTyping();
+        stopIdle();
+        frame.src = frames.anim;
+        updateSlide(nextIndex);
+        if (transitionTimer) clearTimeout(transitionTimer);
+        transitionTimer = setTimeout(() => {
+          frame.src = frames.idle[0];
+          startIdle();
+          isTransitioning = false;
+        }, transitionMs);
+      }
+
+      function nextSlide() {
+        playTransition(slideIndex + 1);
+      }
+
+      function prevSlide() {
+        playTransition(slideIndex - 1);
       }
 
       function triggerGlitch() {
-        screen.classList.remove("glitch");
-        void screen.offsetWidth;
-        screen.classList.add("glitch");
-      }
-
-      function coerceValue(control, value) {
-        if (control.type === "range") return Number(value);
-        if (control.type === "toggle") return Boolean(value);
-        return value;
-      }
-
-      function applyControl(controlId, value) {
-        if (controlId === "glitch") {
-          triggerGlitch();
-          return;
-        }
-        if (controlId in state) {
-          state[controlId] = value;
-          applyState();
-        }
+        imageShell.classList.remove("glitch");
+        void imageShell.offsetWidth;
+        imageShell.classList.add("glitch");
+        setTimeout(() => imageShell.classList.remove("glitch"), 500);
       }
 
       function bootRemote() {
@@ -1858,8 +1594,13 @@ app.get('/roadmap', (_req, res) => {
         const wsUrl = wsParam || protocol + "://" + window.location.host + "/ws";
         const socket = new WebSocket(wsUrl);
 
+        const controlSchema = [
+          { id: "next", label: "Next", type: "button" },
+          { id: "prev", label: "Prev", type: "button" },
+          { id: "glitch", label: "Glitch", type: "button" },
+        ];
+
         socket.addEventListener("open", () => {
-          wsStatus.textContent = "Remote: linked";
           socket.send(
             JSON.stringify({
               type: "controls",
@@ -1869,36 +1610,31 @@ app.get('/roadmap', (_req, res) => {
           );
         });
 
-        socket.addEventListener("close", () => {
-          wsStatus.textContent = "Remote: offline";
-        });
-
-        socket.addEventListener("error", () => {
-          wsStatus.textContent = "Remote: error";
-        });
-
         socket.addEventListener("message", (event) => {
           try {
             const msg = JSON.parse(event.data);
             if (msg.type !== "control" || msg.appId !== appId) return;
-            const control = controlSchema.find((item) => item.id === msg.controlId);
-            if (!control) return;
-            applyControl(control.id, coerceValue(control, msg.value));
+            if (msg.controlId === "next") nextSlide();
+            if (msg.controlId === "prev") prevSlide();
+            if (msg.controlId === "glitch") triggerGlitch();
           } catch (err) {
             console.warn("remote message failed", err);
           }
         });
       }
 
-      updateClock();
-      setInterval(updateClock, 1000 * 30);
-      applyState();
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowRight") nextSlide();
+        if (event.key === "ArrowLeft") prevSlide();
+      });
+
+      updateSlide(0);
+      startIdle();
       bootRemote();
     </script>
   </body>
 </html>`);
 });
-
 app.get('/weatherstar.jpg', (_req, res) => {
   const frame = weatherstarCapture.getFrame();
   if (!frame) {
@@ -1979,6 +1715,12 @@ app.get('/weatherstar', (_req, res) => {
 </html>`);
 });
 
+app.use(
+  '/assets',
+  express.static(path.resolve(__dirname, '../../guide/public/assets'), {
+    index: false,
+  })
+);
 app.use(express.static(distDir, { index: false }));
 
 function getBaseUrl(req: express.Request): string {
@@ -2089,8 +1831,9 @@ const heartbeatTimer = setInterval(() => {
 }, WS_HEARTBEAT_MS);
 
 wss.on('connection', (socket, req) => {
+  const remoteAddr = req.socket.remoteAddress ?? 'unknown';
   wsAlive.set(socket, true);
-  console.log('[ws] client connected', req.socket.remoteAddress ?? 'unknown');
+  console.log('[ws] client connected', remoteAddr);
   socket.on('pong', () => {
     wsAlive.set(socket, true);
   });
@@ -2104,7 +1847,20 @@ wss.on('connection', (socket, req) => {
   socket.on('message', (data) => {
     const message = data.toString();
     try {
-      const parsed = JSON.parse(message) as { type?: string; appId?: string; controls?: RemoteControl[] };
+      const parsed = JSON.parse(message) as {
+        type?: string;
+        role?: string;
+        origin?: string;
+        path?: string;
+        appId?: string;
+        controls?: RemoteControl[];
+      };
+      if (parsed?.type === 'hello' && parsed.role) {
+        console.log('[ws] hello', remoteAddr, parsed.role, parsed.origin ?? '', parsed.path ?? '');
+      }
+      if (parsed?.type === 'mouse' || parsed?.type === 'keyboard') {
+        console.log('[ws] input', remoteAddr, parsed.type);
+      }
       if (parsed?.type === 'controls' && parsed.appId && Array.isArray(parsed.controls)) {
         controlSchemas.set(parsed.appId, {
           appId: parsed.appId,
@@ -2114,6 +1870,7 @@ wss.on('connection', (socket, req) => {
       }
     } catch {
       // ignore parse errors
+      console.warn('[ws] message parse failed', message);
     }
     wss.clients.forEach((client) => {
       if (client.readyState === client.OPEN) {

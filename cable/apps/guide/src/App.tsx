@@ -1113,14 +1113,34 @@ function App() {
     }
   }, [micEnabled, startRemoteMic, stopRemoteMic]);
 
-  const commitRemoteCursor = useCallback((next: RemoteCursorState) => {
-    remoteCursorRef.current = next;
-    if (remoteCursorRafRef.current !== null) return;
-    remoteCursorRafRef.current = window.requestAnimationFrame(() => {
-      remoteCursorRafRef.current = null;
-      setRemoteCursor(remoteCursorRef.current);
-    });
-  }, []);
+  const commitRemoteCursor = useCallback(
+    (next: RemoteCursorState) => {
+      remoteCursorRef.current = next;
+      const surface = playerSurfaceRef.current;
+      if (surface) {
+        surface.style.setProperty(
+          "--remote-cursor-x",
+          `${next.x * 100}%`
+        );
+        surface.style.setProperty(
+          "--remote-cursor-y",
+          `${next.y * 100}%`
+        );
+        surface.style.setProperty(
+          "--remote-cursor-opacity",
+          next.visible ? "1" : "0"
+        );
+      }
+      if (remoteCursorRafRef.current !== null) return;
+      remoteCursorRafRef.current = window.requestAnimationFrame(() => {
+        remoteCursorRafRef.current = null;
+        const current = remoteCursorRef.current;
+        setRemoteCursor(current);
+        setGuideViewState({ remoteCursor: current });
+      });
+    },
+    [setGuideViewState]
+  );
 
   const scheduleRemoteCursorHide = useCallback(() => {
     if (remoteCursorHideRef.current !== null) {
@@ -1394,27 +1414,50 @@ function App() {
   const handleRemoteMouse = useCallback(
     (msg: RemoteMessage) => {
       if (msg.type !== "mouse") return;
-      if (viewMode !== "guide" || !playerOpen || !hasKeyboardMouse) return;
+      if (viewMode !== "guide") return;
+      if (msg.action === "move") {
+        log.debug("remote-mouse", {
+          action: msg.action,
+          dx: msg.dx,
+          dy: msg.dy,
+          playerOpen,
+          hasKeyboardMouse,
+        });
+      } else {
+        log.debug("remote-mouse", {
+          action: msg.action,
+          playerOpen,
+          hasKeyboardMouse,
+        });
+      }
       if (msg.action === "move") {
         moveRemoteCursor(msg.dx, msg.dy);
       }
       if (msg.action === "click") {
+        if (!playerOpen || !hasKeyboardMouse) return;
         clickRemotePointer();
       }
     },
     [
       clickRemotePointer,
-      hasKeyboardMouse,
       moveRemoteCursor,
-      playerOpen,
       viewMode,
+      playerOpen,
+      hasKeyboardMouse,
     ]
   );
 
   const handleRemoteKeyboard = useCallback(
     (msg: RemoteMessage) => {
       if (msg.type !== "keyboard") return;
-      if (viewMode !== "guide" || !playerOpen || !hasKeyboardMouse) return;
+      if (viewMode !== "guide") return;
+      log.debug("remote-keyboard", {
+        action: msg.action,
+        key: msg.key,
+        playerOpen,
+        hasKeyboardMouse,
+      });
+      if (!playerOpen || !hasKeyboardMouse) return;
       const targetInfo = getKeyboardTarget();
       if (!targetInfo?.target || !targetInfo.doc) return;
       if (msg.action === "text") {
@@ -1440,11 +1483,12 @@ function App() {
     ]
   );
 
-  const { send, status } = useRemoteSocket((msg) => {
-    if (msg.type === "mic") {
-      if (msg.from === "remote" && viewMode !== "remote") {
-        void handleGuideMicMessage(msg);
-      }
+  const { send, status } = useRemoteSocket(
+    (msg) => {
+      if (msg.type === "mic") {
+        if (msg.from === "remote" && viewMode !== "remote") {
+          void handleGuideMicMessage(msg);
+        }
       if (msg.from === "guide" && viewMode === "remote") {
         void handleRemoteMicMessage(msg);
       }
@@ -1584,7 +1628,9 @@ function App() {
         handleSelect();
       }
     }
-  });
+  },
+    { role: viewMode === "remote" ? "remote" : "guide" }
+  );
 
   const appControlsAppId = hasAppControls ? effectiveRemoteAppId : "";
   const { remoteControls, remoteControlsStatus, handleRemoteControl } =
@@ -2270,6 +2316,7 @@ function App() {
     baseUrl: string;
     remoteUrl: string;
     qrUrl: string;
+    wsUrl?: string;
   } | null>(null);
   useEffect(() => {
     let alive = true;
@@ -2280,17 +2327,53 @@ function App() {
         ? "443"
         : "80";
     const scheme = window.location.protocol.replace(":", "");
-    fetch(`/api/remote?guide_port=${guidePort}&scheme=${scheme}`)
+    const applyRemote = (data: {
+      baseUrl?: string;
+      remoteUrl?: string;
+      qrUrl?: string;
+      wsUrl?: string;
+    } | null) => {
+      if (!alive || !data?.baseUrl || !data?.qrUrl) return;
+      if (data.wsUrl) {
+        try {
+          window.localStorage.setItem("chiba:ws", data.wsUrl);
+        } catch {
+          // ignore storage errors
+        }
+      }
+      setRemoteOverride({
+        baseUrl: data.baseUrl as string,
+        remoteUrl: data.remoteUrl as string,
+        qrUrl: data.qrUrl as string,
+        wsUrl: data.wsUrl as string | undefined,
+      });
+    };
+    const query = `guide_port=${guidePort}&scheme=${scheme}`;
+    const primaryUrl = `/api/remote?${query}`;
+    const fallbackOrigin = `${window.location.protocol}//${window.location.hostname}:8787`;
+    const fallbackUrl = `${fallbackOrigin}/api/remote?${query}`;
+    fetch(primaryUrl)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!alive || !data?.baseUrl || !data?.qrUrl) return;
-        setRemoteOverride({
-          baseUrl: data.baseUrl as string,
-          remoteUrl: data.remoteUrl as string,
-          qrUrl: data.qrUrl as string,
-        });
+        if (data?.baseUrl && data?.qrUrl) {
+          applyRemote(data);
+          return;
+        }
+        return fetch(fallbackUrl)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((fallbackData) => {
+            applyRemote(fallbackData);
+          })
+          .catch(() => {});
       })
-      .catch(() => {});
+      .catch(() => {
+        fetch(fallbackUrl)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            applyRemote(data);
+          })
+          .catch(() => {});
+      });
     return () => {
       alive = false;
     };
@@ -2451,7 +2534,7 @@ function App() {
       playerOpen,
       playerReady,
       playerSurfaceRef,
-      remoteCursor,
+      hasKeyboardMouse,
       hasPreviewMedia,
       posterImageReady,
       previewContainerRef,
@@ -2490,7 +2573,6 @@ function App() {
     playerOpen,
     playerReady,
     playerSurfaceRef,
-    remoteCursor,
     hasPreviewMedia,
     posterImageReady,
     previewContainerRef,

@@ -29,6 +29,7 @@ type PlayerOverlayProps = {
   setPlayerReady: (ready: boolean) => void;
   surfaceRef?: RefObject<HTMLDivElement | null>;
   remoteCursor?: { x: number; y: number; visible: boolean; pressed: boolean };
+  forceCursor?: boolean;
 };
 
 export function PlayerOverlay({
@@ -46,6 +47,7 @@ export function PlayerOverlay({
   setPlayerReady,
   surfaceRef,
   remoteCursor,
+  forceCursor = false,
 }: PlayerOverlayProps) {
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -143,8 +145,12 @@ export function PlayerOverlay({
     const audio = ambientAudioRef.current;
     if (!audio || ambientOffsetSec === null) return;
     const target = Math.max(0, ambientOffsetSec);
+    const shouldSeek = () => {
+      if (!Number.isFinite(audio.currentTime)) return true;
+      return Math.abs(audio.currentTime - target) > 0.05;
+    };
     const seek = () => {
-      if (didSeekRef.current) return;
+      if (didSeekRef.current && !shouldSeek()) return;
       try {
         const duration = Number.isFinite(audio.duration)
           ? audio.duration
@@ -160,20 +166,30 @@ export function PlayerOverlay({
       seek();
     }
     audio.addEventListener("loadedmetadata", seek);
+    audio.addEventListener("canplay", seek);
+    audio.addEventListener("play", seek);
     return () => {
       audio.removeEventListener("loadedmetadata", seek);
+      audio.removeEventListener("canplay", seek);
+      audio.removeEventListener("play", seek);
     };
   }, [ambientOffsetSec, ambientAudio?.url]);
 
   if (!playerUrl) return null;
 
-  const cursorStyle: CSSProperties | undefined =
-    remoteCursor?.visible
-      ? {
-          left: `${remoteCursor.x * 100}%`,
-          top: `${remoteCursor.y * 100}%`,
-        }
-      : undefined;
+  const cursorState = remoteCursor ?? {
+    x: 0.5,
+    y: 0.5,
+    visible: forceCursor,
+    pressed: false,
+  };
+  const showCursor = playerOpen;
+  const cursorStyle: CSSProperties | undefined = showCursor
+    ? {
+        left: "var(--remote-cursor-x, 50%)",
+        top: "var(--remote-cursor-y, 50%)",
+      }
+    : undefined;
 
   return (
     <div
@@ -264,9 +280,9 @@ export function PlayerOverlay({
             <div className="player-hint">Press Guide or Esc to return</div>
           </div>
         ) : null}
-        {playerOpen && remoteCursor?.visible ? (
+        {showCursor ? (
           <div
-            className={`remote-cursor ${remoteCursor.pressed ? "is-pressed" : ""}`}
+            className={`remote-cursor ${cursorState.pressed ? "is-pressed" : ""}`}
             style={cursorStyle}
           />
         ) : null}

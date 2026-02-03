@@ -9,7 +9,10 @@ import {
 import { DebugPanel } from "../components/DebugPanel";
 import { DialOverlay } from "../components/DialOverlay";
 import { DisplayTuningPanel } from "../components/DisplayTuningPanel";
+import { createLogger } from "../lib/logger";
 import { useRemoteViewStore } from "../store/useRemoteViewStore";
+
+const log = createLogger("remote-view");
 
 export function RemoteView() {
   const {
@@ -31,12 +34,14 @@ export function RemoteView() {
     showInputPanel,
     hasAppControls,
     hasKeyboardMouse,
-    hasSpecialControls,
+    hasMicControls,
     remoteControlsStatus,
     remoteControls,
     handleRemoteControl,
     setRemotePanel,
     pushDialDigit,
+    onMicToggle,
+    micToggleDisabled,
     showDebug,
     memoryStats,
     mediaStats,
@@ -48,6 +53,8 @@ export function RemoteView() {
   const keyboardInputRef = useRef<HTMLInputElement | null>(null);
   const [keyboardValue, setKeyboardValue] = useState("");
   const keyboardValueRef = useRef("");
+  const isCompactMode = showAppPanel || showInputPanel;
+  const hasAnySpecial = hasAppControls || hasKeyboardMouse || hasMicControls;
 
   const startPad = useCallback((clientX: number, clientY: number) => {
     padLastRef.current = { x: clientX, y: clientY };
@@ -64,6 +71,7 @@ export function RemoteView() {
       padLastRef.current = { x: clientX, y: clientY };
       if (dx === 0 && dy === 0) return;
       send({ type: "mouse", action: "move", dx, dy });
+      log.debug("trackpad-move", { dx, dy });
     },
     [send]
   );
@@ -78,6 +86,7 @@ export function RemoteView() {
       const dist = Math.hypot(clientX - tap.x, clientY - tap.y);
       if (dt < 250 && dist < 8) {
         send({ type: "mouse", action: "click" });
+        log.debug("trackpad-click");
       }
     },
     [send]
@@ -92,6 +101,7 @@ export function RemoteView() {
         // ignore if pointer capture unsupported
       }
       startPad(event.clientX, event.clientY);
+      log.debug("trackpad-pointer", { phase: "down" });
     },
     [startPad]
   );
@@ -113,6 +123,7 @@ export function RemoteView() {
         // ignore if pointer capture unsupported
       }
       endPad(event.clientX, event.clientY);
+      log.debug("trackpad-pointer", { phase: "up" });
     },
     [endPad]
   );
@@ -129,6 +140,7 @@ export function RemoteView() {
       if (!touch) return;
       event.preventDefault();
       startPad(touch.clientX, touch.clientY);
+      log.debug("trackpad-touch", { phase: "start" });
     },
     [startPad]
   );
@@ -151,6 +163,7 @@ export function RemoteView() {
       if (!touch) return;
       event.preventDefault();
       endPad(touch.clientX, touch.clientY);
+      log.debug("trackpad-touch", { phase: "end" });
     },
     [endPad]
   );
@@ -210,7 +223,7 @@ export function RemoteView() {
 
   return (
     <div
-      className={`remote-shell ${hasSpecialControls ? "app-active" : ""} ${
+      className={`remote-shell ${isCompactMode ? "app-active" : ""} ${
         showGodPanel ? "godmode-active" : ""
       }`}
     >
@@ -499,13 +512,17 @@ export function RemoteView() {
                 className="up"
                 onClick={() => send({ type: "nav", dir: "up" })}
               >
-                UP
+                <svg viewBox="0 0 48 48" aria-hidden="true">
+                  <path d="M24 6l14 16h-8v20H18V22h-8L24 6z" />
+                </svg>
               </button>
               <button
                 className="left"
                 onClick={() => send({ type: "nav", dir: "left" })}
               >
-                LEFT
+                <svg viewBox="0 0 48 48" aria-hidden="true">
+                  <path d="M6 24l16-14v8h20v12H22v8L6 24z" />
+                </svg>
               </button>
               <button className="ok" onClick={() => send({ type: "select" })}>
                 OK
@@ -514,13 +531,17 @@ export function RemoteView() {
                 className="right"
                 onClick={() => send({ type: "nav", dir: "right" })}
               >
-                RIGHT
+                <svg viewBox="0 0 48 48" aria-hidden="true">
+                  <path d="M42 24L26 38v-8H6V18h20v-8l16 14z" />
+                </svg>
               </button>
               <button
                 className="down"
                 onClick={() => send({ type: "nav", dir: "down" })}
               >
-                DOWN
+                <svg viewBox="0 0 48 48" aria-hidden="true">
+                  <path d="M24 42L10 26h8V6h12v20h8L24 42z" />
+                </svg>
               </button>
             </div>
 
@@ -530,28 +551,35 @@ export function RemoteView() {
               <button onClick={() => send({ type: "mute" })}>Mute</button>
             </div>
 
-            {hasSpecialControls ? (
-              <div className="remote-specials">
-                <div className="remote-special-actions">
-                  {hasKeyboardMouse ? (
-                    <button
-                      className="remote-special-button"
-                      onClick={() => setRemotePanel("input")}
-                    >
-                      Keyboard/Mouse
-                    </button>
-                  ) : null}
-                  {hasAppControls ? (
-                    <button
-                      className="remote-special-button"
-                      onClick={() => setRemotePanel("app")}
-                    >
-                      App Controls
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
+            <div className="remote-feature-row">
+              <button
+                className={`remote-feature-button ${
+                  hasAppControls ? "is-available" : ""
+                }`}
+                onClick={() => setRemotePanel("app")}
+                disabled={!hasAppControls}
+              >
+                App Controls
+              </button>
+              <button
+                className={`remote-feature-button ${
+                  hasKeyboardMouse ? "is-available" : ""
+                }`}
+                onClick={() => setRemotePanel("input")}
+                disabled={!hasKeyboardMouse}
+              >
+                Mouse
+              </button>
+              <button
+                className={`remote-feature-button ${
+                  hasMicControls ? "is-available" : ""
+                }`}
+                onClick={onMicToggle}
+                disabled={!hasMicControls || micToggleDisabled}
+              >
+                Mic
+              </button>
+            </div>
 
             <div className="remote-numpad">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (

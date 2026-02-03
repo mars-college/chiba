@@ -19,6 +19,7 @@ type GuideViewData = {
   playerReady: boolean;
   playerSurfaceRef: RefObject<HTMLDivElement | null>;
   remoteCursor?: { x: number; y: number; visible: boolean; pressed: boolean };
+  hasKeyboardMouse: boolean;
   hasPreviewMedia: boolean;
   posterImageReady: boolean;
   previewContainerRef: RefObject<HTMLDivElement | null>;
@@ -85,6 +86,7 @@ export const useGuideViewStore = create<GuideViewStore>((set) => ({
   playerReady: false,
   playerSurfaceRef: nullRef,
   remoteCursor: undefined,
+  hasKeyboardMouse: false,
   hasPreviewMedia: false,
   posterImageReady: false,
   previewContainerRef: nullRef,

@@ -10,18 +10,9 @@ title = "Multi Phase Field"
 subtitle = "Interactive"
 tag = "ART"
 duration_slots = 1
-source = { type = "url", value = "https://multi-phase-field--jensenabler.replit.app/" }
+remote_controls = ["keyboard_mouse"]
+source = { type = "url", value = "/embed/jensen-art" }
 
-[[program]]
-title = "Spiral Evolve"
-subtitle = "Interactive"
-tag = "ART"
-duration_slots = 1
-source = { type = "url", value = "https://spiral-evolve--jensenabler.replit.app/" }
-
-[[program]]
-title = "Squiggle Evolve"
-subtitle = "Interactive"
-tag = "ART"
-duration_slots = 1
-source = { type = "url", value = "https://squiggle-evolve--jensenabler.replit.app/" }
+[embed]
+mode = "proxy"
+url = "https://multi-phase-field--jensenabler.replit.app/"

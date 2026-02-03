@@ -10,18 +10,23 @@ title = "AI Village"
 tag = "LIVE"
 duration_slots = 2
 remote_controls = ["keyboard_mouse"]
-source = { type = "url", value = "https://theaidigest.org/village" }
+source = { type = "url", value = "/embed/ai-village" }
 
 [[program]]
 title = "AI Village"
 tag = "LIVE"
 duration_slots = 2
 remote_controls = ["keyboard_mouse"]
-source = { type = "url", value = "https://theaidigest.org/village" }
+source = { type = "url", value = "/embed/ai-village" }
 
 [[program]]
 title = "AI Village"
 tag = "LIVE"
 duration_slots = 2
 remote_controls = ["keyboard_mouse"]
-source = { type = "url", value = "https://theaidigest.org/village" }
+source = { type = "url", value = "/embed/ai-village" }
+
+[embed]
+mode = "proxy"
+url = "https://theaidigest.org/village"
+dismiss_selectors = ["[role=\"dialog\"]", ".modal", ".popup"]

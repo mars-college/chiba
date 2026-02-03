@@ -612,25 +612,33 @@
   height: 100%;
   background: #05060c;
   overflow: hidden;
+  --remote-cursor-x: 50%;
+  --remote-cursor-y: 50%;
+  --remote-cursor-opacity: 0;
 }
 
 .remote-cursor {
   position: absolute;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: 2px solid rgba(230, 244, 255, 0.95);
-  background: rgba(126, 215, 255, 0.25);
-  box-shadow: 0 0 12px rgba(126, 215, 255, 0.55);
+  background: rgba(126, 215, 255, 0.35);
+  box-shadow:
+    0 0 16px rgba(126, 215, 255, 0.65),
+    0 0 30px rgba(126, 215, 255, 0.35);
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 6;
+  opacity: var(--remote-cursor-opacity, 0);
+  transition: opacity 280ms ease;
 }
 
 .remote-cursor.is-pressed {
   transform: translate(-50%, -50%) scale(0.85);
   background: rgba(126, 215, 255, 0.5);
 }
+
 
 .player-frame {
   width: 100%;
@@ -1016,7 +1024,6 @@
   --remote-body-gap: clamp(12px, 2.6vh, 18px);
   --remote-font-s: clamp(0.62rem, 1.7vh, 0.85rem);
   --remote-font-xs: clamp(0.55rem, 1.5vh, 0.7rem);
-  min-height: 100%;
   height: 100vh;
   height: 100dvh;
   max-height: 100dvh;
@@ -1038,6 +1045,7 @@
   flex: 1;
   height: 100%;
   max-height: 100%;
+  align-self: stretch;
 }
 
 .remote-shell.godmode-active .remote-god-panel {
@@ -1051,6 +1059,8 @@
 
 .remote-body {
   width: min(360px, 92vw);
+  height: min(720px, calc(100dvh - (var(--remote-pad) * 2)));
+  max-height: min(720px, calc(100dvh - (var(--remote-pad) * 2)));
   border-radius: var(--remote-radius);
   padding: clamp(16px, 3vh, 22px) clamp(14px, 3vw, 18px) clamp(18px, 3.5vh, 24px);
   background: linear-gradient(160deg, rgba(18, 30, 54, 0.98), rgba(8, 12, 22, 0.98));
@@ -1060,6 +1070,8 @@
   flex-direction: column;
   gap: var(--remote-body-gap);
   align-items: center;
+  flex: 0 0 auto;
+  align-self: center;
   max-height: 100%;
   min-height: 0;
   overflow-x: hidden;
@@ -1088,10 +1100,12 @@
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid rgba(126, 215, 255, 0.4);
-  font-size: var(--remote-font-xs);
+  font-size: clamp(0.55rem, 1.5vh, 0.7rem);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--text-soft);
+  min-width: 110px;
+  text-align: center;
 }
 
 .remote-status.open {
@@ -1152,9 +1166,9 @@
 
 .remote-dpad {
   --dpad-size: min(210px, 58vmin);
-  --dpad-inset: clamp(10px, 3vmin, 18px);
-  --dpad-btn: clamp(46px, 14vmin, 64px);
-  --dpad-ok: clamp(56px, 16vmin, 76px);
+  --dpad-inset: clamp(6px, 1.8vmin, 12px);
+  --dpad-btn: clamp(38px, 11vmin, 58px);
+  --dpad-ok: clamp(46px, 13vmin, 68px);
   width: var(--dpad-size);
   aspect-ratio: 1;
   height: auto;
@@ -1177,10 +1191,20 @@
   border: 1px solid rgba(126, 215, 255, 0.4);
   background: rgba(18, 30, 54, 0.95);
   color: #e9f5ff;
-  font-size: clamp(0.6rem, 1.6vh, 0.7rem);
+  font-size: clamp(0.9rem, 2.2vh, 1.05rem);
   letter-spacing: 0.12em;
   line-height: 1;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.remote-dpad button svg {
+  width: 50%;
+  height: 50%;
+  fill: #e9f5ff;
+  filter: drop-shadow(0 2px 4px rgba(6, 12, 22, 0.6));
 }
 
 .remote-dpad .up {
@@ -1225,6 +1249,35 @@
   width: 100%;
 }
 
+.remote-feature-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.remote-feature-button {
+  padding: clamp(6px, 1.6vh, 8px) clamp(4px, 1.4vw, 6px);
+  border-radius: 12px;
+  border: 1px solid rgba(126, 215, 255, 0.3);
+  background: rgba(14, 24, 40, 0.9);
+  color: rgba(210, 230, 255, 0.55);
+  font-size: clamp(0.55rem, 1.4vh, 0.65rem);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: center;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+
+.remote-feature-button.is-available {
+  color: #e9f5ff;
+  border-color: rgba(126, 215, 255, 0.9);
+}
+
+.remote-feature-button:disabled {
+  opacity: 0.55;
+}
+
 .remote-actions button {
   padding: clamp(6px, 1.6vh, 8px) clamp(4px, 1.4vw, 6px);
   border-radius: 12px;
@@ -1246,9 +1299,9 @@
 
 .remote-shell.app-active .remote-dpad {
   --dpad-size: min(190px, 50vmin);
-  --dpad-inset: clamp(8px, 2.6vmin, 14px);
-  --dpad-btn: clamp(40px, 12vmin, 56px);
-  --dpad-ok: clamp(48px, 14vmin, 64px);
+  --dpad-inset: clamp(6px, 1.8vmin, 12px);
+  --dpad-btn: clamp(36px, 10vmin, 52px);
+  --dpad-ok: clamp(44px, 12vmin, 60px);
 }
 
 .remote-shell.app-active .remote-app {
@@ -1292,9 +1345,9 @@
 .remote-specials {
   width: 100%;
   border-radius: 14px;
-  border: 1px solid rgba(126, 215, 255, 0.25);
-  background: rgba(8, 16, 28, 0.9);
-  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  padding: 6px 0;
   display: grid;
   gap: 10px;
 }
@@ -1314,6 +1367,17 @@
   font-size: 0.65rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+
+.remote-special-button.is-available {
+  color: #e9f5ff;
+  border-color: rgba(126, 215, 255, 0.9);
+}
+
+.remote-special-button.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .remote-mic {
@@ -1365,6 +1429,9 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1;
+  min-height: 0;
+  align-self: stretch;
 }
 
 .remote-trackpad {
@@ -1437,6 +1504,9 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  min-height: 0;
+  align-self: stretch;
 }
 
 .remote-display {
@@ -1654,6 +1724,10 @@
 .remote-app-controls {
   display: grid;
   gap: 8px;
+  flex: 0 0 auto;
+  max-height: clamp(180px, 36vh, 360px);
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .remote-control {
@@ -1776,7 +1850,7 @@
     --remote-pad: 14px;
     --remote-gap: 10px;
     --remote-body-gap: 12px;
-    justify-content: flex-start;
+    justify-content: center;
   }
 
   .remote-body {
@@ -1785,8 +1859,9 @@
 
   .remote-dpad {
     --dpad-size: min(190px, 50vmin);
-    --dpad-btn: clamp(42px, 12vmin, 58px);
-    --dpad-ok: clamp(50px, 14vmin, 66px);
+    --dpad-inset: clamp(6px, 1.8vmin, 12px);
+    --dpad-btn: clamp(36px, 10vmin, 54px);
+    --dpad-ok: clamp(44px, 12vmin, 62px);
   }
 
   .remote-actions {
@@ -1811,7 +1886,9 @@
 
   .remote-dpad {
     --dpad-size: min(170px, 46vmin);
-    --dpad-inset: clamp(8px, 2.6vmin, 14px);
+    --dpad-inset: clamp(6px, 1.8vmin, 12px);
+    --dpad-btn: clamp(34px, 9vmin, 50px);
+    --dpad-ok: clamp(42px, 11vmin, 58px);
   }
 
   .rocker button {
@@ -1844,8 +1921,9 @@
 
   .remote-dpad {
     --dpad-size: min(150px, 42vmin);
-    --dpad-btn: clamp(38px, 10vmin, 52px);
-    --dpad-ok: clamp(46px, 12vmin, 60px);
+    --dpad-inset: clamp(5px, 1.6vmin, 10px);
+    --dpad-btn: clamp(32px, 9vmin, 48px);
+    --dpad-ok: clamp(40px, 11vmin, 56px);
   }
 }
 
