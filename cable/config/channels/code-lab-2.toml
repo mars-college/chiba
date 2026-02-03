@@ -10,4 +10,5 @@ title = "Nebula Relay"
 subtitle = "Generative Visualizer"
 tag = "LAB"
 duration_slots = 2
+remote_controls = ["app"]
 source = { type = "url", value = "http://localhost:8790/?ws=ws://localhost:8787/ws&appId=gen-art" }

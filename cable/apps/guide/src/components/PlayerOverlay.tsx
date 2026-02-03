@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, type CSSProperties, type RefObject } from "react";
 import { createLogger } from "../lib/logger";
 import type {
   GuideChannel,
@@ -27,6 +27,8 @@ type PlayerOverlayProps = {
   masterVolume: number;
   masterMuted: boolean;
   setPlayerReady: (ready: boolean) => void;
+  surfaceRef?: RefObject<HTMLDivElement | null>;
+  remoteCursor?: { x: number; y: number; visible: boolean; pressed: boolean };
 };
 
 export function PlayerOverlay({
@@ -42,6 +44,8 @@ export function PlayerOverlay({
   masterVolume,
   masterMuted,
   setPlayerReady,
+  surfaceRef,
+  remoteCursor,
 }: PlayerOverlayProps) {
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -163,12 +167,20 @@ export function PlayerOverlay({
 
   if (!playerUrl) return null;
 
+  const cursorStyle: CSSProperties | undefined =
+    remoteCursor?.visible
+      ? {
+          left: `${remoteCursor.x * 100}%`,
+          top: `${remoteCursor.y * 100}%`,
+        }
+      : undefined;
+
   return (
     <div
       className={`player-overlay ${playerOpen ? "is-open" : ""}`}
       aria-hidden={!playerOpen}
     >
-      <div className="player-surface">
+      <div className="player-surface" ref={surfaceRef}>
         {playerKind === "image" ? (
           <img
             className="player-media player-image"
@@ -251,6 +263,12 @@ export function PlayerOverlay({
             </div>
             <div className="player-hint">Press Guide or Esc to return</div>
           </div>
+        ) : null}
+        {playerOpen && remoteCursor?.visible ? (
+          <div
+            className={`remote-cursor ${remoteCursor.pressed ? "is-pressed" : ""}`}
+            style={cursorStyle}
+          />
         ) : null}
       </div>
     </div>

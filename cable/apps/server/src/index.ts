@@ -1163,6 +1163,742 @@ app.get('/mars', (_req, res) => {
 </html>`);
 });
 
+app.get('/roadmap', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chiba Cable | Roadmap Channel 140</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Azeret+Mono:wght@300;400;500&display=swap');
+      :root {
+        color-scheme: dark;
+        --bg: #07090f;
+        --panel: rgba(12, 16, 26, 0.92);
+        --panel-2: rgba(10, 14, 22, 0.86);
+        --accent: #f3b24a;
+        --accent-2: #77c4cf;
+        --accent-3: #b7d88a;
+        --accent-4: #e9a1a8;
+        --glow: 0.6;
+        --scan-opacity: 0.08;
+        --ticker-duration: 26s;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+      }
+      body {
+        font-family: "Azeret Mono", "Segoe UI", sans-serif;
+        color: #f2efe8;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .app {
+        width: min(1440px, 96vw);
+        height: min(860px, 92vh);
+        position: relative;
+      }
+      .screen {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        border-radius: 22px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: linear-gradient(180deg, #0d111c 0%, #070a12 100%);
+        box-shadow:
+          0 24px 60px rgba(0, 0, 0, 0.6),
+          0 0 calc(20px * var(--glow)) rgba(243, 178, 74, 0.2);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding: 22px 24px 58px;
+      }
+      .screen::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.05) 0,
+          rgba(255, 255, 255, 0.05) 1px,
+          rgba(0, 0, 0, 0) 2px,
+          rgba(0, 0, 0, 0) 6px
+        );
+        opacity: var(--scan-opacity);
+        mix-blend-mode: screen;
+        pointer-events: none;
+        z-index: 1;
+      }
+      .screen.glitch {
+        animation: glitch 0.6s linear;
+      }
+      .screen > * {
+        position: relative;
+        z-index: 2;
+      }
+      .topbar {
+        display: grid;
+        grid-template-columns: 1.4fr 0.6fr 1.2fr;
+        gap: 16px;
+        align-items: center;
+        text-transform: uppercase;
+      }
+      .brand-title {
+        font-family: "Rajdhani", "Azeret Mono", sans-serif;
+        font-size: clamp(1.4rem, 2.4vw, 2.1rem);
+        letter-spacing: 0.18em;
+        color: #f6e3c2;
+      }
+      .brand-sub {
+        font-size: 0.68rem;
+        letter-spacing: 0.34em;
+        color: rgba(240, 220, 190, 0.55);
+        margin-top: 6px;
+      }
+      .channel-badge {
+        justify-self: center;
+        padding: 10px 16px;
+        border-radius: 14px;
+        background: rgba(12, 16, 24, 0.8);
+        border: 1px solid rgba(243, 178, 74, 0.35);
+        text-align: center;
+      }
+      .channel-number {
+        font-family: "Rajdhani", "Azeret Mono", sans-serif;
+        font-size: 1.7rem;
+        letter-spacing: 0.14em;
+        font-weight: 600;
+      }
+      .channel-call {
+        font-size: 0.65rem;
+        letter-spacing: 0.34em;
+        color: rgba(240, 220, 190, 0.6);
+      }
+      .status {
+        display: grid;
+        gap: 6px;
+        justify-items: end;
+        font-size: 0.7rem;
+        letter-spacing: 0.18em;
+        color: rgba(230, 235, 245, 0.68);
+      }
+      .status-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .pill {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.6rem;
+        letter-spacing: 0.3em;
+        background: rgba(12, 18, 32, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+      }
+      .pill.live {
+        color: #1b1207;
+        background: var(--accent);
+        border: 0;
+      }
+      .hero {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 16px 18px;
+        border-radius: 16px;
+        background: rgba(11, 15, 24, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .hero-title {
+        font-family: "Rajdhani", "Azeret Mono", sans-serif;
+        font-size: clamp(1.5rem, 2.2vw, 2.3rem);
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+      .hero-sub {
+        font-size: 0.78rem;
+        letter-spacing: 0.2em;
+        color: rgba(210, 220, 235, 0.6);
+        max-width: 420px;
+        text-transform: uppercase;
+      }
+      .main {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 2.2fr 1fr;
+        gap: 18px;
+        min-height: 0;
+      }
+      .schedule-panel {
+        background: var(--panel);
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 18px;
+        display: grid;
+        gap: 16px;
+        min-height: 0;
+      }
+      .schedule {
+        display: grid;
+        grid-template-columns: 140px repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        font-size: 0.8rem;
+      }
+      .schedule-header {
+        display: contents;
+        text-transform: uppercase;
+        letter-spacing: 0.24em;
+        color: rgba(240, 220, 190, 0.45);
+      }
+      .schedule-header .slot {
+        padding-bottom: 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .schedule-row {
+        display: contents;
+        --row-accent: var(--accent);
+      }
+      .schedule-row[data-category="dev"] { --row-accent: var(--accent-3); }
+      .schedule-row[data-category="curatorial"] { --row-accent: var(--accent-2); }
+      .schedule-row[data-category="physical"] { --row-accent: var(--accent-4); }
+      .slot-label {
+        font-size: 0.72rem;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        align-self: center;
+        color: rgba(230, 235, 245, 0.6);
+      }
+      .slot-card {
+        position: relative;
+        padding: 16px 16px 18px 18px;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-left: 2px solid var(--row-accent);
+        background: rgba(9, 12, 18, 0.85);
+        min-height: 96px;
+        display: grid;
+        gap: 6px;
+      }
+      .slot-tag {
+        font-size: 0.55rem;
+        letter-spacing: 0.26em;
+        text-transform: uppercase;
+        color: var(--row-accent);
+      }
+      .slot-title {
+        font-family: "Rajdhani", "Azeret Mono", sans-serif;
+        font-size: 1rem;
+        letter-spacing: 0.08em;
+        font-weight: 600;
+      }
+      .slot-detail {
+        font-size: 0.7rem;
+        color: rgba(220, 230, 245, 0.62);
+        line-height: 1.4;
+      }
+      .side-panel {
+        display: grid;
+        gap: 14px;
+        min-height: 0;
+      }
+      .panel-card {
+        background: var(--panel-2);
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 16px;
+        display: grid;
+        gap: 10px;
+      }
+      .panel-title {
+        font-size: 0.65rem;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+        color: rgba(240, 220, 190, 0.55);
+      }
+      .note {
+        font-size: 0.78rem;
+        line-height: 1.5;
+      }
+      .note small {
+        color: rgba(255, 255, 255, 0.55);
+      }
+      .signal {
+        display: flex;
+        align-items: flex-end;
+        gap: 6px;
+        height: 46px;
+      }
+      .signal span {
+        flex: 1;
+        border-radius: 6px;
+        background: linear-gradient(180deg, rgba(243, 178, 74, 0.7), rgba(243, 178, 74, 0.2));
+        opacity: 0.7;
+        animation: pulse 2.6s ease-in-out infinite;
+      }
+      .signal span:nth-child(2) { animation-delay: 0.2s; }
+      .signal span:nth-child(3) { animation-delay: 0.4s; }
+      .signal span:nth-child(4) { animation-delay: 0.6s; }
+      .signal span:nth-child(5) { animation-delay: 0.8s; }
+      .signal-label {
+        font-size: 0.62rem;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: rgba(230, 235, 245, 0.55);
+      }
+      .remote-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 0.6rem;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        background: rgba(7, 10, 16, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+      }
+      .ticker {
+        position: absolute;
+        left: 22px;
+        right: 22px;
+        bottom: 18px;
+        height: 26px;
+        border-radius: 999px;
+        background: rgba(7, 10, 16, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+      }
+      .ticker-track {
+        display: flex;
+        gap: 36px;
+        white-space: nowrap;
+        animation: ticker var(--ticker-duration) linear infinite;
+        font-size: 0.65rem;
+        letter-spacing: 0.26em;
+        text-transform: uppercase;
+      }
+      .ticker-track span {
+        color: rgba(240, 220, 190, 0.64);
+      }
+      .app[data-focus="dev"] .schedule-row:not([data-category="dev"]),
+      .app[data-focus="curatorial"] .schedule-row:not([data-category="curatorial"]),
+      .app[data-focus="physical"] .schedule-row:not([data-category="physical"]) {
+        opacity: 0.4;
+        filter: grayscale(0.6);
+      }
+      .app[data-layout="stack"] .schedule {
+        grid-template-columns: 1fr;
+      }
+      .app[data-layout="stack"] .schedule-header {
+        display: none;
+      }
+      .app[data-layout="stack"] .slot-label {
+        grid-column: 1 / -1;
+        padding-top: 12px;
+        font-size: 0.85rem;
+      }
+      .app[data-layout="stack"] .slot-card {
+        grid-column: 1 / -1;
+      }
+      @keyframes ticker {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-50%); }
+      }
+      @keyframes pulse {
+        0%, 100% { transform: scaleY(0.5); opacity: 0.4; }
+        50% { transform: scaleY(1); opacity: 0.9; }
+      }
+      @keyframes glitch {
+        0% { transform: translate(0, 0); filter: hue-rotate(0deg); }
+        20% { transform: translate(-2px, 1px); filter: hue-rotate(6deg); }
+        40% { transform: translate(2px, -1px); filter: hue-rotate(-8deg); }
+        60% { transform: translate(-1px, 2px); filter: hue-rotate(4deg); }
+        80% { transform: translate(1px, -2px); filter: hue-rotate(-6deg); }
+        100% { transform: translate(0, 0); filter: hue-rotate(0deg); }
+      }
+      @media (max-width: 980px) {
+        body {
+          padding: 12px;
+        }
+        .screen {
+          padding: 18px 16px 56px;
+        }
+        .main {
+          grid-template-columns: 1fr;
+        }
+        .topbar {
+          grid-template-columns: 1fr;
+          text-align: center;
+        }
+        .status {
+          justify-items: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app" class="app" data-focus="all" data-layout="grid">
+      <div class="screen" id="screen">
+        <header class="topbar">
+          <div>
+            <div class="brand-title">Chiba Cable</div>
+            <div class="brand-sub">Roadmap Channel</div>
+          </div>
+          <div class="channel-badge">
+            <div class="channel-number">140</div>
+            <div class="channel-call">RMAP</div>
+          </div>
+          <div class="status">
+            <div class="status-row">
+              <span class="pill live">On Air</span>
+              <span id="ws-status">Remote: connecting</span>
+            </div>
+            <div class="status-row">
+              <span id="focus-status">Focus: all</span>
+              <span id="clock">--:--</span>
+            </div>
+          </div>
+        </header>
+
+        <section class="hero">
+          <div class="hero-title">Roadmap Transmission</div>
+          <div class="hero-sub">Signal view of what is next for Chiba Cable.</div>
+        </section>
+
+        <div class="main">
+          <section class="schedule-panel">
+            <div class="schedule">
+              <div class="schedule-header">
+                <div class="slot-label">Track</div>
+                <div class="slot">Now</div>
+                <div class="slot">Next</div>
+                <div class="slot">Later</div>
+              </div>
+
+              <div class="schedule-row" data-category="dev">
+                <div class="slot-label">Dev</div>
+                <div class="slot-card">
+                  <div class="slot-tag">Now</div>
+                  <div class="slot-title">Channel Editor Agent</div>
+                  <div class="slot-detail">Let Chiba edit listings, swap channels, and tune the grid live.</div>
+                </div>
+                <div class="slot-card">
+                  <div class="slot-tag">Next</div>
+                  <div class="slot-title">Bumpers & Commercials</div>
+                  <div class="slot-detail">Modular bumpers, stingers, sponsor breaks, and interstitials.</div>
+                </div>
+                <div class="slot-card">
+                  <div class="slot-tag">Later</div>
+                  <div class="slot-title">Class AV Streams</div>
+                  <div class="slot-detail">Connect live AV feeds for classes and workshops.</div>
+                </div>
+              </div>
+
+              <div class="schedule-row" data-category="curatorial">
+                <div class="slot-label">Curatorial</div>
+                <div class="slot-card">
+                  <div class="slot-tag">Now</div>
+                  <div class="slot-title">More Channels</div>
+                  <div class="slot-detail">Expand the lineup with new editorial and experimental lanes.</div>
+                </div>
+                <div class="slot-card">
+                  <div class="slot-tag">Next</div>
+                  <div class="slot-title">Curate the NAS</div>
+                  <div class="slot-detail">Tag, label, and surface hidden archives in the media vault.</div>
+                </div>
+                <div class="slot-card">
+                  <div class="slot-tag">Later</div>
+                  <div class="slot-title">Creative Rotations</div>
+                  <div class="slot-detail">Seasonal mixes, themed takeovers, guest curators.</div>
+                </div>
+              </div>
+
+              <div class="schedule-row" data-category="physical">
+                <div class="slot-label">Physical</div>
+                <div class="slot-card">
+                  <div class="slot-tag">Now</div>
+                  <div class="slot-title">Satellite Screens</div>
+                  <div class="slot-detail">Install Chiba Cable screens in kitchens and camp clubhouses.</div>
+                </div>
+                <div class="slot-card">
+                  <div class="slot-tag">Next</div>
+                  <div class="slot-title">Call-In Shows</div>
+                  <div class="slot-detail">Phone system integration for live call-ins and request lines.</div>
+                </div>
+                <div class="slot-card">
+                  <div class="slot-tag">Later</div>
+                  <div class="slot-title">Biennale Room</div>
+                  <div class="slot-detail">Set up a dedicated Chiba Cable room for the Biennale.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="side-panel">
+            <div class="panel-card">
+              <div class="panel-title">Studio Notes</div>
+              <div class="note">Weekly channel scans, editing passes, and clear lineup gaps.</div>
+              <div class="note">Add new "roadmap" promos between blocks.</div>
+              <div class="note"><small>Priority: build momentum with bumpers + remote control moments.</small></div>
+            </div>
+            <div class="panel-card">
+              <div class="panel-title">Signal Meter</div>
+              <div class="signal">
+                <span style="height: 28px"></span>
+                <span style="height: 36px"></span>
+                <span style="height: 42px"></span>
+                <span style="height: 32px"></span>
+                <span style="height: 46px"></span>
+              </div>
+              <div class="signal-label">140 • Roadmap</div>
+            </div>
+            <div class="panel-card">
+              <div class="panel-title">Phone Controls</div>
+              <div class="note">
+                <span class="remote-chip">/remote?app=roadmap</span>
+              </div>
+              <div class="note"><small>Focus, layout, scanlines, glow, glitch.</small></div>
+            </div>
+          </aside>
+        </div>
+
+        <div class="ticker" id="ticker">
+          <div class="ticker-track">
+            <span>Chiba Cable Roadmap • Channel 140 • Remote controls live • More channels incoming • Call-in shows + AV streams • Curate the NAS • Biennale buildout •</span>
+            <span>Chiba Cable Roadmap • Channel 140 • Remote controls live • More channels incoming • Call-in shows + AV streams • Curate the NAS • Biennale buildout •</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const app = document.getElementById("app");
+      const screen = document.getElementById("screen");
+      const clock = document.getElementById("clock");
+      const focusStatus = document.getElementById("focus-status");
+      const wsStatus = document.getElementById("ws-status");
+      const ticker = document.getElementById("ticker");
+      const root = document.documentElement;
+
+      const controlSchema = [
+        {
+          id: "focus",
+          label: "Focus",
+          type: "select",
+          value: "all",
+          options: [
+            { value: "all", label: "All" },
+            { value: "dev", label: "Dev" },
+            { value: "curatorial", label: "Curatorial" },
+            { value: "physical", label: "Physical" },
+            { value: "cycle", label: "Cycle" },
+          ],
+        },
+        {
+          id: "layout",
+          label: "Layout",
+          type: "select",
+          value: "grid",
+          options: [
+            { value: "grid", label: "Grid" },
+            { value: "stack", label: "Stack" },
+          ],
+        },
+        {
+          id: "tempo",
+          label: "Tempo",
+          type: "range",
+          min: 1,
+          max: 10,
+          step: 1,
+          value: 6,
+        },
+        {
+          id: "scan",
+          label: "Scanlines",
+          type: "range",
+          min: 0,
+          max: 1,
+          step: 0.05,
+          value: 0.35,
+        },
+        {
+          id: "glow",
+          label: "Glow",
+          type: "range",
+          min: 0.6,
+          max: 1.6,
+          step: 0.05,
+          value: 1,
+        },
+        {
+          id: "ticker",
+          label: "Ticker",
+          type: "toggle",
+          value: true,
+        },
+        {
+          id: "glitch",
+          label: "Glitch",
+          type: "button",
+        },
+      ];
+
+      const state = {
+        focus: "all",
+        layout: "grid",
+        tempo: 6,
+        scan: 0.35,
+        glow: 1,
+        ticker: true,
+      };
+
+      const cycleOrder = ["dev", "curatorial", "physical"];
+      let cycleTimer = null;
+
+      function updateClock() {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, "0");
+        const minutes = String(now.getMinutes()).padStart(2, "0");
+        clock.textContent = hours + ":" + minutes;
+      }
+
+      function formatFocus(value) {
+        if (!value) return "All";
+        if (value === "all") return "All";
+        return value.charAt(0).toUpperCase() + value.slice(1);
+      }
+
+      function setTickerSpeed() {
+        const duration = Math.max(10, 34 - state.tempo * 2.2);
+        root.style.setProperty("--ticker-duration", duration.toFixed(1) + "s");
+      }
+
+      function stopCycle() {
+        if (cycleTimer) {
+          clearInterval(cycleTimer);
+          cycleTimer = null;
+        }
+      }
+
+      function startCycle() {
+        stopCycle();
+        let index = 0;
+        const interval = Math.max(1800, 8000 - state.tempo * 500);
+        const tick = () => {
+          const next = cycleOrder[index % cycleOrder.length];
+          app.dataset.focus = next;
+          focusStatus.textContent = "Focus: " + formatFocus(next) + " (cycle)";
+          index += 1;
+        };
+        tick();
+        cycleTimer = setInterval(tick, interval);
+      }
+
+      function applyFocus() {
+        if (state.focus === "cycle") {
+          startCycle();
+          return;
+        }
+        stopCycle();
+        app.dataset.focus = state.focus;
+        focusStatus.textContent = "Focus: " + formatFocus(state.focus);
+      }
+
+      function applyState() {
+        app.dataset.layout = state.layout;
+        root.style.setProperty("--scan-opacity", state.scan.toFixed(2));
+        root.style.setProperty("--glow", state.glow.toFixed(2));
+        ticker.style.display = state.ticker ? "flex" : "none";
+        setTickerSpeed();
+        applyFocus();
+      }
+
+      function triggerGlitch() {
+        screen.classList.remove("glitch");
+        void screen.offsetWidth;
+        screen.classList.add("glitch");
+      }
+
+      function coerceValue(control, value) {
+        if (control.type === "range") return Number(value);
+        if (control.type === "toggle") return Boolean(value);
+        return value;
+      }
+
+      function applyControl(controlId, value) {
+        if (controlId === "glitch") {
+          triggerGlitch();
+          return;
+        }
+        if (controlId in state) {
+          state[controlId] = value;
+          applyState();
+        }
+      }
+
+      function bootRemote() {
+        const params = new URLSearchParams(window.location.search);
+        const appId = params.get("appId") || params.get("app") || "roadmap";
+        const wsParam = params.get("ws");
+        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+        const wsUrl = wsParam || protocol + "://" + window.location.host + "/ws";
+        const socket = new WebSocket(wsUrl);
+
+        socket.addEventListener("open", () => {
+          wsStatus.textContent = "Remote: linked";
+          socket.send(
+            JSON.stringify({
+              type: "controls",
+              appId: appId,
+              controls: controlSchema,
+            })
+          );
+        });
+
+        socket.addEventListener("close", () => {
+          wsStatus.textContent = "Remote: offline";
+        });
+
+        socket.addEventListener("error", () => {
+          wsStatus.textContent = "Remote: error";
+        });
+
+        socket.addEventListener("message", (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type !== "control" || msg.appId !== appId) return;
+            const control = controlSchema.find((item) => item.id === msg.controlId);
+            if (!control) return;
+            applyControl(control.id, coerceValue(control, msg.value));
+          } catch (err) {
+            console.warn("remote message failed", err);
+          }
+        });
+      }
+
+      updateClock();
+      setInterval(updateClock, 1000 * 30);
+      applyState();
+      bootRemote();
+    </script>
+  </body>
+</html>`);
+});
+
 app.get('/weatherstar.jpg', (_req, res) => {
   const frame = weatherstarCapture.getFrame();
   if (!frame) {

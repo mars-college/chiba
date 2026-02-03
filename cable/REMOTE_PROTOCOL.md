@@ -108,7 +108,34 @@ GET /api/controls/:appId
 ```
 
 ---
-## 6) Screen mirroring options
+## 6) Program remote registrations (TOML)
+
+Programs can opt into special remote panels via config:
+
+```toml
+[[program]]
+title = "My App"
+remote_controls = ["app", "mic", "keyboard_mouse"]
+```
+
+Supported values:
+
+- `app` (shows App Controls panel)
+- `mic` (shows mic toggle)
+- `keyboard_mouse` (shows trackpad + keyboard panel)
+
+Remote sends:
+
+```json
+{ "type": "mouse", "action": "move", "dx": 0.02, "dy": -0.01 }
+{ "type": "mouse", "action": "click" }
+{ "type": "keyboard", "action": "text", "text": "hello" }
+{ "type": "keyboard", "action": "backspace", "count": 1 }
+{ "type": "keyboard", "action": "key", "key": "Enter" }
+```
+
+---
+## 7) Screen mirroring options
 
 ### Option A: Direct embed (simplest)
 If your app is reachable by URL, add it directly to the guide as a program URL.
@@ -130,7 +157,7 @@ You can copy that pattern and serve:
 If you need continuous video, consider an MJPEG endpoint or an ffmpeg RTSP bridge.
 
 ---
-## 7) Sensors (mic/accelerometer) as controls
+## 8) Sensors (mic/accelerometer) as controls
 
 The phone remote can capture sensors and send them as `control` messages:
 
@@ -142,7 +169,7 @@ The phone remote can capture sensors and send them as `control` messages:
 Treat them like any other control input in your app.
 
 ---
-## 8) Conventions
+## 9) Conventions
 
 - `appId` must be unique and stable.
 - Use short, lowercase `controlId` strings.
@@ -150,7 +177,7 @@ Treat them like any other control input in your app.
 - Keep controls small (5-10). Too many makes the remote hard to use.
 
 ---
-## 9) Debug checklist
+## 10) Debug checklist
 
 - Open the app once so it registers its controls.
 - Verify `/api/controls/<appId>` returns JSON.

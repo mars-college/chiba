@@ -22,6 +22,8 @@ type GuideViewProps = {
   selectedProgram?: ProgramSlot | null;
   playerOpen: boolean;
   playerReady: boolean;
+  playerSurfaceRef: RefObject<HTMLDivElement | null>;
+  remoteCursor?: { x: number; y: number; visible: boolean; pressed: boolean };
   hasPreviewMedia: boolean;
   posterImageReady: boolean;
   setPosterImageReady: (ready: boolean) => void;
@@ -71,6 +73,8 @@ export function GuideView({
   selectedProgram,
   playerOpen,
   playerReady,
+  playerSurfaceRef,
+  remoteCursor,
   hasPreviewMedia,
   posterImageReady,
   setPosterImageReady,
@@ -174,6 +178,8 @@ export function GuideView({
         masterVolume={masterVolume}
         masterMuted={masterMuted}
         setPlayerReady={setPlayerReady}
+        surfaceRef={playerSurfaceRef}
+        remoteCursor={remoteCursor}
       />
 
       <DebugPanel

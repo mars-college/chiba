@@ -9,16 +9,19 @@ description = "Live feed of the AI Village."
 title = "AI Village"
 tag = "LIVE"
 duration_slots = 2
+remote_controls = ["keyboard_mouse"]
 source = { type = "url", value = "https://theaidigest.org/village" }
 
 [[program]]
 title = "AI Village"
 tag = "LIVE"
 duration_slots = 2
+remote_controls = ["keyboard_mouse"]
 source = { type = "url", value = "https://theaidigest.org/village" }
 
 [[program]]
 title = "AI Village"
 tag = "LIVE"
 duration_slots = 2
+remote_controls = ["keyboard_mouse"]
 source = { type = "url", value = "https://theaidigest.org/village" }

@@ -1,0 +1,27 @@
+id = "roadmap"
+number = "140"
+name = "Roadmap Channel"
+call_sign = "RMAP"
+accent = "#ffb347"
+description = "Roadmap transmission for dev, curatorial, and physical buildouts."
+
+[[program]]
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/roadmap" }
+
+[[program]]
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/roadmap" }
+
+[[program]]
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/roadmap" }

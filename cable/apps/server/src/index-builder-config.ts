@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import type { ChannelManifest, LoadedConfig } from "./config.js";
+import type { ChannelManifest, LoadedConfig, RemoteRegistration } from "./config.js";
 
 export type ProgramSlot = {
   title: string;
@@ -8,6 +8,7 @@ export type ProgramSlot = {
   tag?: string;
   url?: string;
   durationSec?: number;
+  remoteControls?: RemoteRegistration[];
   start: number;
   span: number;
   end: number;
@@ -127,6 +128,7 @@ function buildSchedule(
       tag: program.tag,
       url,
       durationSec,
+      remoteControls: program.remote_controls,
       start: cursor,
       span,
       end: cursor + span - 1,

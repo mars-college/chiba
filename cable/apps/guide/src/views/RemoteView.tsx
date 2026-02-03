@@ -1,3 +1,11 @@
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type PointerEvent,
+} from "react";
 import { DebugPanel, type MemoryStats } from "../components/DebugPanel";
 import { DialOverlay } from "../components/DialOverlay";
 import {
@@ -36,12 +44,20 @@ type RemoteViewProps = {
   setGodmodeQuery: (value: string) => void;
   setDialBuffer: (value: string) => void;
   showAppPanel: boolean;
+  showInputPanel: boolean;
   hasAppControls: boolean;
+  hasKeyboardMouse: boolean;
+  hasMicControls: boolean;
+  hasSpecialControls: boolean;
   remoteControlsStatus: RemoteControlsStatus;
   remoteControls: RemoteControl[];
   handleRemoteControl: (controlId: string, value: number | string | boolean) => void;
-  setRemotePanel: (panel: "remote" | "app") => void;
+  setRemotePanel: (panel: "remote" | "app" | "input") => void;
   pushDialDigit: (digit: number) => void;
+  micEnabled: boolean;
+  micStatusLabel: string;
+  micToggleDisabled: boolean;
+  onMicToggle: () => void;
   showDebug: boolean;
   memoryStats: MemoryStats | null;
   mediaStats: MediaDebugStats | null;
@@ -64,20 +80,194 @@ export function RemoteView({
   setGodmodeQuery,
   setDialBuffer,
   showAppPanel,
+  showInputPanel,
   hasAppControls,
+  hasKeyboardMouse,
+  hasMicControls,
+  hasSpecialControls,
   remoteControlsStatus,
   remoteControls,
   handleRemoteControl,
   setRemotePanel,
   pushDialDigit,
+  micEnabled,
+  micStatusLabel,
+  micToggleDisabled,
+  onMicToggle,
   showDebug,
   memoryStats,
   mediaStats,
   dialOverlay,
 }: RemoteViewProps) {
+  const padRef = useRef<HTMLDivElement | null>(null);
+  const padLastRef = useRef<{ x: number; y: number } | null>(null);
+  const padTapRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const keyboardInputRef = useRef<HTMLInputElement | null>(null);
+  const [keyboardValue, setKeyboardValue] = useState("");
+  const keyboardValueRef = useRef("");
+
+  const startPad = useCallback((clientX: number, clientY: number) => {
+    padLastRef.current = { x: clientX, y: clientY };
+    padTapRef.current = { x: clientX, y: clientY, time: Date.now() };
+  }, []);
+
+  const movePad = useCallback(
+    (clientX: number, clientY: number) => {
+      const last = padLastRef.current;
+      const rect = padRef.current?.getBoundingClientRect();
+      if (!last || !rect || !rect.width || !rect.height) return;
+      const dx = (clientX - last.x) / rect.width;
+      const dy = (clientY - last.y) / rect.height;
+      padLastRef.current = { x: clientX, y: clientY };
+      if (dx === 0 && dy === 0) return;
+      send({ type: "mouse", action: "move", dx, dy });
+    },
+    [send]
+  );
+
+  const endPad = useCallback(
+    (clientX: number, clientY: number) => {
+      const tap = padTapRef.current;
+      padLastRef.current = null;
+      padTapRef.current = null;
+      if (!tap) return;
+      const dt = Date.now() - tap.time;
+      const dist = Math.hypot(clientX - tap.x, clientY - tap.y);
+      if (dt < 250 && dist < 8) {
+        send({ type: "mouse", action: "click" });
+      }
+    },
+    [send]
+  );
+
+  const handlePadPointerDown = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // ignore if pointer capture unsupported
+      }
+      startPad(event.clientX, event.clientY);
+    },
+    [startPad]
+  );
+
+  const handlePadPointerMove = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      movePad(event.clientX, event.clientY);
+    },
+    [movePad]
+  );
+
+  const handlePadPointerUp = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // ignore if pointer capture unsupported
+      }
+      endPad(event.clientX, event.clientY);
+    },
+    [endPad]
+  );
+
+  const handlePadPointerCancel = useCallback(() => {
+    padLastRef.current = null;
+    padTapRef.current = null;
+  }, []);
+
+  const handlePadTouchStart = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      if ("PointerEvent" in window) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      event.preventDefault();
+      startPad(touch.clientX, touch.clientY);
+    },
+    [startPad]
+  );
+
+  const handlePadTouchMove = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      if ("PointerEvent" in window) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      event.preventDefault();
+      movePad(touch.clientX, touch.clientY);
+    },
+    [movePad]
+  );
+
+  const handlePadTouchEnd = useCallback(
+    (event: React.TouchEvent<HTMLDivElement>) => {
+      if ("PointerEvent" in window) return;
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+      event.preventDefault();
+      endPad(touch.clientX, touch.clientY);
+    },
+    [endPad]
+  );
+
+  const handlePadTouchCancel = useCallback(() => {
+    if ("PointerEvent" in window) return;
+    padLastRef.current = null;
+    padTapRef.current = null;
+  }, []);
+
+  const handleKeyboardChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const next = event.currentTarget.value;
+      const prev = keyboardValueRef.current;
+      if (next === prev) return;
+      if (next.startsWith(prev)) {
+        const delta = next.slice(prev.length);
+        if (delta) {
+          send({ type: "keyboard", action: "text", text: delta });
+        }
+      } else if (prev.startsWith(next)) {
+        const count = prev.length - next.length;
+        if (count > 0) {
+          send({ type: "keyboard", action: "backspace", count });
+        }
+      } else {
+        if (prev.length) {
+          send({ type: "keyboard", action: "backspace", count: prev.length });
+        }
+        if (next) {
+          send({ type: "keyboard", action: "text", text: next });
+        }
+      }
+      keyboardValueRef.current = next;
+      setKeyboardValue(next);
+    },
+    [send]
+  );
+
+  const handleKeyboardKey = useCallback(
+    (key: "Enter" | "Escape" | "Tab") => {
+      send({ type: "keyboard", action: "key", key });
+    },
+    [send]
+  );
+
+  const handleKeyboardBackspace = useCallback(() => {
+    send({ type: "keyboard", action: "backspace", count: 1 });
+  }, [send]);
+
+  useEffect(() => {
+    if (!showInputPanel) {
+      keyboardValueRef.current = "";
+      setKeyboardValue("");
+    }
+  }, [showInputPanel]);
+
   return (
     <div
-      className={`remote-shell ${hasAppControls ? "app-active" : ""} ${
+      className={`remote-shell ${hasSpecialControls ? "app-active" : ""} ${
         showGodPanel ? "godmode-active" : ""
       }`}
     >
@@ -295,6 +485,48 @@ export function RemoteView({
               </div>
             ) : null}
           </div>
+        ) : showInputPanel ? (
+          <div className="remote-input">
+            <div className="remote-app-title">
+              <span>Keyboard / Mouse</span>
+            </div>
+            <button
+              className="remote-app-back"
+              onClick={() => setRemotePanel("remote")}
+            >
+              Back to Remote
+            </button>
+            <div
+              className="remote-trackpad"
+              ref={padRef}
+              onPointerDown={handlePadPointerDown}
+              onPointerMove={handlePadPointerMove}
+              onPointerUp={handlePadPointerUp}
+              onPointerCancel={handlePadPointerCancel}
+            >
+              <div className="remote-trackpad-label">
+                Drag to move · Tap to click
+              </div>
+            </div>
+            <div className="remote-keyboard">
+              <input
+                ref={keyboardInputRef}
+                className="remote-keyboard-input"
+                type="text"
+                value={keyboardValue}
+                onChange={handleKeyboardChange}
+                placeholder="Type here to send keys"
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+              />
+              <div className="remote-keyboard-actions">
+                <button onClick={handleKeyboardBackspace}>Backspace</button>
+                <button onClick={() => handleKeyboardKey("Enter")}>Enter</button>
+                <button onClick={() => handleKeyboardKey("Escape")}>Esc</button>
+              </div>
+            </div>
+          </div>
         ) : (
           <>
             <div className="remote-controls">
@@ -355,21 +587,49 @@ export function RemoteView({
               <button onClick={() => send({ type: "mute" })}>Mute</button>
             </div>
 
-            <button
-              className={`remote-app-toggle ${
-                hasAppControls ? "is-active" : ""
-              }`}
-              disabled={!hasAppControls}
-              onClick={() => setRemotePanel("app")}
-            >
-              App Controls
-            </button>
+            {hasSpecialControls ? (
+              <div className="remote-specials">
+                {hasMicControls ? (
+                  <div className="remote-mic">
+                    <div className="remote-mic-title">Mic</div>
+                    <button
+                      className={`remote-mic-toggle ${
+                        micEnabled ? "is-on" : ""
+                      }`}
+                      disabled={micToggleDisabled}
+                      onClick={onMicToggle}
+                    >
+                      {micEnabled ? "Mic On" : "Mic Off"}
+                    </button>
+                    <div className="remote-mic-status">{micStatusLabel}</div>
+                  </div>
+                ) : null}
+                <div className="remote-special-actions">
+                  {hasKeyboardMouse ? (
+                    <button
+                      className="remote-special-button"
+                      onClick={() => setRemotePanel("input")}
+                    >
+                      Keyboard/Mouse
+                    </button>
+                  ) : null}
+                  {hasAppControls ? (
+                    <button
+                      className="remote-special-button"
+                      onClick={() => setRemotePanel("app")}
+                    >
+                      App Controls
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             <div className="remote-numpad">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                 <button
                   key={num}
-                  disabled={showAppPanel}
+                  disabled={showAppPanel || showInputPanel}
                   onClick={() => pushDialDigit(num)}
                 >
                   {num}
@@ -377,7 +637,7 @@ export function RemoteView({
               ))}
               <button
                 className="zero"
-                disabled={showAppPanel}
+                disabled={showAppPanel || showInputPanel}
                 onClick={() => pushDialDigit(0)}
               >
                 0

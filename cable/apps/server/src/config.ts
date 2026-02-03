@@ -7,11 +7,14 @@ export type ChannelProgramSource = {
   value: string;
 };
 
+export type RemoteRegistration = "mic" | "app" | "keyboard_mouse";
+
 export type ChannelProgram = {
   title: string;
   subtitle?: string;
   tag?: string;
   duration_slots?: number;
+  remote_controls?: RemoteRegistration[];
   source?: ChannelProgramSource;
 };
 
@@ -114,12 +117,40 @@ function normalizePrograms(programs: ChannelProgram[] | undefined): ChannelProgr
       typeof program.duration_slots === "number" && program.duration_slots > 0
         ? program.duration_slots
         : 1,
+    remote_controls: normalizeRemoteControls(program.remote_controls),
   }));
 }
 
 function normalizeNumber(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   return value;
+}
+
+function normalizeRemoteControls(
+  value: unknown
+): RemoteRegistration[] | undefined {
+  const raw = ensureArray(value).filter(isString);
+  if (!raw.length) return undefined;
+  const normalized = raw
+    .map((entry) => entry.trim().toLowerCase())
+    .map((entry) => {
+      if (entry === "keyboard-mouse" || entry === "keyboard/mouse") {
+        return "keyboard_mouse";
+      }
+      if (entry === "app-controls" || entry === "app_controls") {
+        return "app";
+      }
+      if (entry === "microphone") {
+        return "mic";
+      }
+      return entry;
+    })
+    .filter(
+      (entry): entry is RemoteRegistration =>
+        entry === "mic" || entry === "app" || entry === "keyboard_mouse"
+    );
+  if (!normalized.length) return undefined;
+  return Array.from(new Set(normalized));
 }
 
 function normalizeEmbed(value: unknown): ChannelEmbedConfig | undefined {

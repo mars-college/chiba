@@ -4,6 +4,7 @@ export type ProgramSlot = {
   tag?: string;
   url?: string;
   durationSec?: number;
+  remoteControls?: RemoteRegistration[];
   start: number;
   span: number;
   end: number;
@@ -108,6 +109,8 @@ export type RemoteControl =
       type: "button";
     };
 
+export type RemoteRegistration = "mic" | "app" | "keyboard_mouse";
+
 export type RemoteMessage =
   | { type: "nav"; dir: "up" | "down" | "left" | "right" }
   | { type: "channel"; dir: "up" | "down" }
@@ -118,8 +121,29 @@ export type RemoteMessage =
   | { type: "select" }
   | { type: "guide" }
   | { type: "info" }
-  | { type: "app"; appId?: string | null }
+  | {
+      type: "app";
+      appId?: string | null;
+      remoteControls?: RemoteRegistration[];
+    }
   | { type: "index" }
+  | { type: "mouse"; action: "move"; dx: number; dy: number }
+  | { type: "mouse"; action: "click" }
+  | {
+      type: "keyboard";
+      action: "text";
+      text: string;
+    }
+  | {
+      type: "keyboard";
+      action: "backspace";
+      count?: number;
+    }
+  | {
+      type: "keyboard";
+      action: "key";
+      key: "Enter" | "Escape" | "Tab";
+    }
   | {
       type: "now";
       channelId?: string;
@@ -142,6 +166,14 @@ export type RemoteMessage =
       hours?: number | null;
       theme?: string | null;
       screenId?: string | null;
+    }
+  | {
+      type: "mic";
+      action: "offer" | "answer" | "ice" | "stop";
+      sessionId: string;
+      sdp?: string;
+      candidate?: RTCIceCandidateInit;
+      from: "remote" | "guide";
     };
 
 export type RemoteStatus = "connecting" | "open" | "closed";

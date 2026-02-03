@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 
+export type RemoteRegistration = "mic" | "app" | "keyboard_mouse";
+
 export type SourceProgram = {
   title: string;
   subtitle?: string;
@@ -7,6 +9,7 @@ export type SourceProgram = {
   url?: string;
   durationSlots?: number;
   durationSec?: number;
+  remoteControls?: RemoteRegistration[];
 };
 
 export type SourceChannel = {
@@ -37,6 +40,7 @@ export type ProgramSlot = {
   tag?: string;
   url?: string;
   durationSec?: number;
+  remoteControls?: RemoteRegistration[];
   start: number;
   span: number;
   end: number;
@@ -97,6 +101,7 @@ function buildSchedule(
       tag: program.tag,
       url: program.url,
       durationSec,
+      remoteControls: program.remoteControls,
       start: cursor,
       span,
       end: cursor + span - 1,

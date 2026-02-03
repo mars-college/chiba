@@ -90,10 +90,21 @@ import type {
   ProgramSlot,
   AudioSettings,
   RemoteMessage,
+  RemoteRegistration,
   ViewMode,
 } from "./types/guide";
 
 const log = createLogger("guide-app");
+
+const REMOTE_CURSOR_HIDE_MS = 2200;
+const REMOTE_MOUSE_SENSITIVITY = 1.25;
+
+type RemoteCursorState = {
+  x: number;
+  y: number;
+  visible: boolean;
+  pressed: boolean;
+};
 
 function App() {
   const isRemote = window.location.pathname.startsWith("/remote");
@@ -280,7 +291,26 @@ function App() {
   const [dialBuffer, setDialBuffer] = useState("");
   const [activeRemoteAppId, setActiveRemoteAppId] =
     useState(requestedRemoteAppId);
-  const [remotePanel, setRemotePanel] = useState<"remote" | "app">("remote");
+  const [remoteRegistrations, setRemoteRegistrations] = useState<
+    RemoteRegistration[]
+  >([]);
+  const [remotePanel, setRemotePanel] = useState<
+    "remote" | "app" | "input"
+  >("remote");
+  const [remoteCursor, setRemoteCursor] = useState<RemoteCursorState>({
+    x: 0.5,
+    y: 0.5,
+    visible: false,
+    pressed: false,
+  });
+  const [micEnabled, setMicEnabled] = useState(false);
+  const [micStatus, setMicStatus] = useState<
+    "idle" | "requesting" | "connecting" | "live" | "error"
+  >("idle");
+  const [micError, setMicError] = useState<string | null>(null);
+  const [micIncomingStatus, setMicIncomingStatus] = useState<
+    "idle" | "connecting" | "live"
+  >("idle");
 
   const pauseUntilRef = useRef(0);
   const autoHoldUntilRef = useRef(0);
@@ -297,6 +327,22 @@ function App() {
   const dialTimeoutRef = useRef<number | null>(null);
   const sendRef = useRef<((msg: RemoteMessage) => void) | null>(null);
   const dialOverlayTimerRef = useRef<number | null>(null);
+  const micRemotePeerRef = useRef<RTCPeerConnection | null>(null);
+  const micRemoteStreamRef = useRef<MediaStream | null>(null);
+  const micRemoteSessionRef = useRef<string | null>(null);
+  const micGuidePeerRef = useRef<RTCPeerConnection | null>(null);
+  const micGuideSessionRef = useRef<string | null>(null);
+  const micGuideStreamRef = useRef<MediaStream | null>(null);
+  const micAudioRef = useRef<HTMLAudioElement | null>(null);
+  const playerSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const remoteCursorRef = useRef<RemoteCursorState>(remoteCursor);
+  const remoteCursorRafRef = useRef<number | null>(null);
+  const remoteCursorHideRef = useRef<number | null>(null);
+  const remoteCursorPressRef = useRef<number | null>(null);
+  const remotePointerTargetRef = useRef<{
+    target: HTMLElement | null;
+    doc: Document | null;
+  } | null>(null);
 
   const getViewportMetrics = useCallback(() => {
     const viewport = viewportRef.current;
@@ -429,6 +475,21 @@ function App() {
     [decorateProgramUrl, selectedProgram?.url]
   );
   const activeAppId = useMemo(() => getAppIdFromUrl(playerUrl), [playerUrl]);
+  const activeProgramRemoteControls = useMemo(
+    () => (playerOpen ? selectedProgram?.remoteControls ?? [] : []),
+    [playerOpen, selectedProgram]
+  );
+  const effectiveRemoteControls =
+    viewMode === "remote" ? remoteRegistrations : activeProgramRemoteControls;
+  const effectiveRemoteAppId =
+    viewMode === "remote"
+      ? requestedRemoteAppId || activeRemoteAppId
+      : activeAppId;
+  const hasKeyboardMouse = effectiveRemoteControls.includes("keyboard_mouse");
+  const hasMicControls = effectiveRemoteControls.includes("mic");
+  const hasAppControls =
+    Boolean(effectiveRemoteAppId) &&
+    (effectiveRemoteControls.includes("app") || Boolean(requestedRemoteAppId));
   const playerKind = useMemo(
     () => (playerUrl ? getMediaKind(playerUrl) : null),
     [playerUrl]
@@ -774,7 +835,576 @@ function App() {
     });
   }, []);
 
+  const sendMic = useCallback((message: RemoteMessage) => {
+    sendRef.current?.(message);
+  }, []);
+
+  const createMicSessionId = useCallback(() => {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+
+  const stopRemoteMic = useCallback(
+    (notify = true) => {
+      const sessionId = micRemoteSessionRef.current;
+      if (notify && sessionId) {
+        sendMic({
+          type: "mic",
+          action: "stop",
+          sessionId,
+          from: "remote",
+        });
+      }
+      const peer = micRemotePeerRef.current;
+      if (peer) {
+        peer.onicecandidate = null;
+        peer.onconnectionstatechange = null;
+        peer.close();
+      }
+      micRemotePeerRef.current = null;
+      micRemoteSessionRef.current = null;
+      const stream = micRemoteStreamRef.current;
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+      micRemoteStreamRef.current = null;
+      setMicEnabled(false);
+      setMicStatus("idle");
+      setMicError(null);
+    },
+    [sendMic]
+  );
+
+  const startRemoteMic = useCallback(async () => {
+    if (micRemotePeerRef.current) return;
+    if (!sendRef.current) {
+      setMicError("Remote not connected");
+      setMicStatus("error");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMicError("Mic not supported");
+      setMicStatus("error");
+      return;
+    }
+    if (!window.isSecureContext) {
+      setMicError("Mic requires HTTPS");
+      setMicStatus("error");
+      return;
+    }
+    setMicStatus("requesting");
+    setMicError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      const pc = new RTCPeerConnection();
+      const sessionId = createMicSessionId();
+      micRemotePeerRef.current = pc;
+      micRemoteStreamRef.current = stream;
+      micRemoteSessionRef.current = sessionId;
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      pc.onicecandidate = (event) => {
+        if (!event.candidate) return;
+        sendMic({
+          type: "mic",
+          action: "ice",
+          sessionId,
+          candidate: event.candidate.toJSON(),
+          from: "remote",
+        });
+      };
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "connected") {
+          setMicStatus("live");
+          return;
+        }
+        if (
+          pc.connectionState === "failed" ||
+          pc.connectionState === "disconnected" ||
+          pc.connectionState === "closed"
+        ) {
+          setMicStatus("error");
+          setMicEnabled(false);
+        }
+      };
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      sendMic({
+        type: "mic",
+        action: "offer",
+        sessionId,
+        sdp: offer.sdp ?? "",
+        from: "remote",
+      });
+      setMicEnabled(true);
+      setMicStatus("connecting");
+    } catch (error) {
+      log.warn("mic-start-failed", error);
+      setMicError("Mic access blocked");
+      setMicStatus("error");
+      setMicEnabled(false);
+    }
+  }, [createMicSessionId, sendMic]);
+
+  const handleRemoteMicMessage = useCallback(
+    async (msg: RemoteMessage) => {
+      if (msg.type !== "mic") return;
+      const sessionId = micRemoteSessionRef.current;
+      if (!sessionId || msg.sessionId !== sessionId) return;
+      const peer = micRemotePeerRef.current;
+      if (!peer) return;
+      if (msg.action === "answer" && msg.sdp) {
+        try {
+          await peer.setRemoteDescription({
+            type: "answer",
+            sdp: msg.sdp,
+          });
+        } catch (error) {
+          log.warn("mic-answer-failed", error);
+        }
+      }
+      if (msg.action === "ice" && msg.candidate) {
+        try {
+          await peer.addIceCandidate(new RTCIceCandidate(msg.candidate));
+        } catch (error) {
+          log.warn("mic-ice-failed", error);
+        }
+      }
+      if (msg.action === "stop") {
+        stopRemoteMic(false);
+      }
+    },
+    [stopRemoteMic]
+  );
+
+  const cleanupGuideMic = useCallback(() => {
+    const peer = micGuidePeerRef.current;
+    if (peer) {
+      peer.onicecandidate = null;
+      peer.ontrack = null;
+      peer.onconnectionstatechange = null;
+      peer.close();
+    }
+    micGuidePeerRef.current = null;
+    micGuideSessionRef.current = null;
+    const stream = micGuideStreamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+    micGuideStreamRef.current = null;
+    if (micAudioRef.current) {
+      micAudioRef.current.srcObject = null;
+    }
+    setMicIncomingStatus("idle");
+  }, []);
+
+  const handleGuideMicMessage = useCallback(
+    async (msg: RemoteMessage) => {
+      if (msg.type !== "mic") return;
+      if (msg.action === "stop") {
+        if (msg.sessionId === micGuideSessionRef.current) {
+          cleanupGuideMic();
+        }
+        return;
+      }
+      if (msg.action === "offer") {
+        if (!msg.sdp) return;
+        cleanupGuideMic();
+        const pc = new RTCPeerConnection();
+        micGuidePeerRef.current = pc;
+        micGuideSessionRef.current = msg.sessionId;
+        setMicIncomingStatus("connecting");
+        pc.onicecandidate = (event) => {
+          if (!event.candidate) return;
+          sendMic({
+            type: "mic",
+            action: "ice",
+            sessionId: msg.sessionId,
+            candidate: event.candidate.toJSON(),
+            from: "guide",
+          });
+        };
+        pc.ontrack = (event) => {
+          const stream =
+            event.streams?.[0] ?? new MediaStream([event.track]);
+          micGuideStreamRef.current = stream;
+          const audio = micAudioRef.current;
+          if (audio) {
+            audio.srcObject = stream;
+            audio.muted = false;
+            audio.play().catch((error) => {
+              log.warn("mic-play-failed", error);
+            });
+          }
+          setMicIncomingStatus("live");
+        };
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+            setMicIncomingStatus("idle");
+          }
+        };
+        try {
+          await pc.setRemoteDescription({
+            type: "offer",
+            sdp: msg.sdp,
+          });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          sendMic({
+            type: "mic",
+            action: "answer",
+            sessionId: msg.sessionId,
+            sdp: answer.sdp ?? "",
+            from: "guide",
+          });
+        } catch (error) {
+          log.warn("mic-offer-failed", error);
+          cleanupGuideMic();
+        }
+        return;
+      }
+      if (msg.action === "ice" && msg.candidate) {
+        if (msg.sessionId !== micGuideSessionRef.current) return;
+        const peer = micGuidePeerRef.current;
+        if (!peer) return;
+        try {
+          await peer.addIceCandidate(new RTCIceCandidate(msg.candidate));
+        } catch (error) {
+          log.warn("mic-ice-failed", error);
+        }
+      }
+    },
+    [cleanupGuideMic, sendMic]
+  );
+
+  const toggleMic = useCallback(() => {
+    if (micEnabled) {
+      stopRemoteMic(true);
+    } else {
+      void startRemoteMic();
+    }
+  }, [micEnabled, startRemoteMic, stopRemoteMic]);
+
+  const commitRemoteCursor = useCallback((next: RemoteCursorState) => {
+    remoteCursorRef.current = next;
+    if (remoteCursorRafRef.current !== null) return;
+    remoteCursorRafRef.current = window.requestAnimationFrame(() => {
+      remoteCursorRafRef.current = null;
+      setRemoteCursor(remoteCursorRef.current);
+    });
+  }, []);
+
+  const scheduleRemoteCursorHide = useCallback(() => {
+    if (remoteCursorHideRef.current !== null) {
+      window.clearTimeout(remoteCursorHideRef.current);
+    }
+    remoteCursorHideRef.current = window.setTimeout(() => {
+      commitRemoteCursor({
+        ...remoteCursorRef.current,
+        visible: false,
+        pressed: false,
+      });
+    }, REMOTE_CURSOR_HIDE_MS);
+  }, [commitRemoteCursor]);
+
+  const showRemoteCursor = useCallback(() => {
+    commitRemoteCursor({ ...remoteCursorRef.current, visible: true });
+    scheduleRemoteCursorHide();
+  }, [commitRemoteCursor, scheduleRemoteCursorHide]);
+
+  const moveRemoteCursor = useCallback(
+    (dx: number, dy: number) => {
+      const next = {
+        ...remoteCursorRef.current,
+        x: clamp(remoteCursorRef.current.x + dx * REMOTE_MOUSE_SENSITIVITY, 0, 1),
+        y: clamp(remoteCursorRef.current.y + dy * REMOTE_MOUSE_SENSITIVITY, 0, 1),
+        visible: true,
+      };
+      commitRemoteCursor(next);
+      scheduleRemoteCursorHide();
+    },
+    [commitRemoteCursor, scheduleRemoteCursorHide]
+  );
+
+  const getCursorClientPosition = useCallback(() => {
+    const surface = playerSurfaceRef.current;
+    if (!surface) return null;
+    const rect = surface.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const cursor = remoteCursorRef.current;
+    return {
+      rect,
+      clientX: rect.left + cursor.x * rect.width,
+      clientY: rect.top + cursor.y * rect.height,
+    };
+  }, []);
+
+  const resolvePointerTarget = useCallback(
+    (clientX: number, clientY: number) => {
+      const target = document.elementFromPoint(clientX, clientY);
+      if (!target) return null;
+      if (target instanceof HTMLIFrameElement) {
+        const frameRect = target.getBoundingClientRect();
+        try {
+          const doc = target.contentDocument;
+          if (doc) {
+            const innerTarget = doc.elementFromPoint(
+              clientX - frameRect.left,
+              clientY - frameRect.top
+            );
+            if (innerTarget) {
+              return {
+                target: innerTarget as HTMLElement,
+                doc,
+                clientX: clientX - frameRect.left,
+                clientY: clientY - frameRect.top,
+              };
+            }
+          }
+        } catch {
+          // cross-origin, fall back to iframe element
+        }
+      }
+      const owner = target.ownerDocument ?? document;
+      return { target: target as HTMLElement, doc: owner, clientX, clientY };
+    },
+    []
+  );
+
+  const dispatchMouseEvent = useCallback(
+    (
+      info: { target: HTMLElement; doc: Document; clientX: number; clientY: number },
+      type: "mousemove" | "mousedown" | "mouseup" | "click"
+    ) => {
+      const view = info.doc.defaultView ?? window;
+      const event = new view.MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        clientX: info.clientX,
+        clientY: info.clientY,
+        view,
+        buttons: type === "mousedown" || type === "click" ? 1 : 0,
+      });
+      info.target.dispatchEvent(event);
+    },
+    []
+  );
+
+  const pressRemoteCursor = useCallback(
+    (pressed: boolean) => {
+      if (remoteCursorPressRef.current !== null) {
+        window.clearTimeout(remoteCursorPressRef.current);
+      }
+      commitRemoteCursor({ ...remoteCursorRef.current, pressed, visible: true });
+      if (pressed) {
+        remoteCursorPressRef.current = window.setTimeout(() => {
+          commitRemoteCursor({
+            ...remoteCursorRef.current,
+            pressed: false,
+          });
+          remoteCursorPressRef.current = null;
+        }, 140);
+      }
+    },
+    [commitRemoteCursor]
+  );
+
+  const clickRemotePointer = useCallback(() => {
+    const position = getCursorClientPosition();
+    if (!position) return;
+    const info = resolvePointerTarget(position.clientX, position.clientY);
+    if (!info || !info.target) return;
+    if (info.target instanceof HTMLElement) {
+      info.target.focus({ preventScroll: true });
+    }
+    remotePointerTargetRef.current = { target: info.target, doc: info.doc };
+    dispatchMouseEvent(info, "mousemove");
+    dispatchMouseEvent(info, "mousedown");
+    dispatchMouseEvent(info, "mouseup");
+    dispatchMouseEvent(info, "click");
+    pressRemoteCursor(true);
+    scheduleRemoteCursorHide();
+  }, [
+    dispatchMouseEvent,
+    getCursorClientPosition,
+    pressRemoteCursor,
+    resolvePointerTarget,
+    scheduleRemoteCursorHide,
+  ]);
+
+  const getKeyboardTarget = useCallback(() => {
+    const last = remotePointerTargetRef.current;
+    if (last?.target && last.target.isConnected) {
+      return last;
+    }
+    const active = document.activeElement;
+    if (active && active instanceof HTMLElement) {
+      if (active instanceof HTMLIFrameElement) {
+        try {
+          const doc = active.contentDocument;
+          const inner = doc?.activeElement;
+          if (inner && inner instanceof HTMLElement) {
+            return { target: inner, doc: doc ?? document };
+          }
+        } catch {
+          return null;
+        }
+      }
+      return { target: active, doc: active.ownerDocument ?? document };
+    }
+    const position = getCursorClientPosition();
+    if (!position) return null;
+    const info = resolvePointerTarget(position.clientX, position.clientY);
+    if (!info || !info.target) return null;
+    return { target: info.target, doc: info.doc };
+  }, [getCursorClientPosition, resolvePointerTarget]);
+
+  const applyRemoteText = useCallback(
+    (target: HTMLElement, doc: Document, text: string) => {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        const start = target.selectionStart ?? target.value.length;
+        const end = target.selectionEnd ?? target.value.length;
+        target.setRangeText(text, start, end, "end");
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+        return;
+      }
+      if (target.isContentEditable) {
+        const view = doc.defaultView ?? window;
+        if (view.document?.execCommand) {
+          view.document.execCommand("insertText", false, text);
+        } else {
+          const selection = doc.getSelection();
+          if (selection && selection.rangeCount) {
+            selection.deleteFromDocument();
+            selection.getRangeAt(0).insertNode(doc.createTextNode(text));
+            selection.collapseToEnd();
+          }
+        }
+        target.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            data: text,
+            inputType: "insertText",
+          })
+        );
+      }
+    },
+    []
+  );
+
+  const applyRemoteBackspace = useCallback(
+    (target: HTMLElement, count: number) => {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        for (let i = 0; i < count; i += 1) {
+          const start = target.selectionStart ?? target.value.length;
+          const end = target.selectionEnd ?? target.value.length;
+          if (start === end && start > 0) {
+            target.setRangeText("", start - 1, end, "end");
+          } else {
+            target.setRangeText("", start, end, "end");
+          }
+        }
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+        return;
+      }
+      if (target.isContentEditable) {
+        const view = target.ownerDocument?.defaultView ?? window;
+        for (let i = 0; i < count; i += 1) {
+          view.document?.execCommand?.("delete", false);
+        }
+        target.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            inputType: "deleteContentBackward",
+          })
+        );
+      }
+    },
+    []
+  );
+
+  const applyRemoteKey = useCallback(
+    (target: HTMLElement, doc: Document, key: "Enter" | "Escape" | "Tab") => {
+      const view = doc.defaultView ?? window;
+      const down = new view.KeyboardEvent("keydown", {
+        key,
+        bubbles: true,
+        cancelable: true,
+      });
+      const up = new view.KeyboardEvent("keyup", { key, bubbles: true });
+      target.dispatchEvent(down);
+      if (key === "Enter") {
+        if (target instanceof HTMLTextAreaElement) {
+          applyRemoteText(target, doc, "\n");
+        } else if (target instanceof HTMLInputElement) {
+          target.form?.requestSubmit?.();
+        }
+      }
+      target.dispatchEvent(up);
+    },
+    [applyRemoteText]
+  );
+
+  const handleRemoteMouse = useCallback(
+    (msg: RemoteMessage) => {
+      if (msg.type !== "mouse") return;
+      if (viewMode !== "guide" || !playerOpen || !hasKeyboardMouse) return;
+      if (msg.action === "move") {
+        moveRemoteCursor(msg.dx, msg.dy);
+      }
+      if (msg.action === "click") {
+        clickRemotePointer();
+      }
+    },
+    [clickRemotePointer, hasKeyboardMouse, moveRemoteCursor, playerOpen, viewMode]
+  );
+
+  const handleRemoteKeyboard = useCallback(
+    (msg: RemoteMessage) => {
+      if (msg.type !== "keyboard") return;
+      if (viewMode !== "guide" || !playerOpen || !hasKeyboardMouse) return;
+      const targetInfo = getKeyboardTarget();
+      if (!targetInfo?.target || !targetInfo.doc) return;
+      if (msg.action === "text") {
+        applyRemoteText(targetInfo.target, targetInfo.doc, msg.text);
+        return;
+      }
+      if (msg.action === "backspace") {
+        applyRemoteBackspace(targetInfo.target, msg.count ?? 1);
+        return;
+      }
+      if (msg.action === "key") {
+        applyRemoteKey(targetInfo.target, targetInfo.doc, msg.key);
+      }
+    },
+    [
+      applyRemoteBackspace,
+      applyRemoteKey,
+      applyRemoteText,
+      getKeyboardTarget,
+      hasKeyboardMouse,
+      playerOpen,
+      viewMode,
+    ]
+  );
+
   const { send, status } = useRemoteSocket((msg) => {
+    if (msg.type === "mic") {
+      if (msg.from === "remote" && viewMode !== "remote") {
+        void handleGuideMicMessage(msg);
+      }
+      if (msg.from === "guide" && viewMode === "remote") {
+        void handleRemoteMicMessage(msg);
+      }
+      return;
+    }
     if (msg.type === "display") {
       applyDisplaySettings(msg);
       return;
@@ -797,11 +1427,21 @@ function App() {
       }
       return;
     }
+    if (msg.type === "mouse") {
+      handleRemoteMouse(msg);
+      return;
+    }
+    if (msg.type === "keyboard") {
+      handleRemoteKeyboard(msg);
+      return;
+    }
     if (viewMode === "remote") {
       if (msg.type === "app") {
         const nextAppId = msg.appId ?? "";
-        if (requestedRemoteAppId) return;
-        setActiveRemoteAppId(nextAppId);
+        if (!requestedRemoteAppId) {
+          setActiveRemoteAppId(nextAppId);
+        }
+        setRemoteRegistrations(msg.remoteControls ?? []);
       }
       if (msg.type === "dial") {
         if (msg.value) {
@@ -901,10 +1541,11 @@ function App() {
     }
   });
 
+  const appControlsAppId = hasAppControls ? effectiveRemoteAppId : "";
   const { remoteControls, remoteControlsStatus, handleRemoteControl } =
     useRemoteControls({
       viewMode,
-      activeRemoteAppId,
+      activeRemoteAppId: appControlsAppId,
       send,
     });
 
@@ -919,6 +1560,65 @@ function App() {
   useEffect(() => {
     sendRef.current = send;
   }, [send]);
+
+  useEffect(() => {
+    if (remotePanel === "app" && !hasAppControls) {
+      setRemotePanel("remote");
+    }
+    if (remotePanel === "input" && !hasKeyboardMouse) {
+      setRemotePanel("remote");
+    }
+  }, [hasAppControls, hasKeyboardMouse, remotePanel]);
+
+  useEffect(() => {
+    if (viewMode !== "remote") return;
+    if (!hasMicControls && micEnabled) {
+      stopRemoteMic(true);
+      setMicEnabled(false);
+      setMicStatus("idle");
+      setMicError(null);
+    }
+  }, [hasMicControls, micEnabled, stopRemoteMic, viewMode]);
+
+  useEffect(() => {
+    if (!playerOpen) {
+      remotePointerTargetRef.current = null;
+      commitRemoteCursor({
+        ...remoteCursorRef.current,
+        visible: false,
+        pressed: false,
+      });
+    }
+  }, [commitRemoteCursor, playerOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (remoteCursorHideRef.current !== null) {
+        window.clearTimeout(remoteCursorHideRef.current);
+      }
+      if (remoteCursorPressRef.current !== null) {
+        window.clearTimeout(remoteCursorPressRef.current);
+      }
+      if (remoteCursorRafRef.current !== null) {
+        window.cancelAnimationFrame(remoteCursorRafRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (viewMode !== "remote") {
+      stopRemoteMic(false);
+      setMicEnabled(false);
+      setMicStatus("idle");
+      setMicError(null);
+    }
+  }, [viewMode, stopRemoteMic]);
+
+  useEffect(() => {
+    if (viewMode === "remote") {
+      cleanupGuideMic();
+    }
+  }, [viewMode, cleanupGuideMic]);
 
   const commitDial = useCallback(
     (value: string) => {
@@ -1258,16 +1958,25 @@ function App() {
   }, [getViewportMetrics, uiScale]);
 
   useEffect(() => {
+    if (showSplash) {
+      applyScrollOffset(0);
+      autoHoldUntilRef.current = 0;
+      autoResetPendingRef.current = false;
+      lastFrameRef.current = null;
+      return;
+    }
     const bounds = getScrollBounds();
     if (!bounds || channels.length <= visibleRows || bounds.maxScroll <= 0) {
       applyScrollOffset(0);
       autoHoldUntilRef.current = 0;
       autoResetPendingRef.current = false;
+      lastFrameRef.current = null;
       return;
     }
     const maxScroll = bounds.maxScroll;
     autoHoldUntilRef.current = 0;
     autoResetPendingRef.current = false;
+    lastFrameRef.current = null;
 
     const tick = (time: number) => {
       if (lastFrameRef.current === null) lastFrameRef.current = time;
@@ -1310,7 +2019,13 @@ function App() {
       cancelAnimationFrame(raf);
       lastFrameRef.current = null;
     };
-  }, [channels.length, visibleRows, getScrollBounds, applyScrollOffset]);
+  }, [
+    showSplash,
+    channels.length,
+    visibleRows,
+    getScrollBounds,
+    applyScrollOffset,
+  ]);
 
   useEffect(() => {
     if (Date.now() < pauseUntilRef.current) {
@@ -1545,10 +2260,12 @@ function App() {
   useEffect(() => {
     if (viewMode !== "guide") return;
     const nextAppId = playerOpen ? activeAppId : null;
-    if (lastAppMessageRef.current === nextAppId) return;
-    lastAppMessageRef.current = nextAppId;
-    send({ type: "app", appId: nextAppId });
-  }, [viewMode, playerOpen, activeAppId, send]);
+    const nextControls = playerOpen ? activeProgramRemoteControls : [];
+    const nextKey = `${nextAppId ?? ""}|${nextControls.join(",")}`;
+    if (lastAppMessageRef.current === nextKey) return;
+    lastAppMessageRef.current = nextKey;
+    send({ type: "app", appId: nextAppId, remoteControls: nextControls });
+  }, [viewMode, playerOpen, activeAppId, activeProgramRemoteControls, send]);
 
   useEffect(() => {
     const bounds = getScrollBounds();
@@ -1561,9 +2278,38 @@ function App() {
       innerHeight: bounds?.innerHeight ?? null,
     });
   }, [channels.length, visibleRows, uiScale, getScrollBounds]);
-  const hasAppControls = Boolean(activeRemoteAppId);
   const showAppPanel = hasAppControls && remotePanel === "app";
+  const showInputPanel = hasKeyboardMouse && remotePanel === "input";
+  const hasSpecialControls = hasAppControls || hasKeyboardMouse || hasMicControls;
   const showGodPanel = remoteGodmodeOpen;
+  const micStatusLabel = micError
+    ? micError
+    : micStatus === "idle"
+      ? "Off"
+      : micStatus === "requesting"
+        ? "Requesting mic…"
+        : micStatus === "connecting"
+          ? "Connecting…"
+          : micStatus === "live"
+            ? "Live"
+            : "Error";
+  const micToggleDisabled =
+    status !== "open" || micStatus === "requesting" || !hasMicControls;
+  const micIndicator =
+    viewMode !== "remote" && micIncomingStatus !== "idle" ? (
+      <div
+        className={`mic-indicator ${
+          micIncomingStatus === "live" ? "is-live" : ""
+        }`}
+      >
+        <span className="mic-indicator-dot" />
+        {micIncomingStatus === "live" ? "Mic Live" : "Mic Connecting"}
+      </div>
+    ) : null;
+  const micAudioElement =
+    viewMode !== "remote" ? (
+      <audio ref={micAudioRef} className="mic-audio" autoPlay playsInline />
+    ) : null;
   useEffect(() => {
     if (!showGodPanel) {
       setGodmodeQuery("");
@@ -1614,7 +2360,11 @@ function App() {
         setGodmodeQuery={setGodmodeQuery}
         setDialBuffer={setDialBuffer}
         showAppPanel={showAppPanel}
+        showInputPanel={showInputPanel}
         hasAppControls={hasAppControls}
+        hasKeyboardMouse={hasKeyboardMouse}
+        hasMicControls={hasMicControls}
+        hasSpecialControls={hasSpecialControls}
         remoteControlsStatus={remoteControlsStatus}
         remoteControls={remoteControls}
         handleRemoteControl={handleRemoteControl}
@@ -1644,6 +2394,8 @@ function App() {
           masterMuted={masterMuted}
           showVolumeHud={showVolumeHud}
         />
+        {micIndicator}
+        {micAudioElement}
         {displayTuningOverlay}
       </>
     );
@@ -1658,6 +2410,8 @@ function App() {
         selectedProgram={selectedProgram}
         playerOpen={playerOpen}
         playerReady={playerReady}
+        playerSurfaceRef={playerSurfaceRef}
+        remoteCursor={remoteCursor}
         hasPreviewMedia={hasPreviewMedia}
         posterImageReady={posterImageReady}
         setPosterImageReady={setPosterImageReady}
@@ -1694,6 +2448,8 @@ function App() {
         mediaStats={mediaStats}
         dialOverlay={dialOverlay}
       />
+      {micIndicator}
+      {micAudioElement}
       {displayTuningOverlay}
       {splashOverlay}
     </>

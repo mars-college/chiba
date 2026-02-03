@@ -33,6 +33,9 @@ export default defineConfig({
       "/embed": {
         target: "http://localhost:8787",
       },
+      "/roadmap": {
+        target: "http://localhost:8787",
+      },
       "/ws": {
         target: "ws://localhost:8787",
         ws: true,
