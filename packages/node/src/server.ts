@@ -107,6 +107,7 @@ const state: ServerState = {
     id: '',
     friendlyName: 'unnamed-node',
     controllerUrl: '',
+    kioskUrl: '',
   },
   startTime: Date.now(),
   reconnectTimer: null,
@@ -121,6 +122,9 @@ const state: ServerState = {
 const CHIBA_DIR = process.env.CHIBA_DIR || '/home/pi/chiba';
 const ROTATION_CONFIG_FILE = path.join(CHIBA_DIR, '.display-rotate');
 const ROTATION_SIGNAL_FILE = '/tmp/chiba-rotate-signal';
+const KIOSK_URL_FILE = path.join(CHIBA_DIR, '.kiosk-url');
+const KIOSK_RESTART_SIGNAL_FILE = '/tmp/chiba-kiosk-restart';
+const KIOSK_URL_CONFIG_KEY = 'kiosk.url';
 
 /**
  * Update a key=value pair in a .env file.
@@ -204,6 +208,41 @@ function getDisplayRotation(): DisplayRotation {
 }
 
 /**
+ * Read kiosk URL from file (if present).
+ */
+function readKioskUrlFile(): string {
+  try {
+    if (fs.existsSync(KIOSK_URL_FILE)) {
+      return fs.readFileSync(KIOSK_URL_FILE, 'utf-8').trim();
+    }
+  } catch {
+    // Ignore errors, return default
+  }
+  return '';
+}
+
+/**
+ * Persist kiosk URL to file (or remove if empty).
+ */
+function writeKioskUrlFile(url: string): void {
+  try {
+    if (!url) {
+      if (fs.existsSync(KIOSK_URL_FILE)) {
+        fs.unlinkSync(KIOSK_URL_FILE);
+      }
+      return;
+    }
+    fs.mkdirSync(path.dirname(KIOSK_URL_FILE), { recursive: true });
+    fs.writeFileSync(KIOSK_URL_FILE, url);
+  } catch (err) {
+    logger.warn('Failed to write kiosk URL file', {
+      error: (err as Error).message,
+      file: KIOSK_URL_FILE,
+    });
+  }
+}
+
+/**
  * Set display rotation - applies immediately via signal file and persists for reboot.
  * The run-kiosk.sh script watches for the signal file and applies rotation via wlr-randr.
  */
@@ -266,6 +305,7 @@ function getNodeInfo(): NodeInfo {
     version: VERSION,
     uptime: Math.floor((Date.now() - state.startTime) / 1000),
     displayRotation: getDisplayRotation(),
+    kioskUrl: state.config.kioskUrl || undefined,
   };
 }
 
@@ -503,6 +543,15 @@ async function handleRequest(
             controllerConnected:
               state.controllerWs?.readyState === WebSocket.OPEN,
             wsClients: state.playerClients.size,
+          },
+        });
+        return;
+
+      case '/kiosk-url':
+        sendJson(res, {
+          success: true,
+          data: {
+            url: state.config.kioskUrl || '',
           },
         });
         return;
@@ -1166,6 +1215,58 @@ async function handleRequest(
         return;
       }
 
+      case '/kiosk-url': {
+        const nextUrlRaw = body?.url;
+        if (nextUrlRaw !== undefined && typeof nextUrlRaw !== 'string') {
+          sendError(res, 'Invalid url parameter', 400);
+          return;
+        }
+
+        const nextUrl = (nextUrlRaw ?? '').toString().trim();
+        state.config.kioskUrl = nextUrl;
+        setConfig(KIOSK_URL_CONFIG_KEY, nextUrl);
+        writeKioskUrlFile(nextUrl);
+
+        try {
+          fs.writeFileSync(KIOSK_RESTART_SIGNAL_FILE, Date.now().toString());
+        } catch (err) {
+          logger.warn('Failed to signal kiosk restart', {
+            error: (err as Error).message,
+          });
+        }
+
+        // Send a heartbeat so controller/dashboard can reflect the change
+        if (state.controllerWs?.readyState === WebSocket.OPEN) {
+          const heartbeatMessage: NodeToControllerMessage = {
+            type: 'heartbeat',
+            status: getNodeStatus(),
+          };
+          state.controllerWs.send(JSON.stringify(heartbeatMessage));
+        }
+
+        logger.info('Kiosk URL updated', { url: nextUrl || '(default)' });
+        sendJson(res, {
+          success: true,
+          data: {
+            url: nextUrl,
+            restartQueued: true,
+          },
+        });
+        return;
+      }
+
+      case '/kiosk-restart': {
+        try {
+          fs.writeFileSync(KIOSK_RESTART_SIGNAL_FILE, Date.now().toString());
+          logger.info('Kiosk restart requested');
+          sendJson(res, { success: true, data: { restartQueued: true } });
+        } catch (err) {
+          logger.error('Failed to request kiosk restart', err as Error);
+          sendError(res, 'Failed to request kiosk restart', 500);
+        }
+        return;
+      }
+
       case '/exit-kiosk': {
         // Exit kiosk mode by killing cage directly
         logger.info('Exit kiosk command received');
@@ -1558,6 +1659,13 @@ function loadConfig(): void {
     (dbFriendlyName && dbFriendlyName !== 'unnamed-node' ? dbFriendlyName : null) ||
     envFriendlyName ||
     'unnamed-node';
+  const envKioskUrl = process.env.CHIBA_KIOSK_URL || process.env.KIOSK_URL;
+  const fileKioskUrl = readKioskUrlFile();
+  const kioskUrl =
+    envKioskUrl ||
+    dbConfig[KIOSK_URL_CONFIG_KEY] ||
+    fileKioskUrl ||
+    '';
 
   state.config = {
     id: process.env.NODE_ID || dbConfig['node.id'] || crypto.randomUUID(),
@@ -1565,11 +1673,24 @@ function loadConfig(): void {
     controllerUrl:
       process.env.CONTROLLER_URL || dbConfig['controller.url'] || '',
     apiKey: process.env.API_KEY || dbConfig['controller.api_key'],
+    kioskUrl,
   };
 
   // Persist ID if it was just generated or was empty
   if (!dbConfig['node.id'] || dbConfig['node.id'] === '') {
     setConfig('node.id', state.config.id);
+  }
+
+  // Keep kiosk URL in sync (file + db) when loaded from env or file
+  if (kioskUrl) {
+    if (dbConfig[KIOSK_URL_CONFIG_KEY] !== kioskUrl) {
+      setConfig(KIOSK_URL_CONFIG_KEY, kioskUrl);
+    }
+    writeKioskUrlFile(kioskUrl);
+  } else if (dbConfig[KIOSK_URL_CONFIG_KEY]) {
+    // Clear stale config if file/env are empty
+    setConfig(KIOSK_URL_CONFIG_KEY, '');
+    writeKioskUrlFile('');
   }
 
   logger.info('Configuration loaded', {

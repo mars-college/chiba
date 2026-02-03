@@ -454,10 +454,13 @@ CHIBA_DIR="$(dirname "$SCRIPT_DIR")"
 EXIT_SIGNAL="/tmp/chiba-exit-kiosk"
 ROTATE_SIGNAL="/tmp/chiba-rotate-signal"
 ROTATE_CONFIG="$CHIBA_DIR/.display-rotate"
+KIOSK_URL_FILE="$CHIBA_DIR/.kiosk-url"
+KIOSK_RESTART_SIGNAL="/tmp/chiba-kiosk-restart"
 
 # Clean up any stale signals
 rm -f "$EXIT_SIGNAL"
 rm -f "$ROTATE_SIGNAL"
+rm -f "$KIOSK_RESTART_SIGNAL"
 
 # Required environment for Wayland
 export XDG_RUNTIME_DIR=/run/user/$(id -u)
@@ -534,12 +537,31 @@ apply_display_rotation() {
     fi
 }
 
+# Resolve the kiosk URL (env > file > default)
+read_kiosk_url() {
+    if [ -n "$CHIBA_KIOSK_URL" ]; then
+        echo "$CHIBA_KIOSK_URL"
+        return
+    fi
+    if [ -n "$KIOSK_URL" ]; then
+        echo "$KIOSK_URL"
+        return
+    fi
+    if [ -f "$KIOSK_URL_FILE" ]; then
+        URL=$(cat "$KIOSK_URL_FILE" | tr -d '\r\n')
+        if [ -n "$URL" ]; then
+            echo "$URL"
+            return
+        fi
+    fi
+    echo "http://localhost:8080/player"
+}
+
 # Function to watch for exit signal
 watch_exit_signal() {
     while true; do
         if [ -f "$EXIT_SIGNAL" ]; then
             echo "Exit signal detected, stopping kiosk..."
-            rm -f "$EXIT_SIGNAL"
             # Kill cage using multiple methods for reliability
             # Method 1: Kill by process name
             pkill -9 cage 2>/dev/null
@@ -550,9 +572,23 @@ watch_exit_signal() {
             pkill -9 chromium-browser 2>/dev/null
             # Method 4: Use killall as fallback
             killall -9 cage 2>/dev/null
-            exit 0
         fi
         sleep 1
+    done
+}
+
+# Function to watch for restart signal
+watch_restart_signal() {
+    while true; do
+        if [ -f "$KIOSK_RESTART_SIGNAL" ]; then
+            echo "Restart signal detected, restarting kiosk..."
+            pkill -9 cage 2>/dev/null
+            pkill -9 -f "cage.*chromium" 2>/dev/null
+            pkill -9 chromium 2>/dev/null
+            pkill -9 chromium-browser 2>/dev/null
+            killall -9 cage 2>/dev/null
+        fi
+        sleep 0.5
     done
 }
 
@@ -583,25 +619,51 @@ watch_rotation_signal() {
 watch_exit_signal &
 EXIT_WATCHER_PID=$!
 
+# Start restart watcher in background
+watch_restart_signal &
+RESTART_WATCHER_PID=$!
+
 # Start rotation signal watcher in background
 watch_rotation_signal &
 ROTATE_WATCHER_PID=$!
 
-# Apply display rotation in background (after cage starts)
-apply_display_rotation &
-
 # Cleanup on script exit
 cleanup() {
     kill $EXIT_WATCHER_PID 2>/dev/null
+    kill $RESTART_WATCHER_PID 2>/dev/null
     kill $ROTATE_WATCHER_PID 2>/dev/null
-    rm -f "$EXIT_SIGNAL"
     rm -f "$ROTATE_SIGNAL"
+    rm -f "$KIOSK_RESTART_SIGNAL"
 }
 trap cleanup EXIT
 
-# Run Chromium in cage (Wayland compositor)
-# -s flag enables VT switching (Ctrl+Alt+F1-F12)
-cage -s -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" http://localhost:8080/player
+while true; do
+    if [ -f "$EXIT_SIGNAL" ]; then
+        rm -f "$EXIT_SIGNAL"
+        break
+    fi
+
+    KIOSK_URL="$(read_kiosk_url)"
+    echo "Launching kiosk: $KIOSK_URL"
+
+    # Apply display rotation in background (after cage starts)
+    apply_display_rotation &
+
+    # Run Chromium in cage (Wayland compositor)
+    # -s flag enables VT switching (Ctrl+Alt+F1-F12)
+    cage -s -- $CHROMIUM_BIN "${CHROMIUM_FLAGS[@]}" "$KIOSK_URL"
+
+    if [ -f "$EXIT_SIGNAL" ]; then
+        rm -f "$EXIT_SIGNAL"
+        break
+    fi
+
+    if [ -f "$KIOSK_RESTART_SIGNAL" ]; then
+        rm -f "$KIOSK_RESTART_SIGNAL"
+    fi
+
+    sleep 1
+done
 
 # If cage exits normally, clean up
 cleanup

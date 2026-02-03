@@ -96,6 +96,12 @@ curl -X POST $NODE/rotate -d '{"rotation":90}'
 # Exit kiosk mode
 curl -X POST $NODE/exit-kiosk
 
+# Set kiosk URL (e.g., point to Chiba Cable)
+curl -X POST $NODE/kiosk-url -d '{"url":"http://controller:8787/?screenId=pi-01"}'
+
+# Restart kiosk without changing URL
+curl -X POST $NODE/kiosk-restart
+
 # Clear all cached content
 curl -X POST $NODE/clear-cache
 ```
