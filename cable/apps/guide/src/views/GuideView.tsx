@@ -1,116 +1,59 @@
-import type { CSSProperties, RefObject } from "react";
-import { DebugPanel, type MemoryStats } from "../components/DebugPanel";
+import { DebugPanel } from "../components/DebugPanel";
 import { DialOverlay } from "../components/DialOverlay";
 import { GuideFooter } from "../components/GuideFooter";
 import { GuideGrid } from "../components/GuideGrid";
 import { GuideHeader } from "../components/GuideHeader";
 import { PlayerOverlay } from "../components/PlayerOverlay";
 import { VolumeHud } from "../components/VolumeHud";
-import type {
-  GuideChannel,
-  GuideIndex,
-  MediaDebugStats,
-  MediaKind,
-  PlayerMeta,
-  ProgramSlot,
-} from "../types/guide";
+import type { MemoryStats } from "../components/DebugPanel";
+import { useGuideViewStore } from "../store/useGuideViewStore";
 
-type GuideViewProps = {
-  gridStyle: CSSProperties;
-  now: Date;
-  selectedChannel?: GuideChannel;
-  selectedProgram?: ProgramSlot | null;
-  playerOpen: boolean;
-  playerReady: boolean;
-  playerSurfaceRef: RefObject<HTMLDivElement | null>;
-  remoteCursor?: { x: number; y: number; visible: boolean; pressed: boolean };
-  hasPreviewMedia: boolean;
-  posterImageReady: boolean;
-  setPosterImageReady: (ready: boolean) => void;
-  previewContainerRef: RefObject<HTMLDivElement | null>;
-  progressValue: number;
-  indexData: GuideIndex;
-  visibleStartSlot: number;
-  visibleSlotCount: number;
-  slotCount: number;
-  selectedCol: number;
-  currentSlotIndex: number;
-  channels: GuideChannel[];
-  activeRow: number;
-  isPaused: boolean;
-  viewportRef: RefObject<HTMLDivElement | null>;
-  rowsRef: RefObject<HTMLDivElement | null>;
-  onSelectRow: (row: number) => void;
-  onSelectCol: (col: number) => void;
-  onOpenProgram: (program: ProgramSlot, channel: GuideChannel) => void;
-  onToggleDebug: () => void;
-  showQr: boolean;
-  qrUrl: string;
-  playerUrl: string | null;
-  playerKind: MediaKind | null;
-  playerMeta: PlayerMeta | null;
-  showPlayerHud: boolean;
-  ambientAudio: {
-    url: string;
-    volume?: number;
-    offsetMinSec?: number;
-    offsetMaxSec?: number;
-  } | null;
-  masterVolume: number;
-  masterMuted: boolean;
-  showVolumeHud: boolean;
-  setPlayerReady: (ready: boolean) => void;
-  showDebug: boolean;
-  memoryStats: MemoryStats | null;
-  mediaStats: MediaDebugStats | null;
-  dialOverlay: string;
-};
-
-export function GuideView({
-  gridStyle,
-  now,
-  selectedChannel,
-  selectedProgram,
-  playerOpen,
-  playerReady,
-  playerSurfaceRef,
-  remoteCursor,
-  hasPreviewMedia,
-  posterImageReady,
-  setPosterImageReady,
-  previewContainerRef,
-  progressValue,
-  indexData,
-  visibleStartSlot,
-  visibleSlotCount,
-  slotCount,
-  selectedCol,
-  currentSlotIndex,
-  channels,
-  activeRow,
-  isPaused,
-  viewportRef,
-  rowsRef,
-  onSelectRow,
-  onSelectCol,
-  onOpenProgram,
-  onToggleDebug,
-  showQr,
-  qrUrl,
-  playerUrl,
-  playerKind,
-  playerMeta,
-  showPlayerHud,
-  ambientAudio,
-  masterVolume,
-  masterMuted,
-  showVolumeHud,
-  setPlayerReady,
-  showDebug,
-  memoryStats,
-  mediaStats,
-  dialOverlay,
-}: GuideViewProps) {
+export function GuideView() {
+  const {
+    gridStyle,
+    now,
+    selectedChannel,
+    selectedProgram,
+    playerOpen,
+    playerReady,
+    playerSurfaceRef,
+    remoteCursor,
+    hasPreviewMedia,
+    posterImageReady,
+    setPosterImageReady,
+    previewContainerRef,
+    progressValue,
+    indexData,
+    visibleStartSlot,
+    visibleSlotCount,
+    slotCount,
+    selectedCol,
+    currentSlotIndex,
+    channels,
+    activeRow,
+    isPaused,
+    viewportRef,
+    rowsRef,
+    onSelectRow,
+    onSelectCol,
+    onOpenProgram,
+    onToggleDebug,
+    showQr,
+    qrUrl,
+    playerUrl,
+    playerKind,
+    playerMeta,
+    showPlayerHud,
+    ambientAudio,
+    masterVolume,
+    masterMuted,
+    showVolumeHud,
+    setPlayerReady,
+    showDebug,
+    memoryStats,
+    mediaStats,
+    dialOverlay,
+  } = useGuideViewStore();
   return (
     <div
       className={`guide-shell ${playerOpen ? "player-open" : ""}`}

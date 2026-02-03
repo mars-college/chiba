@@ -1,39 +1,23 @@
-import { DebugPanel, type MemoryStats } from "../components/DebugPanel";
+import { DebugPanel } from "../components/DebugPanel";
 import { DialOverlay } from "../components/DialOverlay";
 import { VolumeHud } from "../components/VolumeHud";
-import type {
-  GuideChannel,
-  MediaDebugStats,
-  ProgramSlot,
-} from "../types/guide";
+import type { ProgramSlot } from "../types/guide";
+import { useArtViewStore } from "../store/useArtViewStore";
 
-type ArtViewProps = {
-  channels: GuideChannel[];
-  channelId: string | null;
-  artIndex: number;
-  artPaused: boolean;
-  showDebug: boolean;
-  memoryStats: MemoryStats | null;
-  mediaStats: MediaDebugStats | null;
-  dialOverlay: string;
-  masterVolume: number;
-  masterMuted: boolean;
-  showVolumeHud: boolean;
-};
-
-export function ArtView({
-  channels,
-  channelId,
-  artIndex,
-  artPaused,
-  showDebug,
-  memoryStats,
-  mediaStats,
-  dialOverlay,
-  masterVolume,
-  masterMuted,
-  showVolumeHud,
-}: ArtViewProps) {
+export function ArtView() {
+  const {
+    channels,
+    channelId,
+    artIndex,
+    artPaused,
+    showDebug,
+    memoryStats,
+    mediaStats,
+    dialOverlay,
+    masterVolume,
+    masterMuted,
+    showVolumeHud,
+  } = useArtViewStore();
   const artChannel =
     channels.find((channel) => channel.id === (channelId ?? "jensen-art")) ??
     channels[0];

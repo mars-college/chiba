@@ -81,6 +81,8 @@ import { SplashScreen } from "./components/SplashScreen";
 import { ArtView } from "./views/ArtView";
 import { GuideView } from "./views/GuideView";
 import { RemoteView } from "./views/RemoteView";
+import { useArtViewStore } from "./store/useArtViewStore";
+import { useGuideViewStore } from "./store/useGuideViewStore";
 import { useRemoteViewStore } from "./store/useRemoteViewStore";
 import type {
   DisplaySettings,
@@ -319,6 +321,13 @@ function App() {
   const setRemoteViewHandlers = useRemoteViewStore(
     (state) => state.setRemoteViewHandlers
   );
+  const setGuideViewState = useGuideViewStore(
+    (state) => state.setGuideViewState
+  );
+  const setGuideViewHandlers = useGuideViewStore(
+    (state) => state.setGuideViewHandlers
+  );
+  const setArtViewState = useArtViewStore((state) => state.setArtViewState);
 
   const pauseUntilRef = useRef(0);
   const autoHoldUntilRef = useRef(0);
@@ -2350,6 +2359,9 @@ function App() {
     remoteNowChannel?.id === DEBUG_CHANNEL_ID ||
     normalizeChannelNumber(remoteNowChannel?.number ?? "") ===
       normalizeChannelNumber(DEBUG_CHANNEL_NUMBER);
+  const handleToggleDebug = useCallback(() => {
+    setShowDebug((prev) => !prev);
+  }, []);
 
   useEffect(() => {
     setRemoteViewState({
@@ -2431,6 +2443,134 @@ function App() {
     setRemoteViewHandlers,
   ]);
   useEffect(() => {
+    setGuideViewState({
+      gridStyle,
+      now,
+      selectedChannel,
+      selectedProgram,
+      playerOpen,
+      playerReady,
+      playerSurfaceRef,
+      remoteCursor,
+      hasPreviewMedia,
+      posterImageReady,
+      previewContainerRef,
+      progressValue,
+      indexData,
+      visibleStartSlot,
+      visibleSlotCount,
+      slotCount,
+      selectedCol,
+      currentSlotIndex,
+      channels,
+      activeRow,
+      isPaused,
+      viewportRef,
+      rowsRef,
+      showQr,
+      qrUrl: qrImageUrl,
+      playerUrl,
+      playerKind,
+      playerMeta,
+      showPlayerHud,
+      ambientAudio,
+      masterVolume,
+      masterMuted,
+      showVolumeHud,
+      showDebug,
+      memoryStats,
+      mediaStats,
+      dialOverlay,
+    });
+  }, [
+    gridStyle,
+    now,
+    selectedChannel,
+    selectedProgram,
+    playerOpen,
+    playerReady,
+    playerSurfaceRef,
+    remoteCursor,
+    hasPreviewMedia,
+    posterImageReady,
+    previewContainerRef,
+    progressValue,
+    indexData,
+    visibleStartSlot,
+    visibleSlotCount,
+    slotCount,
+    selectedCol,
+    currentSlotIndex,
+    channels,
+    activeRow,
+    isPaused,
+    viewportRef,
+    rowsRef,
+    showQr,
+    qrImageUrl,
+    playerUrl,
+    playerKind,
+    playerMeta,
+    showPlayerHud,
+    ambientAudio,
+    masterVolume,
+    masterMuted,
+    showVolumeHud,
+    showDebug,
+    memoryStats,
+    mediaStats,
+    dialOverlay,
+    setGuideViewState,
+  ]);
+
+  useEffect(() => {
+    setGuideViewHandlers({
+      setPosterImageReady,
+      onSelectRow: setSelectedRow,
+      onSelectCol: setSelectedCol,
+      onOpenProgram: openProgram,
+      onToggleDebug: handleToggleDebug,
+      setPlayerReady,
+    });
+  }, [
+    setPosterImageReady,
+    setSelectedRow,
+    setSelectedCol,
+    openProgram,
+    handleToggleDebug,
+    setPlayerReady,
+    setGuideViewHandlers,
+  ]);
+
+  useEffect(() => {
+    setArtViewState({
+      channels,
+      channelId,
+      artIndex,
+      artPaused,
+      showDebug,
+      memoryStats,
+      mediaStats,
+      dialOverlay,
+      masterVolume,
+      masterMuted,
+      showVolumeHud,
+    });
+  }, [
+    channels,
+    channelId,
+    artIndex,
+    artPaused,
+    showDebug,
+    memoryStats,
+    mediaStats,
+    dialOverlay,
+    masterVolume,
+    masterMuted,
+    showVolumeHud,
+    setArtViewState,
+  ]);
+  useEffect(() => {
     if (!showGodPanel) {
       setGodmodeQuery("");
     }
@@ -2465,19 +2605,7 @@ function App() {
   if (viewMode === "art") {
     return (
       <>
-        <ArtView
-          channels={channels}
-          channelId={channelId}
-          artIndex={artIndex}
-          artPaused={artPaused}
-          showDebug={showDebug}
-          memoryStats={memoryStats}
-          mediaStats={mediaStats}
-          dialOverlay={dialOverlay}
-          masterVolume={masterVolume}
-          masterMuted={masterMuted}
-          showVolumeHud={showVolumeHud}
-        />
+        <ArtView />
         {micIndicator}
         {micAudioElement}
         {displayTuningOverlay}
@@ -2487,51 +2615,7 @@ function App() {
 
   return (
     <>
-      <GuideView
-        gridStyle={gridStyle}
-        now={now}
-        selectedChannel={selectedChannel}
-        selectedProgram={selectedProgram}
-        playerOpen={playerOpen}
-        playerReady={playerReady}
-        playerSurfaceRef={playerSurfaceRef}
-        remoteCursor={remoteCursor}
-        hasPreviewMedia={hasPreviewMedia}
-        posterImageReady={posterImageReady}
-        setPosterImageReady={setPosterImageReady}
-        previewContainerRef={previewContainerRef}
-        progressValue={progressValue}
-        indexData={indexData}
-        visibleStartSlot={visibleStartSlot}
-        visibleSlotCount={visibleSlotCount}
-        slotCount={slotCount}
-        selectedCol={selectedCol}
-        currentSlotIndex={currentSlotIndex}
-        channels={channels}
-        activeRow={activeRow}
-        isPaused={isPaused}
-        viewportRef={viewportRef}
-        rowsRef={rowsRef}
-        onSelectRow={setSelectedRow}
-        onSelectCol={setSelectedCol}
-        onOpenProgram={openProgram}
-        onToggleDebug={() => setShowDebug((prev) => !prev)}
-        showQr={showQr}
-        qrUrl={qrImageUrl}
-        playerUrl={playerUrl}
-        playerKind={playerKind}
-        playerMeta={playerMeta}
-        showPlayerHud={showPlayerHud}
-        ambientAudio={ambientAudio}
-        masterVolume={masterVolume}
-        masterMuted={masterMuted}
-        showVolumeHud={showVolumeHud}
-        setPlayerReady={setPlayerReady}
-        showDebug={showDebug}
-        memoryStats={memoryStats}
-        mediaStats={mediaStats}
-        dialOverlay={dialOverlay}
-      />
+      <GuideView />
       {micIndicator}
       {micAudioElement}
       {displayTuningOverlay}
