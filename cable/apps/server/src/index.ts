@@ -477,6 +477,38 @@ const buildProxyPage = (
             try {
               const raw = normalizeUrlArg(input);
               if (!raw) return input;
+              if (typeof raw === 'string' && raw.startsWith(proxyBase)) {
+                return raw;
+              }
+              if (upstreamOrigin && typeof raw === 'string' && raw.startsWith('/')) {
+                return proxyBase + raw;
+              }
+              const resolved = new URL(raw, document.baseURI);
+              if (!upstreamOrigin) return input;
+              if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return input;
+              if (resolved.origin !== upstreamOrigin) return input;
+              return proxyBase + resolved.pathname + resolved.search + resolved.hash;
+            } catch {
+              return input;
+            }
+          };
+          const rewriteAsset = (input) => {
+            try {
+              const raw = normalizeUrlArg(input);
+              if (!raw) return input;
+              if (typeof raw === 'string' && raw.startsWith(proxyBase)) {
+                return raw;
+              }
+              if (
+                typeof raw === 'string' &&
+                (raw.startsWith('data:') ||
+                  raw.startsWith('blob:') ||
+                  raw.startsWith('mailto:') ||
+                  raw.startsWith('javascript:') ||
+                  raw.startsWith('#'))
+              ) {
+                return input;
+              }
               if (upstreamOrigin && typeof raw === 'string' && raw.startsWith('/')) {
                 return proxyBase + raw;
               }
@@ -562,6 +594,37 @@ const buildProxyPage = (
             };
           } catch {
             // ignore xhr override failures
+          }
+          const patchAttr = (proto, prop, rewrite) => {
+            try {
+              const desc = Object.getOwnPropertyDescriptor(proto, prop);
+              if (!desc || !desc.set) return;
+              Object.defineProperty(proto, prop, {
+                ...desc,
+                set(value) {
+                  return desc.set.call(this, rewrite(value));
+                },
+              });
+            } catch {
+              // ignore attribute override failures
+            }
+          };
+          patchAttr(HTMLScriptElement.prototype, 'src', rewriteAsset);
+          patchAttr(HTMLLinkElement.prototype, 'href', rewriteAsset);
+          patchAttr(HTMLImageElement.prototype, 'src', rewriteAsset);
+          try {
+            const originalSetAttribute = Element.prototype.setAttribute;
+            Element.prototype.setAttribute = function (name, value) {
+              if (typeof name === 'string') {
+                const lower = name.toLowerCase();
+                if (lower === 'src' || lower === 'href') {
+                  return originalSetAttribute.call(this, name, rewriteAsset(value));
+                }
+              }
+              return originalSetAttribute.call(this, name, value);
+            };
+          } catch {
+            // ignore setAttribute override failures
           }
           const selectors = ${JSON.stringify(selectors)};
           const remove = () => {
