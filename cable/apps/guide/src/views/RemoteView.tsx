@@ -6,99 +6,42 @@ import {
   type ChangeEvent,
   type PointerEvent,
 } from "react";
-import { DebugPanel, type MemoryStats } from "../components/DebugPanel";
+import { DebugPanel } from "../components/DebugPanel";
 import { DialOverlay } from "../components/DialOverlay";
-import {
-  DisplayTuningPanel,
-  type DisplayTuningPayload,
-} from "../components/DisplayTuningPanel";
-import type {
-  GuideChannel,
-  MediaDebugStats,
-  ProgramSlot,
-  RemoteControl,
-  RemoteMessage,
-  RemoteStatus,
-} from "../types/guide";
-import type { RemoteControlsStatus } from "../hooks/useRemoteControls";
+import { DisplayTuningPanel } from "../components/DisplayTuningPanel";
+import { useRemoteViewStore } from "../store/useRemoteViewStore";
 
-type GodmodeItem = {
-  id: string;
-  program: ProgramSlot;
-  channel: GuideChannel;
-};
-
-type RemoteViewProps = {
-  status: RemoteStatus;
-  uiScale: number;
-  textScale: number;
-  visibleHours: number;
-  activeThemeId: string;
-  onDisplayChange: (payload: DisplayTuningPayload) => void;
-  send: (message: RemoteMessage) => void;
-  isRemoteDebug: boolean;
-  showGodPanel: boolean;
-  setRemoteGodmodeOpen: (open: boolean) => void;
-  filteredGodmodeItems: GodmodeItem[];
-  godmodeQuery: string;
-  setGodmodeQuery: (value: string) => void;
-  setDialBuffer: (value: string) => void;
-  showAppPanel: boolean;
-  showInputPanel: boolean;
-  hasAppControls: boolean;
-  hasKeyboardMouse: boolean;
-  hasMicControls: boolean;
-  hasSpecialControls: boolean;
-  remoteControlsStatus: RemoteControlsStatus;
-  remoteControls: RemoteControl[];
-  handleRemoteControl: (controlId: string, value: number | string | boolean) => void;
-  setRemotePanel: (panel: "remote" | "app" | "input") => void;
-  pushDialDigit: (digit: number) => void;
-  micEnabled: boolean;
-  micStatusLabel: string;
-  micToggleDisabled: boolean;
-  onMicToggle: () => void;
-  showDebug: boolean;
-  memoryStats: MemoryStats | null;
-  mediaStats: MediaDebugStats | null;
-  dialOverlay: string;
-};
-
-export function RemoteView({
-  status,
-  uiScale,
-  textScale,
-  visibleHours,
-  activeThemeId,
-  onDisplayChange,
-  send,
-  isRemoteDebug,
-  showGodPanel,
-  setRemoteGodmodeOpen,
-  filteredGodmodeItems,
-  godmodeQuery,
-  setGodmodeQuery,
-  setDialBuffer,
-  showAppPanel,
-  showInputPanel,
-  hasAppControls,
-  hasKeyboardMouse,
-  hasMicControls,
-  hasSpecialControls,
-  remoteControlsStatus,
-  remoteControls,
-  handleRemoteControl,
-  setRemotePanel,
-  pushDialDigit,
-  micEnabled,
-  micStatusLabel,
-  micToggleDisabled,
-  onMicToggle,
-  showDebug,
-  memoryStats,
-  mediaStats,
-  dialOverlay,
-}: RemoteViewProps) {
+export function RemoteView() {
+  const {
+    status,
+    uiScale,
+    textScale,
+    visibleHours,
+    activeThemeId,
+    onDisplayChange,
+    send,
+    isRemoteDebug,
+    showGodPanel,
+    setRemoteGodmodeOpen,
+    filteredGodmodeItems,
+    godmodeQuery,
+    setGodmodeQuery,
+    setDialBuffer,
+    showAppPanel,
+    showInputPanel,
+    hasAppControls,
+    hasKeyboardMouse,
+    hasSpecialControls,
+    remoteControlsStatus,
+    remoteControls,
+    handleRemoteControl,
+    setRemotePanel,
+    pushDialDigit,
+    showDebug,
+    memoryStats,
+    mediaStats,
+    dialOverlay,
+  } = useRemoteViewStore();
   const padRef = useRef<HTMLDivElement | null>(null);
   const padLastRef = useRef<{ x: number; y: number } | null>(null);
   const padTapRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -589,21 +532,6 @@ export function RemoteView({
 
             {hasSpecialControls ? (
               <div className="remote-specials">
-                {hasMicControls ? (
-                  <div className="remote-mic">
-                    <div className="remote-mic-title">Mic</div>
-                    <button
-                      className={`remote-mic-toggle ${
-                        micEnabled ? "is-on" : ""
-                      }`}
-                      disabled={micToggleDisabled}
-                      onClick={onMicToggle}
-                    >
-                      {micEnabled ? "Mic On" : "Mic Off"}
-                    </button>
-                    <div className="remote-mic-status">{micStatusLabel}</div>
-                  </div>
-                ) : null}
                 <div className="remote-special-actions">
                   {hasKeyboardMouse ? (
                     <button

@@ -81,6 +81,7 @@ import { SplashScreen } from "./components/SplashScreen";
 import { ArtView } from "./views/ArtView";
 import { GuideView } from "./views/GuideView";
 import { RemoteView } from "./views/RemoteView";
+import { useRemoteViewStore } from "./store/useRemoteViewStore";
 import type {
   DisplaySettings,
   GuideChannel,
@@ -294,9 +295,9 @@ function App() {
   const [remoteRegistrations, setRemoteRegistrations] = useState<
     RemoteRegistration[]
   >([]);
-  const [remotePanel, setRemotePanel] = useState<
-    "remote" | "app" | "input"
-  >("remote");
+  const [remotePanel, setRemotePanel] = useState<"remote" | "app" | "input">(
+    "remote"
+  );
   const [remoteCursor, setRemoteCursor] = useState<RemoteCursorState>({
     x: 0.5,
     y: 0.5,
@@ -311,6 +312,13 @@ function App() {
   const [micIncomingStatus, setMicIncomingStatus] = useState<
     "idle" | "connecting" | "live"
   >("idle");
+
+  const setRemoteViewState = useRemoteViewStore(
+    (state) => state.setRemoteViewState
+  );
+  const setRemoteViewHandlers = useRemoteViewStore(
+    (state) => state.setRemoteViewHandlers
+  );
 
   const pauseUntilRef = useRef(0);
   const autoHoldUntilRef = useRef(0);
@@ -843,7 +851,9 @@ function App() {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
       return crypto.randomUUID();
     }
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    return `${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
   }, []);
 
   const stopRemoteMic = useCallback(
@@ -1032,8 +1042,7 @@ function App() {
           });
         };
         pc.ontrack = (event) => {
-          const stream =
-            event.streams?.[0] ?? new MediaStream([event.track]);
+          const stream = event.streams?.[0] ?? new MediaStream([event.track]);
           micGuideStreamRef.current = stream;
           const audio = micAudioRef.current;
           if (audio) {
@@ -1046,7 +1055,10 @@ function App() {
           setMicIncomingStatus("live");
         };
         pc.onconnectionstatechange = () => {
-          if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+          if (
+            pc.connectionState === "failed" ||
+            pc.connectionState === "closed"
+          ) {
             setMicIncomingStatus("idle");
           }
         };
@@ -1114,17 +1126,20 @@ function App() {
     }, REMOTE_CURSOR_HIDE_MS);
   }, [commitRemoteCursor]);
 
-  const showRemoteCursor = useCallback(() => {
-    commitRemoteCursor({ ...remoteCursorRef.current, visible: true });
-    scheduleRemoteCursorHide();
-  }, [commitRemoteCursor, scheduleRemoteCursorHide]);
-
   const moveRemoteCursor = useCallback(
     (dx: number, dy: number) => {
       const next = {
         ...remoteCursorRef.current,
-        x: clamp(remoteCursorRef.current.x + dx * REMOTE_MOUSE_SENSITIVITY, 0, 1),
-        y: clamp(remoteCursorRef.current.y + dy * REMOTE_MOUSE_SENSITIVITY, 0, 1),
+        x: clamp(
+          remoteCursorRef.current.x + dx * REMOTE_MOUSE_SENSITIVITY,
+          0,
+          1
+        ),
+        y: clamp(
+          remoteCursorRef.current.y + dy * REMOTE_MOUSE_SENSITIVITY,
+          0,
+          1
+        ),
         visible: true,
       };
       commitRemoteCursor(next);
@@ -1180,7 +1195,12 @@ function App() {
 
   const dispatchMouseEvent = useCallback(
     (
-      info: { target: HTMLElement; doc: Document; clientX: number; clientY: number },
+      info: {
+        target: HTMLElement;
+        doc: Document;
+        clientX: number;
+        clientY: number;
+      },
       type: "mousemove" | "mousedown" | "mouseup" | "click"
     ) => {
       const view = info.doc.defaultView ?? window;
@@ -1202,7 +1222,11 @@ function App() {
       if (remoteCursorPressRef.current !== null) {
         window.clearTimeout(remoteCursorPressRef.current);
       }
-      commitRemoteCursor({ ...remoteCursorRef.current, pressed, visible: true });
+      commitRemoteCursor({
+        ...remoteCursorRef.current,
+        pressed,
+        visible: true,
+      });
       if (pressed) {
         remoteCursorPressRef.current = window.setTimeout(() => {
           commitRemoteCursor({
@@ -1268,7 +1292,10 @@ function App() {
 
   const applyRemoteText = useCallback(
     (target: HTMLElement, doc: Document, text: string) => {
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
         const start = target.selectionStart ?? target.value.length;
         const end = target.selectionEnd ?? target.value.length;
         target.setRangeText(text, start, end, "end");
@@ -1301,7 +1328,10 @@ function App() {
 
   const applyRemoteBackspace = useCallback(
     (target: HTMLElement, count: number) => {
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
         for (let i = 0; i < count; i += 1) {
           const start = target.selectionStart ?? target.value.length;
           const end = target.selectionEnd ?? target.value.length;
@@ -1363,7 +1393,13 @@ function App() {
         clickRemotePointer();
       }
     },
-    [clickRemotePointer, hasKeyboardMouse, moveRemoteCursor, playerOpen, viewMode]
+    [
+      clickRemotePointer,
+      hasKeyboardMouse,
+      moveRemoteCursor,
+      playerOpen,
+      viewMode,
+    ]
   );
 
   const handleRemoteKeyboard = useCallback(
@@ -1545,7 +1581,7 @@ function App() {
   const { remoteControls, remoteControlsStatus, handleRemoteControl } =
     useRemoteControls({
       viewMode,
-      activeRemoteAppId: appControlsAppId,
+      activeRemoteAppId: appControlsAppId ?? "",
       send,
     });
 
@@ -2280,19 +2316,19 @@ function App() {
   }, [channels.length, visibleRows, uiScale, getScrollBounds]);
   const showAppPanel = hasAppControls && remotePanel === "app";
   const showInputPanel = hasKeyboardMouse && remotePanel === "input";
-  const hasSpecialControls = hasAppControls || hasKeyboardMouse || hasMicControls;
+  const hasSpecialControls = hasAppControls || hasKeyboardMouse;
   const showGodPanel = remoteGodmodeOpen;
   const micStatusLabel = micError
     ? micError
     : micStatus === "idle"
-      ? "Off"
-      : micStatus === "requesting"
-        ? "Requesting mic…"
-        : micStatus === "connecting"
-          ? "Connecting…"
-          : micStatus === "live"
-            ? "Live"
-            : "Error";
+    ? "Off"
+    : micStatus === "requesting"
+    ? "Requesting mic…"
+    : micStatus === "connecting"
+    ? "Connecting…"
+    : micStatus === "live"
+    ? "Live"
+    : "Error";
   const micToggleDisabled =
     status !== "open" || micStatus === "requesting" || !hasMicControls;
   const micIndicator =
@@ -2310,15 +2346,95 @@ function App() {
     viewMode !== "remote" ? (
       <audio ref={micAudioRef} className="mic-audio" autoPlay playsInline />
     ) : null;
+  const isRemoteDebug =
+    remoteNowChannel?.id === DEBUG_CHANNEL_ID ||
+    normalizeChannelNumber(remoteNowChannel?.number ?? "") ===
+      normalizeChannelNumber(DEBUG_CHANNEL_NUMBER);
+
+  useEffect(() => {
+    setRemoteViewState({
+      status,
+      uiScale,
+      textScale,
+      visibleHours,
+      activeThemeId,
+      isRemoteDebug,
+      showGodPanel,
+      filteredGodmodeItems,
+      godmodeQuery,
+      showAppPanel,
+      showInputPanel,
+      hasAppControls,
+      hasKeyboardMouse,
+      hasMicControls,
+      hasSpecialControls,
+      remoteControlsStatus,
+      remoteControls,
+      showDebug,
+      memoryStats,
+      mediaStats,
+      dialOverlay,
+      micEnabled,
+      micStatusLabel,
+      micToggleDisabled,
+    });
+  }, [
+    status,
+    uiScale,
+    textScale,
+    visibleHours,
+    activeThemeId,
+    isRemoteDebug,
+    showGodPanel,
+    filteredGodmodeItems,
+    godmodeQuery,
+    showAppPanel,
+    showInputPanel,
+    hasAppControls,
+    hasKeyboardMouse,
+    hasMicControls,
+    hasSpecialControls,
+    remoteControlsStatus,
+    remoteControls,
+    showDebug,
+    memoryStats,
+    mediaStats,
+    dialOverlay,
+    micEnabled,
+    micStatusLabel,
+    micToggleDisabled,
+    setRemoteViewState,
+  ]);
+
+  useEffect(() => {
+    setRemoteViewHandlers({
+      onDisplayChange: handleDisplayChange,
+      send,
+      setRemoteGodmodeOpen,
+      setGodmodeQuery,
+      setDialBuffer,
+      setRemotePanel,
+      pushDialDigit,
+      handleRemoteControl,
+      onMicToggle: toggleMic,
+    });
+  }, [
+    handleDisplayChange,
+    send,
+    setRemoteGodmodeOpen,
+    setGodmodeQuery,
+    setDialBuffer,
+    setRemotePanel,
+    pushDialDigit,
+    handleRemoteControl,
+    toggleMic,
+    setRemoteViewHandlers,
+  ]);
   useEffect(() => {
     if (!showGodPanel) {
       setGodmodeQuery("");
     }
   }, [showGodPanel]);
-  const isRemoteDebug =
-    remoteNowChannel?.id === DEBUG_CHANNEL_ID ||
-    normalizeChannelNumber(remoteNowChannel?.number ?? "") ===
-      normalizeChannelNumber(DEBUG_CHANNEL_NUMBER);
   const handleLocalDisplayChange = useCallback(
     (payload: DisplayTuningPayload) => {
       applyDisplaySettings(payload);
@@ -2343,39 +2459,7 @@ function App() {
     ) : null;
 
   if (viewMode === "remote") {
-    return (
-      <RemoteView
-        status={status}
-        uiScale={uiScale}
-        textScale={textScale}
-        visibleHours={visibleHours}
-        activeThemeId={activeThemeId}
-        onDisplayChange={handleDisplayChange}
-        send={send}
-        isRemoteDebug={isRemoteDebug}
-        showGodPanel={showGodPanel}
-        setRemoteGodmodeOpen={setRemoteGodmodeOpen}
-        filteredGodmodeItems={filteredGodmodeItems}
-        godmodeQuery={godmodeQuery}
-        setGodmodeQuery={setGodmodeQuery}
-        setDialBuffer={setDialBuffer}
-        showAppPanel={showAppPanel}
-        showInputPanel={showInputPanel}
-        hasAppControls={hasAppControls}
-        hasKeyboardMouse={hasKeyboardMouse}
-        hasMicControls={hasMicControls}
-        hasSpecialControls={hasSpecialControls}
-        remoteControlsStatus={remoteControlsStatus}
-        remoteControls={remoteControls}
-        handleRemoteControl={handleRemoteControl}
-        setRemotePanel={setRemotePanel}
-        pushDialDigit={pushDialDigit}
-        showDebug={showDebug}
-        memoryStats={memoryStats}
-        mediaStats={mediaStats}
-        dialOverlay={dialOverlay}
-      />
-    );
+    return <RemoteView />;
   }
 
   if (viewMode === "art") {
