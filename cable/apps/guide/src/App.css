@@ -1724,10 +1724,13 @@
 .remote-app-controls {
   display: grid;
   gap: 8px;
-  flex: 0 0 auto;
-  max-height: clamp(180px, 36vh, 360px);
+  flex: 1 1 auto;
+  max-height: none;
   min-height: 0;
   overflow-y: auto;
+  align-content: start;
+  align-items: start;
+  grid-auto-rows: max-content;
 }
 
 .remote-control {
