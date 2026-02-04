@@ -145,4 +145,8 @@ export type {
   DiscoveryResult,
   LightConfigEntry,
   LightsConfig,
+  BreakpointTimeType,
+  LightScheduleBreakpoint,
+  LightSchedule,
+  SetLightScheduleRequest,
 } from './lights.js';

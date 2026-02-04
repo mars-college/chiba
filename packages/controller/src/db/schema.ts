@@ -129,6 +129,7 @@ UPDATE node_status SET connected = 0, updated_at = strftime('%s', 'now') * 1000;
  * SQL statements to drop all tables (for testing).
  */
 export const DROP_ALL = `
+DROP TABLE IF EXISTS light_schedules;
 DROP TABLE IF EXISTS node_content;
 DROP TABLE IF EXISTS playlists;
 DROP TABLE IF EXISTS content;
@@ -233,4 +234,12 @@ export const MIGRATIONS = [
     ('a', 'Auditorium', '100.128.2.160'),
     ('mz', 'Mezzanine', '100.128.0.223'),
     ('mm', 'Mimos', '100.128.0.226');`,
+
+  // Light schedules table for daily timer/breakpoint system
+  `CREATE TABLE IF NOT EXISTS light_schedules (
+    light_id TEXT PRIMARY KEY REFERENCES lights(id) ON DELETE CASCADE,
+    enabled INTEGER DEFAULT 0,
+    breakpoints TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+  );`,
 ];

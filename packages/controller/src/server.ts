@@ -48,6 +48,7 @@ import {
 import { runDiscovery, startAutoDiscovery, stopAutoDiscovery, pruneByNameFilter } from './services/discovery.js';
 import { isCloudConfigured } from './services/govee-cloud.js';
 import { handleUpload, getUploadPath } from './services/uploads.js';
+import { startScheduler, stopScheduler, reloadLightSchedule } from './services/scheduler.js';
 import type {
   LightWithState,
   LightPreset,
@@ -55,6 +56,8 @@ import type {
   CreatePresetRequest,
   PresetLightSetting,
   DiscoveryResult,
+  SetLightScheduleRequest,
+  LightSchedule,
 } from '@chiba/shared';
 
 // Load .env from project root
@@ -2068,6 +2071,147 @@ async function handleRequest(
     return;
   }
 
+  // ============================================================================
+  // Light Schedule Endpoints
+  // ============================================================================
+
+  // Get light schedule - GET /api/lights/:id/schedule
+  if (method === 'GET' && url.pathname.match(/^\/api\/lights\/[^/]+\/schedule$/)) {
+    const lightId = url.pathname.split('/')[3];
+    if (!lightId) {
+      sendError(res, 'Missing light ID');
+      return;
+    }
+
+    const light = getLightById(lightId);
+    if (!light) {
+      sendError(res, 'Light not found', 404);
+      return;
+    }
+
+    const db = getDatabase();
+    const row = db.prepare('SELECT light_id, enabled, breakpoints, updated_at FROM light_schedules WHERE light_id = ?').get(lightId) as {
+      light_id: string;
+      enabled: number;
+      breakpoints: string;
+      updated_at: number;
+    } | undefined;
+
+    const schedule: LightSchedule = row
+      ? {
+          lightId: row.light_id,
+          enabled: Boolean(row.enabled),
+          breakpoints: JSON.parse(row.breakpoints),
+          updatedAt: row.updated_at,
+        }
+      : {
+          lightId,
+          enabled: false,
+          breakpoints: [],
+          updatedAt: 0,
+        };
+
+    sendJson(res, { success: true, data: schedule });
+    return;
+  }
+
+  // Set light schedule - PUT /api/lights/:id/schedule
+  if (method === 'PUT' && url.pathname.match(/^\/api\/lights\/[^/]+\/schedule$/)) {
+    const lightId = url.pathname.split('/')[3];
+    if (!lightId) {
+      sendError(res, 'Missing light ID');
+      return;
+    }
+
+    const light = getLightById(lightId);
+    if (!light) {
+      sendError(res, 'Light not found', 404);
+      return;
+    }
+
+    const body = await readJsonBody<SetLightScheduleRequest>(req);
+    if (!body || typeof body.enabled !== 'boolean' || !Array.isArray(body.breakpoints)) {
+      sendError(res, 'Invalid request body: enabled (boolean) and breakpoints (array) required');
+      return;
+    }
+
+    // Validate breakpoints
+    for (const bp of body.breakpoints) {
+      if (!['clock', 'sunrise', 'sunset'].includes(bp.timeType)) {
+        sendError(res, `Invalid timeType: ${bp.timeType}`);
+        return;
+      }
+      if (bp.timeType === 'clock' && (!bp.time || !/^\d{2}:\d{2}$/.test(bp.time))) {
+        sendError(res, 'Clock breakpoints require time in HH:MM format');
+        return;
+      }
+      if (typeof bp.power !== 'boolean') {
+        sendError(res, 'Each breakpoint requires power (boolean)');
+        return;
+      }
+      if (typeof bp.brightness !== 'number' || bp.brightness < 0 || bp.brightness > 100) {
+        sendError(res, 'Each breakpoint requires brightness (0-100)');
+        return;
+      }
+    }
+
+    // Assign IDs to breakpoints
+    const breakpoints = body.breakpoints.map((bp, i) => ({
+      id: `bp-${Date.now()}-${i}`,
+      timeType: bp.timeType,
+      time: bp.time,
+      offsetMinutes: bp.offsetMinutes,
+      power: bp.power,
+      brightness: bp.brightness,
+    }));
+
+    const now = Date.now();
+    const db = getDatabase();
+
+    db.prepare(`
+      INSERT INTO light_schedules (light_id, enabled, breakpoints, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(light_id) DO UPDATE SET
+        enabled = excluded.enabled,
+        breakpoints = excluded.breakpoints,
+        updated_at = excluded.updated_at
+    `).run(lightId, body.enabled ? 1 : 0, JSON.stringify(breakpoints), now);
+
+    // Reload the scheduler for this light
+    reloadLightSchedule(lightId);
+
+    logger.info('Light schedule updated', { lightId, enabled: body.enabled, breakpoints: breakpoints.length });
+
+    const schedule: LightSchedule = {
+      lightId,
+      enabled: body.enabled,
+      breakpoints,
+      updatedAt: now,
+    };
+
+    sendJson(res, { success: true, data: schedule });
+    return;
+  }
+
+  // Delete light schedule - DELETE /api/lights/:id/schedule
+  if (method === 'DELETE' && url.pathname.match(/^\/api\/lights\/[^/]+\/schedule$/)) {
+    const lightId = url.pathname.split('/')[3];
+    if (!lightId) {
+      sendError(res, 'Missing light ID');
+      return;
+    }
+
+    const db = getDatabase();
+    db.prepare('DELETE FROM light_schedules WHERE light_id = ?').run(lightId);
+
+    // Reload scheduler (clears timers)
+    reloadLightSchedule(lightId);
+
+    logger.info('Light schedule deleted', { lightId });
+    sendJson(res, { success: true, message: 'Schedule deleted' });
+    return;
+  }
+
   // Node commands: /api/nodes/:id/:action
   if (method === 'POST' && url.pathname.startsWith('/api/nodes/')) {
     const parts = url.pathname.split('/');
@@ -2560,6 +2704,9 @@ export function startServer(port = DEFAULT_PORT): http.Server {
   // Start auto-discovery for lights (runs every 30 minutes)
   startAutoDiscovery();
 
+  // Start light scheduler (daily breakpoint timers)
+  startScheduler();
+
   // Create HTTP server
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch((error) => {
@@ -2607,6 +2754,7 @@ export function startServer(port = DEFAULT_PORT): http.Server {
     logger.info('Shutting down...');
     stopNodeTimeoutCheck();
     stopAutoDiscovery();
+    stopScheduler();
     closeDatabase();
     server.close();
     process.exit(0);

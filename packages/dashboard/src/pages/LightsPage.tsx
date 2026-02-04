@@ -4,6 +4,7 @@ import { apiGet, apiPost, apiDelete, apiPut } from '../hooks/useApi';
 import { LightCard } from '../components/LightCard';
 import { PresetCard } from '../components/PresetCard';
 import { CreatePresetModal } from '../components/CreatePresetModal';
+import { LightScheduleModal } from '../components/LightScheduleModal';
 
 export function LightsPage() {
   const [lights, setLights] = useState<LightWithState[]>([]);
@@ -16,6 +17,7 @@ export function LightsPage() {
   const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
   const [renamingLight, setRenamingLight] = useState<LightWithState | null>(null);
   const [newLightName, setNewLightName] = useState('');
+  const [schedulingLight, setSchedulingLight] = useState<LightWithState | null>(null);
 
   const fetchLights = useCallback(async () => {
     try {
@@ -231,6 +233,7 @@ export function LightsPage() {
               light={light}
               onControl={(request) => handleControlLight(light.id, request)}
               onRename={() => openRenameModal(light)}
+              onSchedule={() => setSchedulingLight(light)}
               onDelete={() => handleDelete(light.id, light.name)}
             />
           ))}
@@ -274,6 +277,14 @@ export function LightsPage() {
           lights={lights}
           onClose={() => setShowCreatePreset(false)}
           onCreate={handleCreatePreset}
+        />
+      )}
+
+      {/* Schedule Light Modal */}
+      {schedulingLight && (
+        <LightScheduleModal
+          light={schedulingLight}
+          onClose={() => setSchedulingLight(null)}
         />
       )}
 

@@ -120,3 +120,44 @@ export interface LightsConfig {
   lights: LightConfigEntry[];
   port: number;
 }
+
+/**
+ * Time type for schedule breakpoints.
+ */
+export type BreakpointTimeType = 'clock' | 'sunrise' | 'sunset';
+
+/**
+ * A single breakpoint in a light schedule.
+ */
+export interface LightScheduleBreakpoint {
+  id: string;
+  timeType: BreakpointTimeType;
+  time?: string;             // HH:MM — required when timeType='clock'
+  offsetMinutes?: number;    // ±N from sunrise/sunset
+  power: boolean;
+  brightness: number;        // 0-100
+}
+
+/**
+ * A daily schedule for a light.
+ */
+export interface LightSchedule {
+  lightId: string;
+  enabled: boolean;
+  breakpoints: LightScheduleBreakpoint[];
+  updatedAt: number;
+}
+
+/**
+ * Request to set a light schedule.
+ */
+export interface SetLightScheduleRequest {
+  enabled: boolean;
+  breakpoints: Array<{
+    timeType: BreakpointTimeType;
+    time?: string;
+    offsetMinutes?: number;
+    power: boolean;
+    brightness: number;
+  }>;
+}

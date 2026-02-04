@@ -5,10 +5,11 @@ interface LightCardProps {
   light: LightWithState;
   onControl: (request: LightControlRequest) => Promise<void>;
   onRename?: () => void;
+  onSchedule?: () => void;
   onDelete?: () => void;
 }
 
-export function LightCard({ light, onControl, onRename, onDelete }: LightCardProps) {
+export function LightCard({ light, onControl, onRename, onSchedule, onDelete }: LightCardProps) {
   // Determine initial mode based on whether kelvin is set in state
   const initialMode = light.state?.kelvin ? 'temperature' : 'color';
   const [mode, setMode] = useState<'color' | 'temperature'>(initialMode);
@@ -126,6 +127,19 @@ export function LightCard({ light, onControl, onRename, onDelete }: LightCardPro
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </button>
+          )}
+          {onSchedule && (
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={onSchedule}
+              title="Schedule"
+              style={{ padding: '4px 6px' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12,6 12,12 16,14" />
               </svg>
             </button>
           )}
