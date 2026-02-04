@@ -454,6 +454,45 @@ curl -X POST http://node:8080/exit-kiosk \
 { "success": true, "message": "Kiosk killed" }
 ```
 
+#### GET /kiosk-url
+Get the current kiosk URL override (empty string means default player).
+
+```bash
+curl http://node:8080/kiosk-url
+```
+
+**Response:**
+```json
+{ "success": true, "data": { "url": "http://controller:8787/?screenId=pi-01" } }
+```
+
+#### POST /kiosk-url
+Set the kiosk URL override and restart the kiosk.
+
+```bash
+curl -X POST http://node:8080/kiosk-url \
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{"url":"http://controller:8787/?screenId=pi-01"}'
+```
+
+**Response:**
+```json
+{ "success": true, "data": { "url": "http://controller:8787/?screenId=pi-01", "restartQueued": true } }
+```
+
+#### POST /kiosk-restart
+Restart the kiosk without changing the URL.
+
+```bash
+curl -X POST http://node:8080/kiosk-restart \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+**Response:**
+```json
+{ "success": true, "data": { "restartQueued": true } }
+```
+
 #### POST /rename
 Rename the node's friendly name.
 

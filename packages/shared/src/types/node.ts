@@ -14,6 +14,8 @@ export interface NodeConfig {
   friendlyName: string;
   /** URL of the controller to register with */
   controllerUrl: string;
+  /** Optional kiosk URL override (used by run-kiosk.sh) */
+  kioskUrl?: string;
   /** Optional per-node API key for authentication */
   apiKey?: string;
 }
@@ -43,6 +45,8 @@ export interface NodeInfo {
   uptime: number;
   /** Display rotation in degrees (0, 90, 180, 270) */
   displayRotation?: DisplayRotation;
+  /** Optional kiosk URL override (used by run-kiosk.sh) */
+  kioskUrl?: string;
 }
 
 /**

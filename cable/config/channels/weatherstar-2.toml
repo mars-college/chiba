@@ -1,0 +1,28 @@
+id = "weatherstar-2"
+number = "637"
+name = "WeatherStar Encore"
+call_sign = "WXST"
+accent = "#8fbaff"
+description = "WeatherStar 4000+ loop for Niland, CA."
+audio_source = { type = "path", value = "/Volumes/share/chiba-cable/audio/03 黑貂果酱.mp3" }
+audio_volume = 0.35
+audio_offset_min_sec = 40
+audio_offset_max_sec = 80
+
+[[program]]
+title = "WeatherStar 4000+"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/weatherstar" }
+
+[[program]]
+title = "WeatherStar 4000+"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/weatherstar" }
+
+[[program]]
+title = "WeatherStar 4000+"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/weatherstar" }
