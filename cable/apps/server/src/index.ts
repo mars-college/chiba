@@ -19,7 +19,8 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT ?? 8787);
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ noServer: true });
+const proxyWss = new WebSocketServer({ noServer: true });
 const WS_HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS ?? 25000);
 const wsAlive = new WeakMap<WebSocket, boolean>();
 
@@ -462,6 +463,7 @@ const buildProxyPage = (
         (() => {
           const baseOrigin = window.location.origin;
           const proxyBase = baseOrigin + window.location.pathname.replace(/\\/$/, '') + '/proxy';
+          const proxyWsBase = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + window.location.pathname.replace(/\\/$/, '') + '/proxy';
           const normalizeUrlArg = (url) => {
             if (!url) return url;
             if (typeof url === 'string') return url;
@@ -473,6 +475,9 @@ const buildProxyPage = (
             }
           };
           const upstreamOrigin = ${JSON.stringify(upstreamOrigin)} || null;
+          const upstreamWsOrigin = upstreamOrigin
+            ? upstreamOrigin.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:')
+            : null;
           const rewriteUrl = (input) => {
             try {
               const raw = normalizeUrlArg(input);
@@ -488,6 +493,25 @@ const buildProxyPage = (
               if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return input;
               if (resolved.origin !== upstreamOrigin) return input;
               return proxyBase + resolved.pathname + resolved.search + resolved.hash;
+            } catch {
+              return input;
+            }
+          };
+          const rewriteWsUrl = (input) => {
+            try {
+              const raw = normalizeUrlArg(input);
+              if (!raw) return input;
+              if (typeof raw === 'string' && raw.startsWith(proxyWsBase)) {
+                return raw;
+              }
+              if (upstreamWsOrigin && typeof raw === 'string' && raw.startsWith('/')) {
+                return proxyWsBase + raw;
+              }
+              const resolved = new URL(raw, document.baseURI);
+              if (!upstreamWsOrigin) return input;
+              if (resolved.protocol !== 'ws:' && resolved.protocol !== 'wss:') return input;
+              if (resolved.origin !== upstreamWsOrigin) return input;
+              return proxyWsBase + resolved.pathname + resolved.search + resolved.hash;
             } catch {
               return input;
             }
@@ -595,6 +619,24 @@ const buildProxyPage = (
           } catch {
             // ignore xhr override failures
           }
+          try {
+            const OriginalWebSocket = window.WebSocket;
+            if (OriginalWebSocket) {
+              const WrappedWebSocket = function (url, protocols) {
+                const rewritten = rewriteWsUrl(url);
+                return protocols
+                  ? new OriginalWebSocket(rewritten, protocols)
+                  : new OriginalWebSocket(rewritten);
+              };
+              WrappedWebSocket.prototype = OriginalWebSocket.prototype;
+              Object.keys(OriginalWebSocket).forEach((key) => {
+                WrappedWebSocket[key] = OriginalWebSocket[key];
+              });
+              window.WebSocket = WrappedWebSocket;
+            }
+          } catch {
+            // ignore websocket override failures
+          }
           const patchAttr = (proto, prop, rewrite) => {
             try {
               const desc = Object.getOwnPropertyDescriptor(proto, prop);
@@ -688,6 +730,14 @@ const buildProxyPage = (
     const rewritten = rewriteSrcset(value);
     return ` ${attr}="${rewritten}"`;
   });
+  output = output.replace(/\s(src|href)=([^"'\\s>]+)/gi, (match, attr, value) => {
+    const rewritten = rewriteAssetUrl(value);
+    return ` ${attr}="${rewritten}"`;
+  });
+  output = output.replace(/\s(srcset)=([^"'\\s>]+)/gi, (match, attr, value) => {
+    const rewritten = rewriteSrcset(value);
+    return ` ${attr}="${rewritten}"`;
+  });
   const injection = `<base href="${proxyPrefix}/"/><style>${hideCss}${debugStyle}</style>${injectScript}${debugScript}`;
   if (/<head[^>]*>/i.test(output)) {
     output = output.replace(/<head[^>]*>/i, (match) => `${match}${injection}`);
@@ -702,6 +752,88 @@ const broadcast = (message: string) => {
     if (client.readyState === client.OPEN) {
       client.send(message);
     }
+  });
+};
+
+const handleProxyUpgrade = (
+  req: http.IncomingMessage,
+  socket: any,
+  head: Buffer
+) => {
+  if (!req.url) {
+    socket.destroy();
+    return;
+  }
+  const parsed = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+  const match = parsed.pathname.match(/^\/embed\/([^/]+)\/proxy\/(.+)$/);
+  if (!match) {
+    socket.destroy();
+    return;
+  }
+  const embedId = match[1];
+  const rawSuffix = match[2] ?? '';
+  const embed = getEmbedConfig(embedId);
+  if (!embed?.url) {
+    socket.destroy();
+    return;
+  }
+  const base = new URL(embed.url);
+  const suffixPath = rawSuffix.startsWith('/') ? rawSuffix : `/${rawSuffix}`;
+  const targetUrl = new URL(suffixPath + parsed.search, base);
+  targetUrl.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+
+  proxyWss.handleUpgrade(req, socket, head, (client) => {
+    const headers: Record<string, string> = {};
+    Object.entries(req.headers).forEach(([key, value]) => {
+      if (!value) return;
+      if (key.toLowerCase() === 'host') return;
+      if (Array.isArray(value)) {
+        headers[key] = value.join(', ');
+      } else {
+        headers[key] = value;
+      }
+    });
+    const protocolHeader = req.headers['sec-websocket-protocol'];
+    const protocols =
+      typeof protocolHeader === 'string'
+        ? protocolHeader.split(',').map((p) => p.trim())
+        : undefined;
+    const upstream = new WebSocket(targetUrl.toString(), protocols, {
+      headers,
+    });
+
+    const closeBoth = () => {
+      if (
+        client.readyState === client.OPEN ||
+        client.readyState === client.CONNECTING
+      ) {
+        client.close();
+      }
+      if (
+        upstream.readyState === upstream.OPEN ||
+        upstream.readyState === upstream.CONNECTING
+      ) {
+        upstream.close();
+      }
+    };
+
+    upstream.on('open', () => {
+      client.on('message', (data) => {
+        if (upstream.readyState === upstream.OPEN) {
+          upstream.send(data);
+        }
+      });
+      client.on('close', closeBoth);
+      client.on('error', closeBoth);
+    });
+
+    upstream.on('message', (data) => {
+      if (client.readyState === client.OPEN) {
+        client.send(data);
+      }
+    });
+    upstream.on('close', closeBoth);
+    upstream.on('error', closeBoth);
   });
 };
 
@@ -1441,15 +1573,18 @@ app.get('/roadmap', (_req, res) => {
       }
       .frame {
         position: relative;
-        width: min(1200px, 96vw);
+        width: min(1320px, 98vw);
         aspect-ratio: 1024 / 666;
+        max-height: 92vh;
         background: #000;
         overflow: hidden;
       }
       .frame img {
         width: 100%;
         height: 100%;
-        object-fit: contain;
+        object-fit: cover;
+        transform: scale(1.04);
+        transform-origin: center;
         image-rendering: pixelated;
       }
       .frame.glitch {
@@ -1833,6 +1968,19 @@ function normalizeRemoteBase(input: string, fallback: string): string {
   return `http://${trimmed}`;
 }
 
+function isPrivateLanAddress(addr: string): boolean {
+  if (!addr || addr.includes(':')) return true;
+  const parts = addr.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 169 && b === 254) return true;
+  return false;
+}
+
 function getRemoteBaseUrl(
   req: express.Request,
   options: RemoteBaseOptions = {}
@@ -1845,12 +1993,13 @@ function getRemoteBaseUrl(
   if (configured) {
     return normalizeRemoteBase(configured, fallback);
   }
-  const scheme =
-    options.scheme ??
-    (req.secure ? 'https' : 'http');
   const port = options.port ?? PORT;
   const lan = getLanAddress();
   if (lan) {
+    const explicitScheme = options.scheme ?? null;
+    const scheme =
+      explicitScheme ??
+      (isPrivateLanAddress(lan) ? 'http' : req.secure ? 'https' : 'http');
     return `${scheme}://${lan}${port ? `:${port}` : ''}`;
   }
   return fallback;
@@ -1892,6 +2041,25 @@ const heartbeatTimer = setInterval(() => {
     }
   });
 }, WS_HEARTBEAT_MS);
+
+server.on('upgrade', (req, socket, head) => {
+  if (!req.url) {
+    socket.destroy();
+    return;
+  }
+  const path = req.url.split('?')[0] ?? '';
+  if (path === '/ws') {
+    wss.handleUpgrade(req, socket, head, (client) => {
+      wss.emit('connection', client, req);
+    });
+    return;
+  }
+  if (path.startsWith('/embed/')) {
+    handleProxyUpgrade(req, socket, head);
+    return;
+  }
+  socket.destroy();
+});
 
 wss.on('connection', (socket, req) => {
   const remoteAddr = req.socket.remoteAddress ?? 'unknown';

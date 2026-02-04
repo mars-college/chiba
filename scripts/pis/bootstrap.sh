@@ -6,9 +6,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 REGISTRY_PATH="$SCRIPT_DIR/registry.local.toml"
 PI_NAME=""
+REBOOT_AFTER=0
 
 usage() {
-  echo "Usage: $0 <pi-name> [--registry path]"
+  echo "Usage: $0 <pi-name> [--registry path] [--reboot]"
   exit 1
 }
 
@@ -24,6 +25,10 @@ while [ $# -gt 0 ]; do
       ;;
     --help|-h)
       usage
+      ;;
+    --reboot)
+      REBOOT_AFTER=1
+      shift
       ;;
     *)
       if [ -z "$PI_NAME" ]; then
@@ -207,7 +212,7 @@ Type=simple
 User=$PI_USER
 WorkingDirectory=$REMOTE_DIR
 Environment=PORT=$GUIDE_PORT
-ExecStart=/usr/bin/env pnpm -C $REMOTE_DIR/cable/apps/guide dev -- --host 0.0.0.0 --port $GUIDE_PORT
+ExecStart=/usr/bin/env pnpm -C $REMOTE_DIR/cable/apps/guide exec vite preview --host 0.0.0.0 --port $GUIDE_PORT --strictPort
 Restart=always
 RestartSec=2
 
@@ -217,6 +222,17 @@ SERVICE
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now chiba-cable-server chiba-cable-guide
+
+# Ensure node server is running before kiosk URL update
+sudo systemctl start chiba-node || true
+echo "Waiting for node server on port 8080..."
+for i in {1..20}; do
+  if curl -s http://localhost:8080/health >/dev/null 2>&1; then
+    echo "Node server ready."
+    break
+  fi
+  sleep 1
+done
 
 # NAS mount (optional)
 if [ -n "$NAS_HOST" ] && [ -n "$NAS_USER" ] && [ -n "$NAS_PASSWORD" ]; then
@@ -232,7 +248,11 @@ CREDS
   if ! grep -q "credentials-chiba-nas" /etc/fstab; then
     echo "//$NAS_HOST/$NAS_SHARE $NAS_MOUNT cifs credentials=/etc/samba/credentials-chiba-nas,iocharset=utf8,uid=$PI_USER,gid=$PI_USER,file_mode=0775,dir_mode=0775,nofail,x-systemd.automount 0 0" | sudo tee -a /etc/fstab
   fi
-  sudo mount -a
+  if ! mountpoint -q "$NAS_MOUNT"; then
+    sudo mount -a
+  else
+    echo "NAS already mounted at $NAS_MOUNT"
+  fi
 fi
 
 # Install Playwright browsers (needed for weatherstar)
@@ -246,6 +266,11 @@ curl -sS -X POST http://localhost:8080/kiosk-url \
   -d "{\"url\":\"$KIOSK_URL\"}" >/dev/null || true
 if [ ! -f "$REMOTE_DIR/.kiosk-url" ]; then
   echo "$KIOSK_URL" > "$REMOTE_DIR/.kiosk-url"
+fi
+
+if [ "$REBOOT_AFTER" -eq 1 ]; then
+  echo "Rebooting $NODE_NAME..."
+  sudo reboot
 fi
 
 echo "Bootstrap complete on $NODE_NAME"

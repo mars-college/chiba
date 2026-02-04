@@ -635,6 +635,9 @@ function App() {
   const handleChannelChange = useCallback(
     (dir: "up" | "down") => {
       if (!channels.length) return;
+      if (showDebug) {
+        setShowDebug(false);
+      }
       const delta = dir === "up" ? -1 : 1;
       const nextRow = (activeRow + delta + channels.length) % channels.length;
       const nextChannel = channels[nextRow];
@@ -672,6 +675,7 @@ function App() {
       openProgram,
       getProgramForChannel,
       showDialOverlay,
+      showDebug,
     ]
   );
 
@@ -680,6 +684,7 @@ function App() {
       const targetNumber = normalizeChannelNumber(value);
       if (targetNumber === null) return;
       if (targetNumber === normalizeChannelNumber(GODMODE_CHANNEL_NUMBER)) {
+        setShowDebug(false);
         setPlayerOpen(false);
         sendRef.current?.({
           type: "now",
@@ -698,6 +703,9 @@ function App() {
           title: "Diagnostics",
         });
         return;
+      }
+      if (showDebug) {
+        setShowDebug(false);
       }
       const targetChannel = allChannels.find((channel) => {
         const channelNumber = normalizeChannelNumber(channel.number);
@@ -726,7 +734,14 @@ function App() {
         });
       }
     },
-    [allChannels, channels, currentSlotIndex, getProgramForChannel, openProgram]
+    [
+      allChannels,
+      channels,
+      currentSlotIndex,
+      getProgramForChannel,
+      openProgram,
+      showDebug,
+    ]
   );
 
   const handleGodmodePick = useCallback(
