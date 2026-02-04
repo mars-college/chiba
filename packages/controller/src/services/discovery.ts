@@ -583,11 +583,22 @@ export async function runDiscovery(timeout = DEFAULT_TIMEOUT, subnet?: string, p
   }
 
   // Combine results (initial scan results take precedence for IP updates)
-  const allLights = [...initialLights];
+  let allLights = [...initialLights];
   for (const probed of probedLights) {
     if (!discoveredDeviceIds.has(probed.deviceId)) {
       allLights.push(probed);
       discoveredDeviceIds.add(probed.deviceId);
+    }
+  }
+
+  // Apply GOVEE_SUBNET filter: only keep lights whose IP matches the prefix
+  // Lights with no IP (cloud-only, not found on LAN) are excluded when filter is active
+  const subnetFilter = process.env.GOVEE_SUBNET;
+  if (subnetFilter) {
+    const before = allLights.length;
+    allLights = allLights.filter(l => l.ip && l.ip.startsWith(subnetFilter));
+    if (allLights.length < before) {
+      logger.info('Filtered discovery results by subnet', { subnet: subnetFilter, before, after: allLights.length });
     }
   }
 
@@ -626,6 +637,38 @@ export function startAutoDiscovery(interval = AUTO_DISCOVERY_INTERVAL): void {
       logger.error('Auto-discovery failed', err as Error);
     });
   }, interval);
+}
+
+/**
+ * Remove lights from the database whose IP doesn't match the given subnet prefix.
+ * Used on startup to ensure each controller only manages its own lights.
+ * Lights with no IP or empty IP are also removed (can't determine location).
+ *
+ * @param subnetPrefix - IP prefix to keep (e.g., "100.128" or "10.")
+ * @returns Number of lights removed
+ */
+export function pruneBySubnet(subnetPrefix: string): number {
+  const db = getDatabase();
+
+  // Find lights that don't match the subnet
+  const toRemove = db.prepare(`
+    SELECT id, name, ip_address, device_id FROM lights
+    WHERE ip_address = '' OR ip_address NOT LIKE ?
+  `).all(`${subnetPrefix}%`) as Array<{ id: string; name: string; ip_address: string; device_id: string | null }>;
+
+  if (toRemove.length === 0) return 0;
+
+  // light_state has ON DELETE CASCADE, so deleting from lights cleans up state too
+  const deleteStmt = db.prepare('DELETE FROM lights WHERE id = ?');
+  const transaction = db.transaction(() => {
+    for (const light of toRemove) {
+      deleteStmt.run(light.id);
+      logger.info('Pruned out-of-subnet light', { id: light.id, name: light.name, ip: light.ip_address, subnet: subnetPrefix });
+    }
+  });
+  transaction();
+
+  return toRemove.length;
 }
 
 /**
