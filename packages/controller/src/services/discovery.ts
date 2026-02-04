@@ -591,12 +591,13 @@ export async function runDiscovery(timeout = DEFAULT_TIMEOUT, subnet?: string, p
     }
   }
 
-  // Apply GOVEE_SUBNET filter: only keep lights whose IP matches the prefix
-  // Lights with no IP (cloud-only, not found on LAN) are excluded when filter is active
+  // Apply GOVEE_SUBNET filter to lights that have IPs.
+  // Cloud-only devices (no IP) are kept — they're from our account and controllable via cloud API.
+  // Only filter out devices whose known IP belongs to a different subnet.
   const subnetFilter = process.env.GOVEE_SUBNET;
   if (subnetFilter) {
     const before = allLights.length;
-    allLights = allLights.filter(l => l.ip && l.ip.startsWith(subnetFilter));
+    allLights = allLights.filter(l => !l.ip || l.ip.startsWith(subnetFilter));
     if (allLights.length < before) {
       logger.info('Filtered discovery results by subnet', { subnet: subnetFilter, before, after: allLights.length });
     }
@@ -650,10 +651,11 @@ export function startAutoDiscovery(interval = AUTO_DISCOVERY_INTERVAL): void {
 export function pruneBySubnet(subnetPrefix: string): number {
   const db = getDatabase();
 
-  // Find lights that don't match the subnet
+  // Find lights whose IP is set but doesn't match the subnet.
+  // Lights with empty IP (cloud-only, no LAN IP yet) are kept.
   const toRemove = db.prepare(`
     SELECT id, name, ip_address, device_id FROM lights
-    WHERE ip_address = '' OR ip_address NOT LIKE ?
+    WHERE ip_address != '' AND ip_address NOT LIKE ?
   `).all(`${subnetPrefix}%`) as Array<{ id: string; name: string; ip_address: string; device_id: string | null }>;
 
   if (toRemove.length === 0) return 0;
