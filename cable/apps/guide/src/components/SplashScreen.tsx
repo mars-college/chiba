@@ -1,12 +1,26 @@
-import type { CSSProperties } from "react";
+import { useMemo, type CSSProperties } from "react";
 
 type SplashScreenProps = {
   active: boolean;
 };
 
 export function SplashScreen({ active }: SplashScreenProps) {
+  const splashStyle = useMemo<CSSProperties>(() => {
+    if (typeof window === "undefined") {
+      return {};
+    }
+    const maxViewport = Math.max(window.innerWidth, window.innerHeight);
+    const mandalaSize = Math.min(420, Math.max(1, window.innerWidth * 0.7));
+    const expand = Math.max(1, (maxViewport / mandalaSize) * 1.1);
+    return { "--splash-expand": String(expand) } as CSSProperties;
+  }, []);
+
   return (
-    <div className={`splash-screen ${active ? "is-active" : ""}`} aria-hidden={!active}>
+    <div
+      className={`splash-screen ${active ? "is-active" : ""}`}
+      style={splashStyle}
+      aria-hidden={!active}
+    >
       <div className="splash-scanlines" aria-hidden="true" />
       <div className="splash-inner">
         <div className="splash-mandala" aria-hidden="true">

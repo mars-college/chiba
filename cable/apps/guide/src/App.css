@@ -1991,6 +1991,7 @@
   --splash-hold: 1s;
   --splash-fade: 0.5s;
   --splash-exit: var(--splash-fade);
+  --splash-expand: 4.2;
   background-color: #0a1121;
   background-image: radial-gradient(circle at 50% 30%, rgba(40, 90, 150, 0.6), rgba(10, 17, 33, 0.95) 55%),
     radial-gradient(circle at 50% 70%, rgba(18, 32, 56, 0.98), rgba(6, 10, 18, 1));
@@ -2033,7 +2034,6 @@
 
 .splash-mandala {
   --mandala-size: min(420px, 70vw);
-  --splash-expand: calc(100vmax / var(--mandala-size));
   position: relative;
   width: var(--mandala-size);
   height: var(--mandala-size);
