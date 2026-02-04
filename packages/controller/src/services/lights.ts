@@ -643,8 +643,22 @@ export function syncLightsFromConfig(): { added: number; updated: number; total:
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
+  // Filter config lights by GOVEE_SUBNET if configured
+  const subnetFilter = process.env.GOVEE_SUBNET;
+  const filteredLights = subnetFilter
+    ? config.lights.filter(l => l.ip.startsWith(subnetFilter))
+    : config.lights;
+
+  if (subnetFilter && filteredLights.length < config.lights.length) {
+    logger.info('Filtered config lights by subnet', {
+      subnet: subnetFilter,
+      total: config.lights.length,
+      matching: filteredLights.length,
+    });
+  }
+
   const transaction = db.transaction(() => {
-    for (const light of config.lights) {
+    for (const light of filteredLights) {
       const existing = findById.get(light.id) as {
         id: string;
         name: string;
