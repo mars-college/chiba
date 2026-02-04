@@ -46,6 +46,7 @@ import {
   syncLightsFromConfig,
 } from './services/lights.js';
 import { runDiscovery, startAutoDiscovery, stopAutoDiscovery } from './services/discovery.js';
+import { isCloudConfigured } from './services/govee-cloud.js';
 import { handleUpload, getUploadPath } from './services/uploads.js';
 import type {
   LightWithState,
@@ -2585,6 +2586,7 @@ export function startServer(port = DEFAULT_PORT): http.Server {
   // Start listening
   server.listen(port, () => {
     logger.info(`Controller server started`, { port, version: VERSION });
+    logger.info('Govee cloud API', { configured: isCloudConfigured() });
     logger.info(`WebSocket endpoints: /ws/nodes, /ws/dashboard`);
 
     // Start node timeout monitoring

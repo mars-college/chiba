@@ -11,6 +11,7 @@ import dgram from 'dgram';
 import { createLogger } from '@chiba/shared';
 import type { DiscoveredLight, DiscoveryResult } from '@chiba/shared';
 import { getDatabase, generateId } from '../db/index.js';
+import { isCloudConfigured, cloudListDevices } from './govee-cloud.js';
 
 const logger = createLogger('controller', 'discovery');
 
@@ -443,24 +444,25 @@ export function syncDiscoveredLights(discovered: DiscoveredLight[], prune = fals
       } | undefined;
 
       if (existing) {
-        // Update IP if it changed
-        if (existing.ip_address !== light.ip) {
-          updateLight.run(light.ip, light.sku, now, light.deviceId);
+        // Update IP if it changed (but don't overwrite a known IP with empty string)
+        const newIp = light.ip || existing.ip_address;
+        if (existing.ip_address !== newIp) {
+          updateLight.run(newIp, light.sku, now, light.deviceId);
           logger.info('Updated light IP', {
             id: existing.id,
             name: existing.name,
             oldIp: existing.ip_address,
-            newIp: light.ip,
+            newIp,
           });
         } else {
           // Just update SKU and timestamp
-          updateLight.run(light.ip, light.sku, now, light.deviceId);
+          updateLight.run(newIp, light.sku, now, light.deviceId);
         }
         updated++;
       } else {
-        // Insert new light with default name
+        // Insert new light - prefer cloud-provided name, fall back to generic
         const id = generateId();
-        const name = `Light (${light.sku})`;
+        const name = light.name || `Light (${light.sku})`;
         insertLight.run(id, name, light.ip, DEFAULT_LIGHT_PORT, light.deviceId, light.sku, now, now);
         logger.info('Added new light', { id, name, ip: light.ip, deviceId: light.deviceId, sku: light.sku });
         added++;
@@ -502,14 +504,60 @@ export async function runDiscovery(timeout = DEFAULT_TIMEOUT, subnet?: string, p
 
   let initialLights: DiscoveredLight[] = [];
 
+  // Step 0: Try cloud device listing first (provides device names)
+  if (isCloudConfigured()) {
+    try {
+      const cloudDevices = await cloudListDevices();
+      if (cloudDevices.length > 0) {
+        // Look up existing IPs from DB (cloud doesn't provide IPs)
+        const db = getDatabase();
+        const existingLights = db.prepare(`
+          SELECT ip_address, device_id FROM lights WHERE device_id IS NOT NULL
+        `).all() as Array<{ ip_address: string; device_id: string }>;
+        const ipByDeviceId = new Map(existingLights.map(l => [l.device_id, l.ip_address]));
+
+        initialLights = cloudDevices.map(d => ({
+          ip: ipByDeviceId.get(d.device) || '',
+          deviceId: d.device,
+          sku: d.sku,
+          name: d.deviceName,
+        }));
+        logger.info('Cloud discovery found devices', { count: initialLights.length });
+      }
+    } catch (err) {
+      logger.warn('Cloud device listing failed, falling back to LAN discovery', { error: (err as Error).message });
+    }
+  }
+
+  // Step 1: LAN discovery (subnet scan or multicast)
+  // Run LAN scan to discover IPs even if cloud found devices
+  let lanLights: DiscoveredLight[] = [];
   if (subnet) {
-    // Step 1a: Subnet scan via direct UDP probes
-    initialLights = await scanSubnet(subnet, PROBE_TIMEOUT);
-    logger.info('Subnet scan found lights', { count: initialLights.length });
+    lanLights = await scanSubnet(subnet, PROBE_TIMEOUT);
+    logger.info('Subnet scan found lights', { count: lanLights.length });
   } else {
-    // Step 1b: Multicast discovery (local subnet only)
-    initialLights = await discoverLights(timeout);
-    logger.info('Multicast scan found lights', { count: initialLights.length });
+    lanLights = await discoverLights(timeout);
+    logger.info('Multicast scan found lights', { count: lanLights.length });
+  }
+
+  // Merge LAN results into cloud results (LAN provides IPs)
+  if (initialLights.length > 0 && lanLights.length > 0) {
+    const lanByDeviceId = new Map(lanLights.map(l => [l.deviceId, l]));
+    for (const light of initialLights) {
+      const lanMatch = lanByDeviceId.get(light.deviceId);
+      if (lanMatch) {
+        light.ip = lanMatch.ip; // LAN IP takes precedence
+      }
+    }
+    // Add any LAN-only lights not found in cloud
+    const cloudDeviceIds = new Set(initialLights.map(l => l.deviceId));
+    for (const lanLight of lanLights) {
+      if (!cloudDeviceIds.has(lanLight.deviceId)) {
+        initialLights.push(lanLight);
+      }
+    }
+  } else if (initialLights.length === 0) {
+    initialLights = lanLights;
   }
 
   const discoveredDeviceIds = new Set(initialLights.map(l => l.deviceId));
