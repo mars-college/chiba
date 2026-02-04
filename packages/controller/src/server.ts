@@ -45,7 +45,7 @@ import {
   refreshAllLightStates,
   syncLightsFromConfig,
 } from './services/lights.js';
-import { runDiscovery, startAutoDiscovery, stopAutoDiscovery, pruneBySubnet } from './services/discovery.js';
+import { runDiscovery, startAutoDiscovery, stopAutoDiscovery, pruneByNameFilter } from './services/discovery.js';
 import { isCloudConfigured } from './services/govee-cloud.js';
 import { handleUpload, getUploadPath } from './services/uploads.js';
 import type {
@@ -2548,12 +2548,12 @@ export function startServer(port = DEFAULT_PORT): http.Server {
   // Sync lights from config file (lights.json)
   syncLightsFromConfig();
 
-  // Prune lights outside our subnet (if GOVEE_SUBNET is configured)
-  const goveeSubnet = process.env.GOVEE_SUBNET;
-  if (goveeSubnet) {
-    const pruned = pruneBySubnet(goveeSubnet);
+  // Prune lights that don't match the name filter (if GOVEE_FILTER is configured)
+  const goveeFilter = process.env.GOVEE_FILTER;
+  if (goveeFilter) {
+    const pruned = pruneByNameFilter();
     if (pruned > 0) {
-      logger.info('Pruned out-of-subnet lights on startup', { subnet: goveeSubnet, pruned });
+      logger.info('Pruned lights by name filter on startup', { filter: goveeFilter, pruned });
     }
   }
 
@@ -2595,7 +2595,7 @@ export function startServer(port = DEFAULT_PORT): http.Server {
   // Start listening
   server.listen(port, () => {
     logger.info(`Controller server started`, { port, version: VERSION });
-    logger.info('Govee cloud API', { configured: isCloudConfigured(), subnet: process.env.GOVEE_SUBNET || 'none (all lights)' });
+    logger.info('Govee cloud API', { configured: isCloudConfigured(), filter: process.env.GOVEE_FILTER || 'none (all lights)' });
     logger.info(`WebSocket endpoints: /ws/nodes, /ws/dashboard`);
 
     // Start node timeout monitoring

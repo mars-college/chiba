@@ -643,15 +643,21 @@ export function syncLightsFromConfig(): { added: number; updated: number; total:
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  // Filter config lights by GOVEE_SUBNET if configured
-  const subnetFilter = process.env.GOVEE_SUBNET;
-  const filteredLights = subnetFilter
-    ? config.lights.filter(l => l.ip.startsWith(subnetFilter))
+  // Filter config lights by GOVEE_FILTER if configured
+  const nameFilter = process.env.GOVEE_FILTER;
+  const filteredLights = nameFilter
+    ? config.lights.filter(l => {
+        const lowerName = l.name.toLowerCase();
+        if (nameFilter.startsWith('!')) {
+          return !lowerName.includes(nameFilter.slice(1).toLowerCase());
+        }
+        return lowerName.includes(nameFilter.toLowerCase());
+      })
     : config.lights;
 
-  if (subnetFilter && filteredLights.length < config.lights.length) {
-    logger.info('Filtered config lights by subnet', {
-      subnet: subnetFilter,
+  if (nameFilter && filteredLights.length < config.lights.length) {
+    logger.info('Filtered config lights by name', {
+      filter: nameFilter,
       total: config.lights.length,
       matching: filteredLights.length,
     });

@@ -28,6 +28,32 @@ const AUTO_DISCOVERY_INTERVAL = 30 * 60 * 1000; // 30 minutes
 let autoDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
+ * Check if a light name passes the GOVEE_FILTER.
+ *
+ * GOVEE_FILTER=saturn  → only names containing "saturn" (case-insensitive)
+ * GOVEE_FILTER=!saturn → all names NOT containing "saturn" (case-insensitive)
+ * GOVEE_FILTER unset   → all names pass
+ *
+ * @param name - Light name to check (from cloud API or DB)
+ * @returns true if the name passes the filter
+ */
+export function passesNameFilter(name: string | undefined): boolean {
+  const filter = process.env.GOVEE_FILTER;
+  if (!filter) return true;
+
+  const lowerName = (name || '').toLowerCase();
+
+  if (filter.startsWith('!')) {
+    // Exclude mode: reject names containing the keyword
+    const keyword = filter.slice(1).toLowerCase();
+    return !lowerName.includes(keyword);
+  }
+
+  // Include mode: only accept names containing the keyword
+  return lowerName.includes(filter.toLowerCase());
+}
+
+/**
  * The scan message to send to discover Govee devices.
  */
 const SCAN_MESSAGE = JSON.stringify({
@@ -157,13 +183,6 @@ export function discoverLights(timeout = DEFAULT_TIMEOUT): Promise<DiscoveredLig
           if (response.msg?.cmd === 'scan' && response.msg?.data) {
             const { ip, device, sku } = response.msg.data;
             const lightIp = ip || rinfo.address;
-
-            // Filter by subnet if GOVEE_SUBNET is configured
-            const subnetFilter = process.env.GOVEE_SUBNET;
-            if (subnetFilter && !lightIp.startsWith(subnetFilter)) {
-              logger.debug('Ignoring light outside subnet', { ip: lightIp, filter: subnetFilter });
-              return;
-            }
 
             if (device && sku) {
               // Use device ID as key to deduplicate
@@ -591,15 +610,13 @@ export async function runDiscovery(timeout = DEFAULT_TIMEOUT, subnet?: string, p
     }
   }
 
-  // Apply GOVEE_SUBNET filter to lights that have IPs.
-  // Cloud-only devices (no IP) are kept — they're from our account and controllable via cloud API.
-  // Only filter out devices whose known IP belongs to a different subnet.
-  const subnetFilter = process.env.GOVEE_SUBNET;
-  if (subnetFilter) {
+  // Apply GOVEE_FILTER: filter by device name (e.g., "saturn" or "!saturn")
+  const nameFilter = process.env.GOVEE_FILTER;
+  if (nameFilter) {
     const before = allLights.length;
-    allLights = allLights.filter(l => !l.ip || l.ip.startsWith(subnetFilter));
+    allLights = allLights.filter(l => passesNameFilter(l.name));
     if (allLights.length < before) {
-      logger.info('Filtered discovery results by subnet', { subnet: subnetFilter, before, after: allLights.length });
+      logger.info('Filtered discovery results by name', { filter: nameFilter, before, after: allLights.length });
     }
   }
 
@@ -641,23 +658,19 @@ export function startAutoDiscovery(interval = AUTO_DISCOVERY_INTERVAL): void {
 }
 
 /**
- * Remove lights from the database whose IP doesn't match the given subnet prefix.
+ * Remove lights from the database whose name doesn't pass the GOVEE_FILTER.
  * Used on startup to ensure each controller only manages its own lights.
- * Lights with no IP or empty IP are also removed (can't determine location).
  *
- * @param subnetPrefix - IP prefix to keep (e.g., "100.128" or "10.")
  * @returns Number of lights removed
  */
-export function pruneBySubnet(subnetPrefix: string): number {
+export function pruneByNameFilter(): number {
+  const filter = process.env.GOVEE_FILTER;
+  if (!filter) return 0;
+
   const db = getDatabase();
+  const allLights = db.prepare('SELECT id, name FROM lights').all() as Array<{ id: string; name: string }>;
 
-  // Find lights whose IP is set but doesn't match the subnet.
-  // Lights with empty IP (cloud-only, no LAN IP yet) are kept.
-  const toRemove = db.prepare(`
-    SELECT id, name, ip_address, device_id FROM lights
-    WHERE ip_address != '' AND ip_address NOT LIKE ?
-  `).all(`${subnetPrefix}%`) as Array<{ id: string; name: string; ip_address: string; device_id: string | null }>;
-
+  const toRemove = allLights.filter(l => !passesNameFilter(l.name));
   if (toRemove.length === 0) return 0;
 
   // light_state has ON DELETE CASCADE, so deleting from lights cleans up state too
@@ -665,7 +678,7 @@ export function pruneBySubnet(subnetPrefix: string): number {
   const transaction = db.transaction(() => {
     for (const light of toRemove) {
       deleteStmt.run(light.id);
-      logger.info('Pruned out-of-subnet light', { id: light.id, name: light.name, ip: light.ip_address, subnet: subnetPrefix });
+      logger.info('Pruned light by name filter', { id: light.id, name: light.name, filter });
     }
   });
   transaction();
