@@ -24,6 +24,7 @@ export interface DiscoveredLight {
   ip: string;
   deviceId: string;
   sku: string;
+  name?: string;
 }
 
 /**

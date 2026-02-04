@@ -7,6 +7,13 @@ import { createLogger } from '@chiba/shared';
 import { loadLightsConfig } from '@chiba/shared/utils/config';
 import type { Light, LightState, LightControlRequest } from '@chiba/shared';
 import { getDatabase } from '../db/index.js';
+import {
+  isCloudConfigured,
+  cloudControlPower,
+  cloudControlBrightness,
+  cloudControlColorRgb,
+  cloudControlColorTemp,
+} from './govee-cloud.js';
 
 const logger = createLogger('controller', 'lights');
 
@@ -110,22 +117,45 @@ async function sendGoveeCommand(
 
 /**
  * Set light power state.
+ * Tries cloud API first, falls back to UDP LAN.
  */
 export async function setLightPower(light: Light, on: boolean): Promise<void> {
   logger.info('Setting light power', { lightId: light.id, name: light.name, on });
+
+  if (isCloudConfigured() && light.deviceId && light.sku) {
+    try {
+      await cloudControlPower(light.sku, light.deviceId, on);
+      return;
+    } catch (err) {
+      logger.warn('Cloud power control failed, falling back to UDP', { lightId: light.id, error: (err as Error).message });
+    }
+  }
+
   await sendGoveeCommand(light.ipAddress, light.port, 'turn', { value: on ? 1 : 0 });
 }
 
 /**
  * Set light brightness.
+ * Tries cloud API first, falls back to UDP LAN.
  */
 export async function setLightBrightness(light: Light, brightness: number): Promise<void> {
   logger.info('Setting light brightness', { lightId: light.id, brightness });
+
+  if (isCloudConfigured() && light.deviceId && light.sku) {
+    try {
+      await cloudControlBrightness(light.sku, light.deviceId, brightness);
+      return;
+    } catch (err) {
+      logger.warn('Cloud brightness control failed, falling back to UDP', { lightId: light.id, error: (err as Error).message });
+    }
+  }
+
   await sendGoveeCommand(light.ipAddress, light.port, 'brightness', { value: brightness });
 }
 
 /**
  * Set light color using HSB values.
+ * Tries cloud API first, falls back to UDP LAN.
  */
 export async function setLightColor(
   light: Light,
@@ -135,6 +165,16 @@ export async function setLightColor(
 ): Promise<void> {
   logger.info('Setting light color', { lightId: light.id, hue, saturation, brightness });
   const rgb = hsbToRgb(hue, saturation, brightness);
+
+  if (isCloudConfigured() && light.deviceId && light.sku) {
+    try {
+      await cloudControlColorRgb(light.sku, light.deviceId, rgb.r, rgb.g, rgb.b);
+      return;
+    } catch (err) {
+      logger.warn('Cloud color control failed, falling back to UDP', { lightId: light.id, error: (err as Error).message });
+    }
+  }
+
   await sendGoveeCommand(light.ipAddress, light.port, 'colorwc', {
     color: rgb,
     colorTemInKelvin: 0,
@@ -143,9 +183,20 @@ export async function setLightColor(
 
 /**
  * Set light color temperature in Kelvin.
+ * Tries cloud API first, falls back to UDP LAN.
  */
 export async function setLightTemperature(light: Light, kelvin: number): Promise<void> {
   logger.info('Setting light temperature', { lightId: light.id, kelvin });
+
+  if (isCloudConfigured() && light.deviceId && light.sku) {
+    try {
+      await cloudControlColorTemp(light.sku, light.deviceId, kelvin);
+      return;
+    } catch (err) {
+      logger.warn('Cloud temperature control failed, falling back to UDP', { lightId: light.id, error: (err as Error).message });
+    }
+  }
+
   await sendGoveeCommand(light.ipAddress, light.port, 'colorwc', {
     color: { r: 0, g: 0, b: 0 },
     colorTemInKelvin: Math.max(2000, Math.min(9000, kelvin)),

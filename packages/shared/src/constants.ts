@@ -139,4 +139,6 @@ export const ENV = {
   NODE_ID: 'NODE_ID',
   MEDIA_DIR: 'MEDIA_DIR',
   DB_PATH: 'DB_PATH',
+  GOVEE_API_KEY: 'GOVEE_API_KEY',
+  GOVEE_SUBNET: 'GOVEE_SUBNET',
 } as const;

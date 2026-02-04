@@ -29,6 +29,33 @@ GOVEE_MAC_PREFIXES = [
 ]
 
 
+def get_mac_for_ip(ip: str) -> str | None:
+    """Look up MAC address for an IP from the ARP table."""
+    # Ping first to ensure it's in the ARP table
+    try:
+        subprocess.run(
+            ["ping", "-c", "1", "-W", "1", ip],
+            capture_output=True,
+            timeout=2,
+        )
+    except:
+        pass
+
+    # Get ARP table
+    try:
+        result = subprocess.run(["arp", "-n", ip], capture_output=True, text=True)
+        # macOS/Linux format: hostname (192.168.1.1) at aa:bb:cc:dd:ee:ff ...
+        # or: 192.168.1.1 ether aa:bb:cc:dd:ee:ff ...
+        pattern = r'([0-9a-f]{1,2}:[0-9a-f]{1,2}:[0-9a-f]{1,2}:[0-9a-f]{1,2}:[0-9a-f]{1,2}:[0-9a-f]{1,2})'
+        match = re.search(pattern, result.stdout, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+    except:
+        pass
+
+    return None
+
+
 def discover_govee_lan(timeout: float = 5.0) -> list[dict]:
     """Discover Govee devices using LAN API multicast scan.
 
@@ -93,13 +120,16 @@ def discover_govee_lan(timeout: float = 5.0) -> list[dict]:
 
                     if ip not in seen_ips:
                         seen_ips.add(ip)
+                        mac = get_mac_for_ip(ip)
                         device = {
                             "ip": ip,
                             "sku": device_data.get("sku", "unknown"),
                             "device": device_data.get("device", "unknown"),
+                            "mac": mac,
                         }
                         devices.append(device)
-                        print(f"  Found: {ip} - {device['sku']} (ID: {device['device']})")
+                        mac_str = f" (MAC: {mac})" if mac else ""
+                        print(f"  Found: {ip} - {device['sku']} (ID: {device['device']}){mac_str}")
             except socket.timeout:
                 break
             except json.JSONDecodeError:
@@ -356,11 +386,14 @@ Examples:
     import_lights = []
     for d in devices:
         if d.get("device") and d.get("sku"):
-            import_lights.append({
+            light = {
                 "ip": d["ip"],
                 "deviceId": d["device"],
                 "sku": d["sku"],
-            })
+            }
+            if d.get("mac"):
+                light["mac"] = d["mac"]
+            import_lights.append(light)
 
     # JSON output for import
     if args.json:
