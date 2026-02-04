@@ -71,7 +71,14 @@ async function applyBreakpoint(lightId: string, bp: LightScheduleBreakpoint): Pr
   });
 
   try {
-    await controlLight(light, { power: bp.power, brightness: bp.brightness });
+    const request: Record<string, unknown> = { power: bp.power, brightness: bp.brightness };
+    if (bp.kelvin != null) {
+      request.kelvin = bp.kelvin;
+    } else {
+      if (bp.hue != null) request.hue = bp.hue;
+      if (bp.saturation != null) request.saturation = bp.saturation;
+    }
+    await controlLight(light, request as { power: boolean; brightness: number; hue?: number; saturation?: number; kelvin?: number });
   } catch (err) {
     logger.error('Failed to apply scheduled breakpoint', err as Error, { lightId, breakpointId: bp.id });
   }

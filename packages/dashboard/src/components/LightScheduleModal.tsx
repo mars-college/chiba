@@ -2,17 +2,41 @@ import { useState, useEffect } from 'react';
 import type { LightWithState, LightSchedule, BreakpointTimeType } from '@chiba/shared';
 import { apiGet, apiPut, apiDelete } from '../hooks/useApi';
 
+type ColorMode = 'none' | 'color' | 'temperature';
+
 interface BreakpointRow {
   timeType: BreakpointTimeType;
   time: string;
   offsetMinutes: number;
   power: boolean;
   brightness: number;
+  colorMode: ColorMode;
+  hue: number;
+  saturation: number;
+  kelvin: number;
 }
 
 interface LightScheduleModalProps {
   light: LightWithState;
   onClose: () => void;
+}
+
+function rowFromSaved(bp: { timeType: BreakpointTimeType; time?: string; offsetMinutes?: number; power: boolean; brightness: number; hue?: number; saturation?: number; kelvin?: number }): BreakpointRow {
+  let colorMode: ColorMode = 'none';
+  if (bp.kelvin != null) colorMode = 'temperature';
+  else if (bp.hue != null || bp.saturation != null) colorMode = 'color';
+
+  return {
+    timeType: bp.timeType,
+    time: bp.time || '08:00',
+    offsetMinutes: bp.offsetMinutes || 0,
+    power: bp.power,
+    brightness: bp.brightness,
+    colorMode,
+    hue: bp.hue ?? 0,
+    saturation: bp.saturation ?? 100,
+    kelvin: bp.kelvin ?? 4000,
+  };
 }
 
 export function LightScheduleModal({ light, onClose }: LightScheduleModalProps) {
@@ -26,15 +50,7 @@ export function LightScheduleModal({ light, onClose }: LightScheduleModalProps) 
     apiGet<{ success: boolean; data: LightSchedule }>(`/lights/${light.id}/schedule`)
       .then(res => {
         setEnabled(res.data.enabled);
-        setBreakpoints(
-          res.data.breakpoints.map(bp => ({
-            timeType: bp.timeType,
-            time: bp.time || '08:00',
-            offsetMinutes: bp.offsetMinutes || 0,
-            power: bp.power,
-            brightness: bp.brightness,
-          }))
-        );
+        setBreakpoints(res.data.breakpoints.map(rowFromSaved));
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
@@ -43,7 +59,7 @@ export function LightScheduleModal({ light, onClose }: LightScheduleModalProps) 
   const addBreakpoint = () => {
     setBreakpoints(prev => [
       ...prev,
-      { timeType: 'clock', time: '08:00', offsetMinutes: 0, power: true, brightness: 100 },
+      { timeType: 'clock', time: '08:00', offsetMinutes: 0, power: true, brightness: 100, colorMode: 'none', hue: 0, saturation: 100, kelvin: 4000 },
     ]);
   };
 
@@ -69,6 +85,8 @@ export function LightScheduleModal({ light, onClose }: LightScheduleModalProps) 
           offsetMinutes: bp.timeType !== 'clock' ? bp.offsetMinutes : undefined,
           power: bp.power,
           brightness: bp.brightness,
+          ...(bp.power && bp.colorMode === 'color' && { hue: bp.hue, saturation: bp.saturation }),
+          ...(bp.power && bp.colorMode === 'temperature' && { kelvin: bp.kelvin }),
         })),
       });
       onClose();
@@ -90,6 +108,9 @@ export function LightScheduleModal({ light, onClose }: LightScheduleModalProps) 
       setSaving(false);
     }
   };
+
+  const labelStyle = { fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' as const };
+  const valueStyle = { fontSize: '0.8rem', color: 'var(--text-secondary)', minWidth: '28px', textAlign: 'right' as const };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -138,7 +159,7 @@ export function LightScheduleModal({ light, onClose }: LightScheduleModalProps) 
                     position: 'absolute',
                     inset: 0,
                     borderRadius: '12px',
-                    background: enabled ? 'var(--color-primary)' : 'var(--bg-secondary)',
+                    background: enabled ? 'var(--color-primary)' : '#555',
                     transition: 'background 0.2s',
                   }}>
                     <span style={{
@@ -268,7 +289,7 @@ export function LightScheduleModal({ light, onClose }: LightScheduleModalProps) 
                     </div>
 
                     {/* Row 2: Power + brightness */}
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: bp.power ? '8px' : '0' }}>
                       <label style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -287,9 +308,7 @@ export function LightScheduleModal({ light, onClose }: LightScheduleModalProps) 
 
                       {bp.power && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                            Brightness
-                          </span>
+                          <span style={labelStyle}>Brightness</span>
                           <input
                             type="range"
                             min="0"
@@ -298,12 +317,90 @@ export function LightScheduleModal({ light, onClose }: LightScheduleModalProps) 
                             onChange={e => updateBreakpoint(i, { brightness: Number(e.target.value) })}
                             style={{ flex: 1 }}
                           />
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', minWidth: '28px', textAlign: 'right' }}>
-                            {bp.brightness}%
-                          </span>
+                          <span style={valueStyle}>{bp.brightness}%</span>
                         </div>
                       )}
                     </div>
+
+                    {/* Row 3: Optional color/temperature */}
+                    {bp.power && (
+                      <div>
+                        {/* Color mode selector */}
+                        <div style={{ display: 'flex', gap: '0', marginBottom: bp.colorMode !== 'none' ? '8px' : '0', borderRadius: '4px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                          {(['none', 'color', 'temperature'] as ColorMode[]).map(m => (
+                            <button
+                              key={m}
+                              onClick={() => updateBreakpoint(i, { colorMode: m })}
+                              style={{
+                                flex: 1,
+                                padding: '3px 8px',
+                                border: 'none',
+                                background: bp.colorMode === m ? 'var(--color-primary)' : 'var(--bg-primary)',
+                                color: bp.colorMode === m ? 'white' : 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                fontSize: '0.75rem',
+                                borderRight: m !== 'temperature' ? '1px solid var(--border-color)' : 'none',
+                              }}
+                            >
+                              {m === 'none' ? 'No color' : m === 'color' ? 'Color' : 'Temp'}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Color sliders */}
+                        {bp.colorMode === 'color' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ ...labelStyle, minWidth: '32px' }}>Hue</span>
+                              <input
+                                type="range"
+                                min="0"
+                                max="360"
+                                value={bp.hue}
+                                onChange={e => updateBreakpoint(i, { hue: Number(e.target.value) })}
+                                style={{
+                                  flex: 1,
+                                  background: 'linear-gradient(to right, hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%), hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), hsl(360,100%,50%))',
+                                }}
+                              />
+                              <span style={valueStyle}>{bp.hue}</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ ...labelStyle, minWidth: '32px' }}>Sat</span>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={bp.saturation}
+                                onChange={e => updateBreakpoint(i, { saturation: Number(e.target.value) })}
+                                style={{ flex: 1 }}
+                              />
+                              <span style={valueStyle}>{bp.saturation}%</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Temperature slider */}
+                        {bp.colorMode === 'temperature' && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={labelStyle}>Temp</span>
+                            <input
+                              type="range"
+                              min="2000"
+                              max="9000"
+                              step="100"
+                              value={bp.kelvin}
+                              onChange={e => updateBreakpoint(i, { kelvin: Number(e.target.value) })}
+                              style={{
+                                flex: 1,
+                                background: 'linear-gradient(to right, #ff9329, #fff5e6, #ffffff, #d4e4ff, #a6c8ff)',
+                              }}
+                            />
+                            <span style={valueStyle}>{bp.kelvin}K</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

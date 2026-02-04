@@ -136,6 +136,9 @@ export interface LightScheduleBreakpoint {
   offsetMinutes?: number;    // ±N from sunrise/sunset
   power: boolean;
   brightness: number;        // 0-100
+  hue?: number;              // 0-360 (optional, keeps current if unset)
+  saturation?: number;       // 0-100 (optional)
+  kelvin?: number;           // 2000-9000 (optional, mutually exclusive with hue/saturation)
 }
 
 /**
@@ -159,5 +162,8 @@ export interface SetLightScheduleRequest {
     offsetMinutes?: number;
     power: boolean;
     brightness: number;
+    hue?: number;
+    saturation?: number;
+    kelvin?: number;
   }>;
 }

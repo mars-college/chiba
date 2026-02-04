@@ -2153,6 +2153,18 @@ async function handleRequest(
         sendError(res, 'Each breakpoint requires brightness (0-100)');
         return;
       }
+      if (bp.hue != null && (typeof bp.hue !== 'number' || bp.hue < 0 || bp.hue > 360)) {
+        sendError(res, 'hue must be 0-360');
+        return;
+      }
+      if (bp.saturation != null && (typeof bp.saturation !== 'number' || bp.saturation < 0 || bp.saturation > 100)) {
+        sendError(res, 'saturation must be 0-100');
+        return;
+      }
+      if (bp.kelvin != null && (typeof bp.kelvin !== 'number' || bp.kelvin < 2000 || bp.kelvin > 9000)) {
+        sendError(res, 'kelvin must be 2000-9000');
+        return;
+      }
     }
 
     // Assign IDs to breakpoints
@@ -2163,6 +2175,9 @@ async function handleRequest(
       offsetMinutes: bp.offsetMinutes,
       power: bp.power,
       brightness: bp.brightness,
+      ...(bp.hue != null && { hue: bp.hue }),
+      ...(bp.saturation != null && { saturation: bp.saturation }),
+      ...(bp.kelvin != null && { kelvin: bp.kelvin }),
     }));
 
     const now = Date.now();
