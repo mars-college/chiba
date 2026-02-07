@@ -1981,6 +1981,47 @@ function isPrivateLanAddress(addr: string): boolean {
   return false;
 }
 
+function isLoopbackHost(host: string): boolean {
+  if (!host) return true;
+  const lower = host.toLowerCase();
+  if (lower === 'localhost' || lower === 'ip6-localhost' || lower === 'ip6-loopback') {
+    return true;
+  }
+  if (lower === '::1') return true;
+  if (lower.startsWith('127.')) return true;
+  return false;
+}
+
+function extractHostname(hostHeader: string): string {
+  const trimmed = hostHeader.trim();
+  if (!trimmed) return '';
+  try {
+    return new URL(`http://${trimmed}`).hostname;
+  } catch {
+    return trimmed.split(':')[0] ?? '';
+  }
+}
+
+function getMdnsHostname(): string {
+  const name = os.hostname();
+  return name.endsWith('.local') ? name : `${name}.local`;
+}
+
+function getFallbackHost(
+  req: express.Request,
+  port: number | null
+): { host: string; isLocal: boolean } {
+  const rawHost = req.headers.host ?? '';
+  const hostname = extractHostname(rawHost);
+  if (!hostname || isLoopbackHost(hostname)) {
+    const mdns = getMdnsHostname();
+    return { host: port ? `${mdns}:${port}` : mdns, isLocal: true };
+  }
+  const isLocal = hostname.endsWith('.local');
+  const host = port ? `${hostname}:${port}` : hostname;
+  return { host, isLocal };
+}
+
 function getRemoteBaseUrl(
   req: express.Request,
   options: RemoteBaseOptions = {}
@@ -1989,9 +2030,8 @@ function getRemoteBaseUrl(
     loadedConfig?.config?.server?.remote_url ??
     process.env.CHIBA_REMOTE_URL ??
     '';
-  const fallback = getBaseUrl(req);
   if (configured) {
-    return normalizeRemoteBase(configured, fallback);
+    return normalizeRemoteBase(configured, getBaseUrl(req));
   }
   const port = options.port ?? PORT;
   const lan = getLanAddress();
@@ -2002,7 +2042,11 @@ function getRemoteBaseUrl(
       (isPrivateLanAddress(lan) ? 'http' : req.secure ? 'https' : 'http');
     return `${scheme}://${lan}${port ? `:${port}` : ''}`;
   }
-  return fallback;
+  const fallback = getFallbackHost(req, port);
+  const explicitScheme = options.scheme ?? null;
+  const scheme =
+    explicitScheme ?? (fallback.isLocal ? 'http' : req.secure ? 'https' : 'http');
+  return `${scheme}://${fallback.host}`;
 }
 
 async function sendIndex(req: express.Request, res: express.Response) {
