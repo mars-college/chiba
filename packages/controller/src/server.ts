@@ -2896,6 +2896,20 @@ function handleNodeMessage(
         const [nodeId, conn] = existing;
         conn.status = status;
         conn.lastHeartbeat = Date.now();
+
+        // Update httpUrl if node IP changed (e.g., DHCP renewal after WiFi recovery)
+        if (status.node?.ip && status.node?.port) {
+          const newHttpUrl = `http://${status.node.ip}:${status.node.port}`;
+          if (conn.httpUrl !== newHttpUrl) {
+            logger.info('Node IP changed, updating httpUrl', {
+              nodeId,
+              oldUrl: conn.httpUrl,
+              newUrl: newHttpUrl,
+            });
+            conn.httpUrl = newHttpUrl;
+          }
+        }
+
         state.nodes.set(nodeId, conn);
 
         broadcastToDashboards({
