@@ -159,6 +159,8 @@ export type {
   PlugControlRequest,
   DiscoveredPlug,
   PlugDiscoveryResult,
+  PlugConfigEntry,
+  PlugsConfig,
   PlugScheduleBreakpoint,
   PlugSchedule,
   SetPlugScheduleRequest,

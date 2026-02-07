@@ -14,6 +14,7 @@ export function PlugsPage() {
   const [renamingPlug, setRenamingPlug] = useState<PlugWithState | null>(null);
   const [newPlugName, setNewPlugName] = useState('');
   const [schedulingPlug, setSchedulingPlug] = useState<PlugWithState | null>(null);
+  const [subnet, setSubnet] = useState('');
 
   const fetchPlugs = useCallback(async () => {
     try {
@@ -57,7 +58,11 @@ export function PlugsPage() {
     setDiscoveryResult(null);
     setError(null);
     try {
-      const response = await apiPost<{ success: boolean; data: PlugDiscoveryResult }>('/plugs/discover', { timeout: 5000 });
+      const timeout = subnet ? 10000 : 5000;
+      const response = await apiPost<{ success: boolean; data: PlugDiscoveryResult }>('/plugs/discover', {
+        timeout,
+        subnet: subnet || undefined,
+      });
       setDiscoveryResult(response.data);
       await fetchPlugs();
     } catch (err) {
@@ -112,7 +117,15 @@ export function PlugsPage() {
           <h1 className="page-title">Plugs</h1>
           <p className="page-subtitle">Control Kasa smart plugs</p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input
+            type="text"
+            className="form-input"
+            value={subnet}
+            onChange={(e) => setSubnet(e.target.value)}
+            placeholder="e.g. 100.128.0"
+            style={{ width: '140px', height: '36px', fontSize: '13px' }}
+          />
           <button
             className="btn btn-secondary"
             onClick={handleDiscover}

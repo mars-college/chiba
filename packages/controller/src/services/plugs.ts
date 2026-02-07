@@ -2,10 +2,12 @@
  * Service for controlling Kasa smart plugs via tplink-smarthome-api.
  */
 
-import { Client } from 'tplink-smarthome-api';
+import pkg from 'tplink-smarthome-api';
+const { Client } = pkg;
 import type TplinkPlug from 'tplink-smarthome-api/lib/plug/index.js';
 import { createLogger } from '@chiba/shared';
 import type { Plug, PlugState, PlugControlRequest, DiscoveredPlug, PlugDiscoveryResult } from '@chiba/shared';
+import { loadPlugsConfig } from '@chiba/shared/utils/config';
 import { getDatabase } from '../db/index.js';
 
 const logger = createLogger('controller', 'plugs');
@@ -63,6 +65,124 @@ export async function discoverPlugs(timeout = 5000): Promise<DiscoveredPlug[]> {
 }
 
 /**
+ * Probe a single IP for a Kasa plug. Returns DiscoveredPlug or null if unreachable.
+ */
+export async function probePlugAt(ip: string, timeout = 3000): Promise<DiscoveredPlug | null> {
+  try {
+    const c = getClient();
+    const device = c.getPlug({ host: ip, sysInfo: {} as any });
+    const sysInfo = await Promise.race([
+      device.getSysInfo(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout)),
+    ]);
+    return {
+      ip,
+      deviceId: sysInfo.deviceId || '',
+      alias: sysInfo.alias || ip,
+      model: sysInfo.model || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scan a /24 subnet for Kasa plugs by probing each IP.
+ * Batches in groups of 50 to avoid file descriptor limits.
+ */
+export async function scanSubnetForPlugs(subnet: string, timeout = 3000): Promise<DiscoveredPlug[]> {
+  const discovered: DiscoveredPlug[] = [];
+  const batchSize = 50;
+
+  logger.info('Starting subnet scan for plugs', { subnet, timeout });
+
+  for (let batchStart = 1; batchStart <= 254; batchStart += batchSize) {
+    const batchEnd = Math.min(batchStart + batchSize - 1, 254);
+    const batch: Promise<DiscoveredPlug | null>[] = [];
+
+    for (let i = batchStart; i <= batchEnd; i++) {
+      batch.push(probePlugAt(`${subnet}.${i}`, timeout));
+    }
+
+    const results = await Promise.all(batch);
+    for (const result of results) {
+      if (result) {
+        discovered.push(result);
+        logger.info('Found plug via subnet scan', { ip: result.ip, alias: result.alias, model: result.model });
+      }
+    }
+  }
+
+  logger.info('Subnet scan complete', { subnet, found: discovered.length });
+  return discovered;
+}
+
+/**
+ * Sync plugs from static config file (plugs.json) into the database.
+ */
+export function syncPlugsFromConfig(): { added: number; updated: number; total: number } {
+  const config = loadPlugsConfig();
+
+  if (!config) {
+    logger.warn('Could not load plugs config - skipping sync');
+    return { added: 0, updated: 0, total: 0 };
+  }
+
+  const db = getDatabase();
+  const now = Date.now();
+  let added = 0;
+  let updated = 0;
+
+  const findById = db.prepare('SELECT id, name, ip_address, device_id FROM plugs WHERE id = ?');
+  const updatePlug = db.prepare(`
+    UPDATE plugs SET name = ?, ip_address = ?, host = ?, device_id = COALESCE(?, device_id), model = COALESCE(?, model), updated_at = ?
+    WHERE id = ?
+  `);
+  const insertPlug = db.prepare(`
+    INSERT INTO plugs (id, name, ip_address, host, device_id, model, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const transaction = db.transaction(() => {
+    for (const plug of config.plugs) {
+      const existing = findById.get(plug.id) as {
+        id: string;
+        name: string;
+        ip_address: string;
+        device_id: string | null;
+      } | undefined;
+
+      if (existing) {
+        const deviceIdChanged = plug.deviceId && existing.device_id !== plug.deviceId;
+        if (existing.name !== plug.name || existing.ip_address !== plug.ip || deviceIdChanged) {
+          updatePlug.run(plug.name, plug.ip, plug.ip, plug.deviceId || null, plug.model || null, now, plug.id);
+          logger.info('Updated plug from config', {
+            id: plug.id,
+            name: plug.name,
+            oldIp: existing.ip_address,
+            newIp: plug.ip,
+          });
+          updated++;
+        }
+      } else {
+        insertPlug.run(plug.id, plug.name, plug.ip, plug.ip, plug.deviceId || null, plug.model || null, now, now);
+        logger.info('Added plug from config', {
+          id: plug.id,
+          name: plug.name,
+          ip: plug.ip,
+        });
+        added++;
+      }
+    }
+  });
+
+  transaction();
+
+  logger.info('Plugs sync completed', { added, updated, total: config.plugs.length });
+  return { added, updated, total: config.plugs.length };
+}
+
+/**
  * Sync discovered plugs to the database (upsert by deviceId).
  */
 export function syncDiscoveredPlugs(discovered: DiscoveredPlug[]): { added: number; updated: number } {
@@ -106,9 +226,12 @@ export function syncDiscoveredPlugs(discovered: DiscoveredPlug[]): { added: numb
 
 /**
  * Run discovery and sync results to database.
+ * When subnet is provided, uses unicast probing instead of broadcast.
  */
-export async function runPlugDiscovery(timeout = 5000): Promise<PlugDiscoveryResult> {
-  const discovered = await discoverPlugs(timeout);
+export async function runPlugDiscovery(timeout = 5000, subnet?: string): Promise<PlugDiscoveryResult> {
+  const discovered = subnet
+    ? await scanSubnetForPlugs(subnet, timeout)
+    : await discoverPlugs(timeout);
   const { added, updated } = syncDiscoveredPlugs(discovered);
 
   return {
@@ -130,7 +253,7 @@ export async function setPlugPower(plug: Plug, on: boolean): Promise<void> {
   logger.info('Setting plug power', { plugId: plug.id, name: plug.name, on });
 
   const c = getClient();
-  const device = c.getPlug({ host: plug.ipAddress });
+  const device = c.getPlug({ host: plug.ipAddress, sysInfo: {} as any });
   await device.setPowerState(on);
 }
 
@@ -168,7 +291,7 @@ export async function controlPlug(plug: Plug, request: PlugControlRequest): Prom
 export async function queryPlugState(plug: Plug): Promise<PlugState | null> {
   try {
     const c = getClient();
-    const device = c.getPlug({ host: plug.ipAddress });
+    const device = c.getPlug({ host: plug.ipAddress, sysInfo: {} as any });
     const power = await device.getPowerState();
     const now = Date.now();
 

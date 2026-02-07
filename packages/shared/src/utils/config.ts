@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { LightsConfig } from '../types/lights.js';
+import type { PlugsConfig } from '../types/plugs.js';
 
 /**
  * Get the path to the config directory.
@@ -28,6 +29,20 @@ export function loadLightsConfig(): LightsConfig | null {
     const configPath = path.join(getConfigDir(), 'lights.json');
     const content = fs.readFileSync(configPath, 'utf-8');
     return JSON.parse(content) as LightsConfig;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Load the plugs configuration from plugs.json.
+ * Returns null if the file doesn't exist or is invalid.
+ */
+export function loadPlugsConfig(): PlugsConfig | null {
+  try {
+    const configPath = path.join(getConfigDir(), 'plugs.json');
+    const content = fs.readFileSync(configPath, 'utf-8');
+    return JSON.parse(content) as PlugsConfig;
   } catch (err) {
     return null;
   }

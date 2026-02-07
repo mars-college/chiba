@@ -63,6 +63,24 @@ export interface PlugDiscoveryResult {
 }
 
 /**
+ * A plug entry in the static config file (plugs.json).
+ */
+export interface PlugConfigEntry {
+  id: string;
+  name: string;
+  ip: string;
+  deviceId?: string;
+  model?: string;
+}
+
+/**
+ * Static plug configuration loaded from plugs.json.
+ */
+export interface PlugsConfig {
+  plugs: PlugConfigEntry[];
+}
+
+/**
  * A single breakpoint in a plug schedule.
  */
 export interface PlugScheduleBreakpoint {

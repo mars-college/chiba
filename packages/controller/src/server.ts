@@ -57,6 +57,8 @@ import {
   controlPlug,
   refreshAllPlugStates,
   runPlugDiscovery,
+  syncPlugsFromConfig,
+  syncDiscoveredPlugs,
 } from './services/plugs.js';
 import { startPlugScheduler, stopPlugScheduler, reloadPlugSchedule } from './services/plug-scheduler.js';
 import type {
@@ -338,6 +340,8 @@ async function handleRequest(
             // Plugs
             'GET /api/plugs',
             'POST /api/plugs/discover',
+            'POST /api/plugs/import',
+            'POST /api/plugs/sync',
             'PUT /api/plugs/:id',
             'DELETE /api/plugs/:id',
             'POST /api/plugs/:id/control',
@@ -551,22 +555,25 @@ async function handleRequest(
           state_updated_at: number | null;
         }>;
 
-        const plugsWithState: PlugWithState[] = rows.map(row => ({
-          id: row.id,
-          name: row.name,
-          ipAddress: row.ip_address,
-          host: row.host,
-          deviceId: row.device_id ?? undefined,
-          model: row.model ?? undefined,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-          state: row.power !== null ? {
-            plugId: row.id,
-            power: Boolean(row.power),
-            updatedAt: row.state_updated_at ?? 0,
-          } : null,
-          reachable: reachabilityMap.get(row.id) !== null,
-        }));
+        const plugsWithState: PlugWithState[] = rows.map(row => {
+          const liveState = reachabilityMap.get(row.id) ?? null;
+          return {
+            id: row.id,
+            name: row.name,
+            ipAddress: row.ip_address,
+            host: row.host,
+            deviceId: row.device_id ?? undefined,
+            model: row.model ?? undefined,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            state: liveState ?? (row.power !== null ? {
+              plugId: row.id,
+              power: Boolean(row.power),
+              updatedAt: row.state_updated_at ?? 0,
+            } : null),
+            reachable: liveState !== null,
+          };
+        });
 
         sendJson(res, { success: true, data: plugsWithState });
         return;
@@ -2303,17 +2310,70 @@ async function handleRequest(
 
   // Discover plugs - POST /api/plugs/discover
   if (method === 'POST' && url.pathname === '/api/plugs/discover') {
-    const body = await readJsonBody<{ timeout?: number }>(req);
+    const body = await readJsonBody<{ timeout?: number; subnet?: string }>(req);
     const timeout = body?.timeout ?? 5000;
+    const subnet = body?.subnet;
 
-    logger.info('Starting plug discovery', { timeout });
+    logger.info('Starting plug discovery', { timeout, subnet: subnet || 'broadcast' });
 
     try {
-      const result: PlugDiscoveryResult = await runPlugDiscovery(timeout);
+      const result: PlugDiscoveryResult = await runPlugDiscovery(timeout, subnet);
       sendJson(res, { success: true, data: result });
     } catch (err) {
       logger.error('Plug discovery failed', err as Error);
       sendError(res, `Discovery failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
+  // Import plugs - POST /api/plugs/import
+  if (method === 'POST' && url.pathname === '/api/plugs/import') {
+    const body = await readJsonBody<{ plugs: Array<{ ip: string; deviceId?: string; alias?: string; model?: string }> }>(req);
+
+    if (!body?.plugs || !Array.isArray(body.plugs)) {
+      sendError(res, 'plugs array is required');
+      return;
+    }
+
+    for (const plug of body.plugs) {
+      if (!plug.ip) {
+        sendError(res, 'Each plug must have an ip');
+        return;
+      }
+    }
+
+    logger.info('Importing plugs', { count: body.plugs.length });
+
+    try {
+      const discovered = body.plugs.map(p => ({
+        ip: p.ip,
+        deviceId: p.deviceId || '',
+        alias: p.alias || p.ip,
+        model: p.model || '',
+      }));
+      const { added, updated } = syncDiscoveredPlugs(discovered);
+
+      sendJson(res, {
+        success: true,
+        data: { imported: body.plugs.length, added, updated },
+      });
+    } catch (err) {
+      logger.error('Plug import failed', err as Error);
+      sendError(res, `Import failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
+  // Sync plugs from config - POST /api/plugs/sync
+  if (method === 'POST' && url.pathname === '/api/plugs/sync') {
+    logger.info('Syncing plugs from config');
+
+    try {
+      const result = syncPlugsFromConfig();
+      sendJson(res, { success: true, data: result });
+    } catch (err) {
+      logger.error('Plug sync failed', err as Error);
+      sendError(res, `Sync failed: ${(err as Error).message}`, 500);
     }
     return;
   }
@@ -3046,6 +3106,9 @@ export function startServer(port = DEFAULT_PORT): http.Server {
 
   // Sync lights from config file (lights.json)
   syncLightsFromConfig();
+
+  // Sync plugs from config file (plugs.json)
+  syncPlugsFromConfig();
 
   // Prune lights that don't match the name filter (if GOVEE_FILTER is configured)
   const goveeFilter = process.env.GOVEE_FILTER;
