@@ -150,3 +150,16 @@ export type {
   LightSchedule,
   SetLightScheduleRequest,
 } from './lights.js';
+
+// Plug types
+export type {
+  Plug,
+  PlugState,
+  PlugWithState,
+  PlugControlRequest,
+  DiscoveredPlug,
+  PlugDiscoveryResult,
+  PlugScheduleBreakpoint,
+  PlugSchedule,
+  SetPlugScheduleRequest,
+} from './plugs.js';

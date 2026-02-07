@@ -115,6 +115,33 @@ CREATE TABLE IF NOT EXISTS light_presets (
 
 -- Index for fast preset lookups
 CREATE INDEX IF NOT EXISTS idx_light_presets_name ON light_presets(name);
+
+-- Kasa smart plugs
+CREATE TABLE IF NOT EXISTS plugs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  ip_address TEXT NOT NULL,
+  host TEXT NOT NULL,
+  device_id TEXT UNIQUE,
+  model TEXT,
+  created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+  updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+);
+
+-- Current plug state (ephemeral)
+CREATE TABLE IF NOT EXISTS plug_state (
+  plug_id TEXT PRIMARY KEY REFERENCES plugs(id) ON DELETE CASCADE,
+  power INTEGER DEFAULT 0,
+  updated_at INTEGER
+);
+
+-- Plug schedules for daily timer/breakpoint system
+CREATE TABLE IF NOT EXISTS plug_schedules (
+  plug_id TEXT PRIMARY KEY REFERENCES plugs(id) ON DELETE CASCADE,
+  enabled INTEGER DEFAULT 0,
+  breakpoints TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+);
 `;
 
 /**
@@ -129,6 +156,9 @@ UPDATE node_status SET connected = 0, updated_at = strftime('%s', 'now') * 1000;
  * SQL statements to drop all tables (for testing).
  */
 export const DROP_ALL = `
+DROP TABLE IF EXISTS plug_schedules;
+DROP TABLE IF EXISTS plug_state;
+DROP TABLE IF EXISTS plugs;
 DROP TABLE IF EXISTS light_schedules;
 DROP TABLE IF EXISTS node_content;
 DROP TABLE IF EXISTS playlists;
@@ -238,6 +268,31 @@ export const MIGRATIONS = [
   // Light schedules table for daily timer/breakpoint system
   `CREATE TABLE IF NOT EXISTS light_schedules (
     light_id TEXT PRIMARY KEY REFERENCES lights(id) ON DELETE CASCADE,
+    enabled INTEGER DEFAULT 0,
+    breakpoints TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+  );`,
+
+  // Kasa smart plugs tables
+  `CREATE TABLE IF NOT EXISTS plugs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    ip_address TEXT NOT NULL,
+    host TEXT NOT NULL,
+    device_id TEXT UNIQUE,
+    model TEXT,
+    created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS plug_state (
+    plug_id TEXT PRIMARY KEY REFERENCES plugs(id) ON DELETE CASCADE,
+    power INTEGER DEFAULT 0,
+    updated_at INTEGER
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS plug_schedules (
+    plug_id TEXT PRIMARY KEY REFERENCES plugs(id) ON DELETE CASCADE,
     enabled INTEGER DEFAULT 0,
     breakpoints TEXT NOT NULL DEFAULT '[]',
     updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)

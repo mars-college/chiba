@@ -4,6 +4,7 @@ import { NodeDetailPage } from './pages/NodeDetailPage';
 import { ContentPage } from './pages/ContentPage';
 import { PlaylistsPage } from './pages/PlaylistsPage';
 import { LightsPage } from './pages/LightsPage';
+import { PlugsPage } from './pages/PlugsPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 export default function App() {
@@ -73,6 +74,17 @@ export default function App() {
             <span>Lights</span>
           </NavLink>
           <NavLink
+            to="/plugs"
+            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+          >
+            <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2v6m0 8v6" />
+              <rect x="8" y="8" width="8" height="8" rx="1" />
+              <path d="M10 8V5m4 3V5" />
+            </svg>
+            <span>Plugs</span>
+          </NavLink>
+          <NavLink
             to="/settings"
             className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
           >
@@ -94,6 +106,7 @@ export default function App() {
           <Route path="/content" element={<ContentPage />} />
           <Route path="/playlists" element={<PlaylistsPage />} />
           <Route path="/lights" element={<LightsPage />} />
+          <Route path="/plugs" element={<PlugsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>

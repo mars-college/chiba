@@ -49,6 +49,16 @@ import { runDiscovery, startAutoDiscovery, stopAutoDiscovery, pruneByNameFilter 
 import { isCloudConfigured } from './services/govee-cloud.js';
 import { handleUpload, getUploadPath } from './services/uploads.js';
 import { startScheduler, stopScheduler, reloadLightSchedule } from './services/scheduler.js';
+import {
+  getAllPlugs,
+  getPlugById,
+  renamePlug,
+  deletePlug,
+  controlPlug,
+  refreshAllPlugStates,
+  runPlugDiscovery,
+} from './services/plugs.js';
+import { startPlugScheduler, stopPlugScheduler, reloadPlugSchedule } from './services/plug-scheduler.js';
 import type {
   LightWithState,
   LightPreset,
@@ -58,6 +68,11 @@ import type {
   DiscoveryResult,
   SetLightScheduleRequest,
   LightSchedule,
+  PlugWithState,
+  PlugControlRequest,
+  PlugDiscoveryResult,
+  SetPlugScheduleRequest,
+  PlugSchedule,
 } from '@chiba/shared';
 
 // Load .env from project root
@@ -320,6 +335,16 @@ async function handleRequest(
             'POST /api/presets',
             'POST /api/presets/:id/apply',
             'DELETE /api/presets/:id',
+            // Plugs
+            'GET /api/plugs',
+            'POST /api/plugs/discover',
+            'PUT /api/plugs/:id',
+            'DELETE /api/plugs/:id',
+            'POST /api/plugs/:id/control',
+            'POST /api/plugs/all/control',
+            'GET /api/plugs/:id/schedule',
+            'PUT /api/plugs/:id/schedule',
+            'DELETE /api/plugs/:id/schedule',
           ],
         });
         return;
@@ -499,6 +524,51 @@ async function handleRequest(
         }));
 
         sendJson(res, { success: true, data: lightsWithState });
+        return;
+      }
+
+      case '/api/plugs': {
+        // Refresh states from actual plugs
+        const reachabilityMap = await refreshAllPlugStates();
+
+        // Get all plugs with their updated states from database
+        const db = getDatabase();
+        const rows = db.prepare(`
+          SELECT p.*, ps.power, ps.updated_at as state_updated_at
+          FROM plugs p
+          LEFT JOIN plug_state ps ON p.id = ps.plug_id
+          ORDER BY p.name
+        `).all() as Array<{
+          id: string;
+          name: string;
+          ip_address: string;
+          host: string;
+          device_id: string | null;
+          model: string | null;
+          created_at: number;
+          updated_at: number;
+          power: number | null;
+          state_updated_at: number | null;
+        }>;
+
+        const plugsWithState: PlugWithState[] = rows.map(row => ({
+          id: row.id,
+          name: row.name,
+          ipAddress: row.ip_address,
+          host: row.host,
+          deviceId: row.device_id ?? undefined,
+          model: row.model ?? undefined,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          state: row.power !== null ? {
+            plugId: row.id,
+            power: Boolean(row.power),
+            updatedAt: row.state_updated_at ?? 0,
+          } : null,
+          reachable: reachabilityMap.get(row.id) !== null,
+        }));
+
+        sendJson(res, { success: true, data: plugsWithState });
         return;
       }
 
@@ -2227,6 +2297,276 @@ async function handleRequest(
     return;
   }
 
+  // ============================================================================
+  // Plug Control Endpoints
+  // ============================================================================
+
+  // Discover plugs - POST /api/plugs/discover
+  if (method === 'POST' && url.pathname === '/api/plugs/discover') {
+    const body = await readJsonBody<{ timeout?: number }>(req);
+    const timeout = body?.timeout ?? 5000;
+
+    logger.info('Starting plug discovery', { timeout });
+
+    try {
+      const result: PlugDiscoveryResult = await runPlugDiscovery(timeout);
+      sendJson(res, { success: true, data: result });
+    } catch (err) {
+      logger.error('Plug discovery failed', err as Error);
+      sendError(res, `Discovery failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
+  // Rename a plug - PUT /api/plugs/:id
+  if (method === 'PUT' && url.pathname.match(/^\/api\/plugs\/[^/]+$/) && !url.pathname.includes('/control')) {
+    const plugId = url.pathname.split('/')[3];
+    if (!plugId) {
+      sendError(res, 'Missing plug ID');
+      return;
+    }
+
+    const body = await readJsonBody<{ name?: string }>(req);
+    if (!body?.name?.trim()) {
+      sendError(res, 'Name is required');
+      return;
+    }
+
+    try {
+      const updated = renamePlug(plugId, body.name.trim());
+      if (!updated) {
+        sendError(res, 'Plug not found', 404);
+        return;
+      }
+      logger.info('Plug renamed', { id: plugId, name: body.name.trim() });
+      sendJson(res, { success: true, data: updated });
+    } catch (err) {
+      logger.error('Failed to rename plug', err as Error);
+      sendError(res, `Rename failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
+  // Delete a plug - DELETE /api/plugs/:id
+  if (method === 'DELETE' && url.pathname.match(/^\/api\/plugs\/[^/]+$/)) {
+    const plugId = url.pathname.split('/')[3];
+    if (!plugId) {
+      sendError(res, 'Missing plug ID');
+      return;
+    }
+
+    try {
+      const deleted = deletePlug(plugId);
+      if (!deleted) {
+        sendError(res, 'Plug not found', 404);
+        return;
+      }
+      reloadPlugSchedule(plugId);
+      logger.info('Plug deleted', { id: plugId });
+      sendJson(res, { success: true, message: 'Plug deleted' });
+    } catch (err) {
+      logger.error('Failed to delete plug', err as Error);
+      sendError(res, `Delete failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
+  // Control all plugs - POST /api/plugs/all/control
+  if (method === 'POST' && url.pathname === '/api/plugs/all/control') {
+    const body = await readJsonBody<PlugControlRequest>(req);
+    if (!body || typeof body.power !== 'boolean') {
+      sendError(res, 'Invalid JSON body: power (boolean) required');
+      return;
+    }
+
+    const plugs = getAllPlugs();
+    const results: Array<{ plugId: string; success: boolean; error?: string }> = [];
+
+    logger.info('Control all plugs', { body, count: plugs.length });
+
+    await Promise.all(
+      plugs.map(async (plug) => {
+        try {
+          await controlPlug(plug, body);
+          results.push({ plugId: plug.id, success: true });
+        } catch (err) {
+          results.push({ plugId: plug.id, success: false, error: (err as Error).message });
+        }
+      })
+    );
+
+    sendJson(res, { success: true, data: { results } });
+    return;
+  }
+
+  // Control a single plug - POST /api/plugs/:id/control
+  if (method === 'POST' && url.pathname.match(/^\/api\/plugs\/[^/]+\/control$/)) {
+    const plugId = url.pathname.split('/')[3];
+    if (!plugId) {
+      sendError(res, 'Missing plug ID');
+      return;
+    }
+
+    const plug = getPlugById(plugId);
+    if (!plug) {
+      sendError(res, 'Plug not found', 404);
+      return;
+    }
+
+    const body = await readJsonBody<PlugControlRequest>(req);
+    if (!body || typeof body.power !== 'boolean') {
+      sendError(res, 'Invalid JSON body: power (boolean) required');
+      return;
+    }
+
+    logger.info('Plug control request', { plugId, body });
+
+    try {
+      const state = await controlPlug(plug, body);
+      sendJson(res, { success: true, data: { plugId: plug.id, state } });
+    } catch (err) {
+      logger.error('Failed to control plug', err as Error, { plugId });
+      sendError(res, `Plug control failed: ${(err as Error).message}`, 500);
+    }
+    return;
+  }
+
+  // ============================================================================
+  // Plug Schedule Endpoints
+  // ============================================================================
+
+  // Get plug schedule - GET /api/plugs/:id/schedule
+  if (method === 'GET' && url.pathname.match(/^\/api\/plugs\/[^/]+\/schedule$/)) {
+    const plugId = url.pathname.split('/')[3];
+    if (!plugId) {
+      sendError(res, 'Missing plug ID');
+      return;
+    }
+
+    const plug = getPlugById(plugId);
+    if (!plug) {
+      sendError(res, 'Plug not found', 404);
+      return;
+    }
+
+    const db = getDatabase();
+    const row = db.prepare('SELECT plug_id, enabled, breakpoints, updated_at FROM plug_schedules WHERE plug_id = ?').get(plugId) as {
+      plug_id: string;
+      enabled: number;
+      breakpoints: string;
+      updated_at: number;
+    } | undefined;
+
+    const schedule: PlugSchedule = row
+      ? {
+          plugId: row.plug_id,
+          enabled: Boolean(row.enabled),
+          breakpoints: JSON.parse(row.breakpoints),
+          updatedAt: row.updated_at,
+        }
+      : {
+          plugId,
+          enabled: false,
+          breakpoints: [],
+          updatedAt: 0,
+        };
+
+    sendJson(res, { success: true, data: schedule });
+    return;
+  }
+
+  // Set plug schedule - PUT /api/plugs/:id/schedule
+  if (method === 'PUT' && url.pathname.match(/^\/api\/plugs\/[^/]+\/schedule$/)) {
+    const plugId = url.pathname.split('/')[3];
+    if (!plugId) {
+      sendError(res, 'Missing plug ID');
+      return;
+    }
+
+    const plug = getPlugById(plugId);
+    if (!plug) {
+      sendError(res, 'Plug not found', 404);
+      return;
+    }
+
+    const body = await readJsonBody<SetPlugScheduleRequest>(req);
+    if (!body || typeof body.enabled !== 'boolean' || !Array.isArray(body.breakpoints)) {
+      sendError(res, 'Invalid request body: enabled (boolean) and breakpoints (array) required');
+      return;
+    }
+
+    // Validate breakpoints
+    for (const bp of body.breakpoints) {
+      if (!['clock', 'sunrise', 'sunset'].includes(bp.timeType)) {
+        sendError(res, `Invalid timeType: ${bp.timeType}`);
+        return;
+      }
+      if (bp.timeType === 'clock' && (!bp.time || !/^\d{2}:\d{2}$/.test(bp.time))) {
+        sendError(res, 'Clock breakpoints require time in HH:MM format');
+        return;
+      }
+      if (typeof bp.power !== 'boolean') {
+        sendError(res, 'Each breakpoint requires power (boolean)');
+        return;
+      }
+    }
+
+    // Assign IDs to breakpoints
+    const breakpoints = body.breakpoints.map((bp, i) => ({
+      id: `bp-${Date.now()}-${i}`,
+      timeType: bp.timeType,
+      time: bp.time,
+      offsetMinutes: bp.offsetMinutes,
+      power: bp.power,
+    }));
+
+    const now = Date.now();
+    const db = getDatabase();
+
+    db.prepare(`
+      INSERT INTO plug_schedules (plug_id, enabled, breakpoints, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(plug_id) DO UPDATE SET
+        enabled = excluded.enabled,
+        breakpoints = excluded.breakpoints,
+        updated_at = excluded.updated_at
+    `).run(plugId, body.enabled ? 1 : 0, JSON.stringify(breakpoints), now);
+
+    // Reload the scheduler for this plug
+    reloadPlugSchedule(plugId);
+
+    logger.info('Plug schedule updated', { plugId, enabled: body.enabled, breakpoints: breakpoints.length });
+
+    const schedule: PlugSchedule = {
+      plugId,
+      enabled: body.enabled,
+      breakpoints,
+      updatedAt: now,
+    };
+
+    sendJson(res, { success: true, data: schedule });
+    return;
+  }
+
+  // Delete plug schedule - DELETE /api/plugs/:id/schedule
+  if (method === 'DELETE' && url.pathname.match(/^\/api\/plugs\/[^/]+\/schedule$/)) {
+    const plugId = url.pathname.split('/')[3];
+    if (!plugId) {
+      sendError(res, 'Missing plug ID');
+      return;
+    }
+
+    const db = getDatabase();
+    db.prepare('DELETE FROM plug_schedules WHERE plug_id = ?').run(plugId);
+
+    // Reload scheduler (clears timers)
+    reloadPlugSchedule(plugId);
+
+    logger.info('Plug schedule deleted', { plugId });
+    sendJson(res, { success: true, message: 'Schedule deleted' });
+    return;
+  }
+
   // Node commands: /api/nodes/:id/:action
   if (method === 'POST' && url.pathname.startsWith('/api/nodes/')) {
     const parts = url.pathname.split('/');
@@ -2722,6 +3062,9 @@ export function startServer(port = DEFAULT_PORT): http.Server {
   // Start light scheduler (daily breakpoint timers)
   startScheduler();
 
+  // Start plug scheduler (daily breakpoint timers)
+  startPlugScheduler();
+
   // Create HTTP server
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch((error) => {
@@ -2770,6 +3113,7 @@ export function startServer(port = DEFAULT_PORT): http.Server {
     stopNodeTimeoutCheck();
     stopAutoDiscovery();
     stopScheduler();
+    stopPlugScheduler();
     closeDatabase();
     server.close();
     process.exit(0);
