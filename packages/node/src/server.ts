@@ -97,7 +97,15 @@ interface ServerState {
   reconnectTimer: NodeJS.Timeout | null;
   /** Heartbeat timer */
   heartbeatTimer: NodeJS.Timeout | null;
+  /** Current reconnect backoff delay in ms */
+  reconnectDelay: number;
+  /** Number of consecutive reconnect attempts */
+  reconnectAttempts: number;
 }
+
+const RECONNECT_DELAY_INITIAL = 5000;   // 5 seconds
+const RECONNECT_DELAY_MAX = 60000;      // 60 seconds
+const WS_HANDSHAKE_TIMEOUT = 10000;     // 10 seconds
 
 const state: ServerState = {
   playback: { ...DEFAULT_PLAYBACK_STATE },
@@ -112,7 +120,26 @@ const state: ServerState = {
   startTime: Date.now(),
   reconnectTimer: null,
   heartbeatTimer: null,
+  reconnectDelay: RECONNECT_DELAY_INITIAL,
+  reconnectAttempts: 0,
 };
+
+// Persistent connection log for post-mortem debugging
+const CONNECTION_LOG_PATH = path.join(
+  process.env.CHIBA_DIR || '/home/pi/chiba',
+  'connection.log'
+);
+
+function logConnectionEvent(event: string, details?: Record<string, unknown>): void {
+  const timestamp = new Date().toISOString();
+  const ip = getIpAddress();
+  const line = JSON.stringify({ timestamp, event, ip, ...details }) + '\n';
+  try {
+    fs.appendFileSync(CONNECTION_LOG_PATH, line);
+  } catch {
+    // Ignore write errors (e.g., read-only filesystem)
+  }
+}
 
 // ============================================================================
 // Node Information
@@ -1470,16 +1497,33 @@ function connectToController(): void {
   }
 
   const wsUrl = state.config.controllerUrl.replace(/^http/, 'ws') + '/ws/nodes';
-  logger.info('Connecting to controller', { url: wsUrl });
+  state.reconnectAttempts++;
+  logger.info('Connecting to controller', {
+    url: wsUrl,
+    attempt: state.reconnectAttempts,
+  });
+  logConnectionEvent('connecting', {
+    url: wsUrl,
+    attempt: state.reconnectAttempts,
+    backoffMs: state.reconnectDelay,
+  });
 
   try {
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl, {
+      handshakeTimeout: WS_HANDSHAKE_TIMEOUT,
+    });
     let isAlive = true;
 
     ws.on('open', () => {
       logger.info('Connected to controller');
       state.controllerWs = ws;
       isAlive = true;
+
+      // Reset backoff on successful connection
+      state.reconnectDelay = RECONNECT_DELAY_INITIAL;
+      state.reconnectAttempts = 0;
+
+      logConnectionEvent('connected');
 
       // Send registration
       const registerMessage: NodeToControllerMessage = {
@@ -1509,17 +1553,29 @@ function connectToController(): void {
     });
 
     ws.on('close', () => {
-      logger.warn('Controller connection closed');
-      state.controllerWs = null;
-      stopHeartbeat();
+      // Guard: only clean up if this ws is still the active connection
+      if (state.controllerWs === ws) {
+        logger.warn('Controller connection closed');
+        logConnectionEvent('disconnected', { reason: 'close' });
+        state.controllerWs = null;
+        stopHeartbeat();
+      }
       scheduleReconnect();
     });
 
     ws.on('error', (error) => {
-      logger.error('Controller WebSocket error', error);
-      state.controllerWs = null;
-      stopHeartbeat();
-      scheduleReconnect();
+      // Guard: only clean up if this ws is still the active connection
+      if (state.controllerWs === ws) {
+        logger.error('Controller WebSocket error', error);
+        logConnectionEvent('error', { error: (error as Error).message });
+        state.controllerWs = null;
+        stopHeartbeat();
+      } else {
+        logger.error('Controller WebSocket error (stale connection)', error);
+        logConnectionEvent('error_stale', { error: (error as Error).message });
+      }
+      // Don't schedule reconnect here - the 'close' event always follows 'error'
+      // and will handle scheduling. This prevents double-scheduling.
     });
 
     // Ping the controller every 30 seconds to detect stale connections
@@ -1532,6 +1588,7 @@ function connectToController(): void {
       if (!isAlive) {
         // No response since last ping - connection is stale
         logger.warn('Controller connection stale (no pong), forcing reconnect');
+        logConnectionEvent('stale_connection', { action: 'terminate' });
         clearInterval(pingInterval);
         ws.terminate(); // Force close, triggers 'close' event
         return;
@@ -1546,6 +1603,7 @@ function connectToController(): void {
 
   } catch (error) {
     logger.error('Failed to connect to controller', error as Error);
+    logConnectionEvent('connect_exception', { error: (error as Error).message });
     scheduleReconnect();
   }
 }
@@ -1622,18 +1680,29 @@ function stopHeartbeat(): void {
 }
 
 /**
- * Schedule reconnection to controller.
+ * Schedule reconnection to controller with exponential backoff and jitter.
  */
 function scheduleReconnect(): void {
   if (state.reconnectTimer) {
     return;
   }
 
-  logger.info('Scheduling reconnection in 5 seconds');
+  // Add random jitter (0-25% of delay) to avoid thundering herd
+  const jitter = Math.random() * state.reconnectDelay * 0.25;
+  const delay = Math.round(state.reconnectDelay + jitter);
+
+  logger.info('Scheduling reconnection', {
+    delayMs: delay,
+    attempt: state.reconnectAttempts,
+  });
+
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
     connectToController();
-  }, 5000);
+  }, delay);
+
+  // Exponential backoff for next attempt
+  state.reconnectDelay = Math.min(state.reconnectDelay * 2, RECONNECT_DELAY_MAX);
 }
 
 // ============================================================================
