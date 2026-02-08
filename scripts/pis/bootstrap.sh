@@ -4,12 +4,34 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-REGISTRY_PATH="$SCRIPT_DIR/registry.local.toml"
+load_env() {
+  local f
+  for f in "$REPO_ROOT/.env.pis.local" "$SCRIPT_DIR/.env.pis.local"; do
+    if [ -f "$f" ]; then
+      set -a
+      # shellcheck disable=SC1090
+      source "$f"
+      set +a
+    fi
+  done
+}
+load_env
+
+REGISTRY_PATH="$SCRIPT_DIR/registry.toml"
+if [ ! -f "$REGISTRY_PATH" ] && [ -f "$SCRIPT_DIR/registry.local.toml" ]; then
+  REGISTRY_PATH="$SCRIPT_DIR/registry.local.toml"
+fi
+
+# Pi installs rsync the repo without .git/, so record a deploy stamp for /api/version.
+LOCAL_GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD 2>/dev/null || true)"
+DEPLOYED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 PI_NAME=""
+HOST_OVERRIDE=""
 REBOOT_AFTER=0
+ENABLE_AUTO_REBOOT=0
 
 usage() {
-  echo "Usage: $0 <pi-name> [--registry path] [--reboot]"
+  echo "Usage: $0 <pi-name> [--registry path] [--host host-or-ip] [--enable-auto-reboot] [--reboot]"
   exit 1
 }
 
@@ -25,6 +47,18 @@ while [ $# -gt 0 ]; do
       ;;
     --help|-h)
       usage
+      ;;
+    --host)
+      HOST_OVERRIDE="$2"
+      shift 2
+      ;;
+    --host=*)
+      HOST_OVERRIDE="${1#*=}"
+      shift
+      ;;
+    --enable-auto-reboot)
+      ENABLE_AUTO_REBOOT=1
+      shift
       ;;
     --reboot)
       REBOOT_AFTER=1
@@ -61,6 +95,7 @@ fi
 EVAL_OUT="$($PYTHON_BIN - "$REGISTRY_PATH" "$PI_NAME" <<'PY'
 import sys
 import shlex
+import os
 try:
     import tomllib as toml_parser
 except Exception:
@@ -78,6 +113,28 @@ with open(path, "rb") as f:
 def q(val):
     return shlex.quote("" if val is None else str(val))
 
+def suffix(name: str) -> str:
+    out = []
+    last_us = False
+    for ch in (name or ""):
+        is_ok = ("a" <= ch <= "z") or ("A" <= ch <= "Z") or ("0" <= ch <= "9")
+        if is_ok:
+            out.append(ch.upper())
+            last_us = False
+        else:
+            if not last_us:
+                out.append("_")
+                last_us = True
+    s = "".join(out).strip("_")
+    return s
+
+def env_first(*keys: str) -> str:
+    for k in keys:
+        v = os.environ.get(k)
+        if v:
+            return v
+    return ""
+
 def get_default(key, default=""):
     return data.get("defaults", {}).get(key, default)
 
@@ -91,6 +148,7 @@ if name not in pis:
     sys.exit(0)
 
 node = pis[name]
+pi_suffix = suffix(name)
 
 def get_node(key, default=""):
     return node.get(key, get_default(key, default))
@@ -102,20 +160,48 @@ out = {
     "PI_NAME": name,
     "PI_HOST": get_node("host"),
     "PI_USER": get_node("user", get_default("user", "pi")),
-    "PI_PASSWORD": node.get("password", ""),
+    "PI_PASSWORD": (
+        (node.get("password") or "").strip()
+        or (get_default("password", "") or "").strip()
+        or env_first(f"CHIBA_PI_PASSWORD_{pi_suffix}", "CHIBA_PI_PASSWORD", "PI_PASSWORD")
+    ),
     "CONTROLLER_URL": get_node("controller_url"),
     "NODE_NAME": get_node("node_name", name),
-    "API_KEY": node.get("api_key", ""),
-    "EDEN_KEY": node.get("eden_key", ""),
-    "WIFI_SSID": node.get("wifi_ssid", ""),
-    "WIFI_PASSWORD": node.get("wifi_password", ""),
+    "API_KEY": (
+        (node.get("api_key") or "").strip()
+        or (get_default("api_key", "") or "").strip()
+        or env_first(f"CHIBA_API_KEY_{pi_suffix}", "CHIBA_API_KEY")
+    ),
+    "EDEN_KEY": (
+        (node.get("eden_key") or "").strip()
+        or (get_default("eden_key", "") or "").strip()
+        or env_first("CHIBA_EDEN_KEY", "EDEN_KEY")
+    ),
+    "WIFI_SSID": (
+        (node.get("wifi_ssid") or "").strip()
+        or (get_default("wifi_ssid", "") or "").strip()
+        or env_first(f"CHIBA_WIFI_SSID_{pi_suffix}", "CHIBA_WIFI_SSID", "WIFI_SSID")
+    ),
+    "WIFI_PASSWORD": (
+        (node.get("wifi_password") or "").strip()
+        or (get_default("wifi_password", "") or "").strip()
+        or env_first(f"CHIBA_WIFI_PASSWORD_{pi_suffix}", "CHIBA_WIFI_PASSWORD", "WIFI_PASSWORD")
+    ),
     "GUIDE_PORT": str(get_node("guide_port", get_default("guide_port", 5173))),
     "SERVER_PORT": str(get_node("server_port", get_default("server_port", 8787))),
     "NAS_HOST": get_nested_node("nas", "host", get_nested_default("nas", "host")),
     "NAS_SHARE": get_nested_node("nas", "share", get_nested_default("nas", "share", "share")),
     "NAS_MOUNT": get_nested_node("nas", "mount", get_nested_default("nas", "mount", "/Volumes/share")),
-    "NAS_USER": get_nested_node("nas", "user", get_nested_default("nas", "user")),
-    "NAS_PASSWORD": get_nested_node("nas", "password", get_nested_default("nas", "password")),
+    "NAS_USER": (
+        (get_nested_node("nas", "user", "") or "").strip()
+        or (get_nested_default("nas", "user", "") or "").strip()
+        or env_first("CHIBA_NAS_USER", "NAS_USER")
+    ),
+    "NAS_PASSWORD": (
+        (get_nested_node("nas", "password", "") or "").strip()
+        or (get_nested_default("nas", "password", "") or "").strip()
+        or env_first("CHIBA_NAS_PASSWORD", "NAS_PASSWORD")
+    ),
 }
 
 for key, val in out.items():
@@ -130,11 +216,19 @@ fi
 
 if echo "$EVAL_OUT" | grep -q "^ERROR=missing_pi"; then
   echo "Unknown pi in registry: $PI_NAME"
+  echo ""
+  echo "Note: bootstrap.sh expects a *pi-name* key from the registry (e.g. upper-east-3), not a hostname like mars29.local."
+  echo "Known pi names in $REGISTRY_PATH:"
+  rg -n "^\\[pis\\." "$REGISTRY_PATH" | sed -E 's/^.*\\[pis\\.([^\\]]+)\\].*$/  - \\1/' || true
   exit 1
 fi
 
 # shellcheck disable=SC2086
 eval "$EVAL_OUT"
+
+if [ -n "$HOST_OVERRIDE" ]; then
+  PI_HOST="$HOST_OVERRIDE"
+fi
 
 if [ -z "$PI_HOST" ] || [ -z "$CONTROLLER_URL" ]; then
   echo "Registry missing required fields for $PI_NAME"
@@ -151,7 +245,7 @@ fi
 
 SSH_TARGET="${PI_USER}@${PI_HOST}"
 REMOTE_DIR="/home/${PI_USER}/chiba"
-KIOSK_URL="http://localhost:${GUIDE_PORT}/"
+KIOSK_URL="http://localhost:${GUIDE_PORT}/?screenId=${NODE_NAME}"
 
 printf "\nSyncing repo to %s...\n" "$SSH_TARGET"
 "${SSH_BASE[@]}" "$SSH_TARGET" "mkdir -p $REMOTE_DIR"
@@ -172,6 +266,11 @@ fi
 
 cd "$REMOTE_DIR"
 
+# Deploy metadata for ops/version checks (read by cable server at runtime).
+cat > "$REMOTE_DIR/.chiba-deploy.json" <<JSON
+{"app":"chiba","gitSha":"$LOCAL_GIT_SHA","deployedAt":"$DEPLOYED_AT_UTC","method":"bootstrap","pi":"$PI_NAME"}
+JSON
+
 ./scripts/setup-node.sh \
   --controller-url "$CONTROLLER_URL" \
   --node-name "$NODE_NAME" \
@@ -181,6 +280,11 @@ cd "$REMOTE_DIR"
   --wifi-password "$WIFI_PASSWORD" \
   --install-dir "$REMOTE_DIR" \
   --skip-git
+
+if [ "$ENABLE_AUTO_REBOOT" -eq 1 ]; then
+  sudo touch /var/tmp/chiba-auto-reboot-enabled
+  sudo systemctl restart chiba-network-watchdog 2>/dev/null || true
+fi
 
 # Cable services
 sudo tee /etc/systemd/system/chiba-cable-server.service > /dev/null <<SERVICE

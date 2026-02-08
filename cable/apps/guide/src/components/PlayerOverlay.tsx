@@ -18,6 +18,9 @@ type PlayerOverlayProps = {
   selectedChannel?: GuideChannel;
   selectedProgram?: ProgramSlot | null;
   showPlayerHud: boolean;
+  loopVideo?: boolean;
+  onMediaEnded?: () => void;
+  onMediaError?: (kind: MediaKind, url: string) => void;
   ambientAudio: {
     url: string;
     volume?: number;
@@ -41,6 +44,9 @@ export function PlayerOverlay({
   selectedChannel,
   selectedProgram,
   showPlayerHud,
+  loopVideo = true,
+  onMediaEnded,
+  onMediaError,
   ambientAudio,
   masterVolume,
   masterMuted,
@@ -54,6 +60,22 @@ export function PlayerOverlay({
   const mediaVideoRef = useRef<HTMLVideoElement | null>(null);
   const didSeekRef = useRef(false);
   const [ambientOffsetSec, setAmbientOffsetSec] = useState<number | null>(null);
+
+  const playlistForcesNoLoop = useMemo(() => {
+    // Defensive: force no-loop in gallery playlist mode even if props are stale.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const norm = (v: string | null) => (v ?? "").trim().toLowerCase();
+      const truthy = (v: string | null) => ["1", "true", "yes", "on"].includes(norm(v));
+      const gallery = truthy(params.get("gallery"));
+      const playlist = truthy(params.get("playlist"));
+      return gallery && playlist;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const effectiveLoopVideo = playlistForcesNoLoop ? false : loopVideo;
   useEffect(() => {
     if (!playerUrl) return;
     log.info("mount", { url: playerUrl, kind: playerKind, open: playerOpen });
@@ -175,6 +197,33 @@ export function PlayerOverlay({
     };
   }, [ambientOffsetSec, ambientAudio?.url]);
 
+  useEffect(() => {
+    // Best-effort autoplay: some Chromium builds can still be finicky in kiosk mode.
+    if (!playerOpen) return;
+    if (!playerUrl) return;
+    if (playerKind !== "video" && playerKind !== "audio") return;
+
+    const target = playerKind === "video" ? mediaVideoRef.current : mediaAudioRef.current;
+    if (!target) return;
+
+    let cancelled = false;
+    const tryPlay = async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        await target.play();
+      } catch (err) {
+        if (cancelled) return;
+        log.warn("autoplay-failed", { url: playerUrl, kind: playerKind, err: String(err) });
+      }
+    };
+    // Defer one tick so `muted` props have applied.
+    const t = window.setTimeout(() => void tryPlay(), 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [playerOpen, playerUrl, playerKind]);
+
   if (!playerUrl) return null;
 
   const cursorState = remoteCursor ?? {
@@ -206,19 +255,30 @@ export function PlayerOverlay({
               log.info("loaded", { url: playerUrl, kind: "image" });
               setPlayerReady(true);
             }}
+            onError={() => {
+              log.warn("error", { url: playerUrl, kind: "image" });
+              onMediaError?.("image", playerUrl);
+            }}
           />
         ) : playerKind === "video" ? (
           <video
             className="player-media player-video"
             src={playerUrl}
             autoPlay
-            loop
+            loop={effectiveLoopVideo}
             muted={masterMuted || !playerOpen}
             playsInline
             ref={mediaVideoRef}
             onLoadedData={() => {
               log.info("loaded", { url: playerUrl, kind: "video" });
               setPlayerReady(true);
+            }}
+            onEnded={() => {
+              onMediaEnded?.();
+            }}
+            onError={() => {
+              log.warn("error", { url: playerUrl, kind: "video" });
+              onMediaError?.("video", playerUrl);
             }}
           />
         ) : playerKind === "audio" ? (
@@ -233,6 +293,10 @@ export function PlayerOverlay({
               onCanPlay={() => {
                 log.info("loaded", { url: playerUrl, kind: "audio" });
                 setPlayerReady(true);
+              }}
+              onError={() => {
+                log.warn("error", { url: playerUrl, kind: "audio" });
+                onMediaError?.("audio", playerUrl);
               }}
             />
           </div>
@@ -274,10 +338,19 @@ export function PlayerOverlay({
             <div className="player-title">
               {playerMeta?.title ?? selectedProgram?.title}
             </div>
-            <div className="player-subtitle">
-              {playerMeta?.subtitle ?? selectedProgram?.subtitle}
-            </div>
-            <div className="player-hint">Press Guide or Esc to return</div>
+            {playerMeta?.artist ? (
+              <div className="player-artist">{playerMeta.artist}</div>
+            ) : null}
+            {(() => {
+              const subtitle = (playerMeta?.subtitle ?? selectedProgram?.subtitle ?? "").trim();
+              // "Loop" is useful in the grid, but looks like junk in the info card.
+              if (!subtitle) return null;
+              if (subtitle.toLowerCase() === "loop") return null;
+              return <div className="player-subtitle">{subtitle}</div>;
+            })()}
+            {playerMeta?.description ? (
+              <div className="player-description">{playerMeta.description}</div>
+            ) : null}
           </div>
         ) : null}
         {showCursor ? (

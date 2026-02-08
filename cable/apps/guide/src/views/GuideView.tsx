@@ -44,6 +44,9 @@ export function GuideView() {
     playerKind,
     playerMeta,
     showPlayerHud,
+    loopVideo,
+    onPlayerEnded,
+    onPlayerError,
     ambientAudio,
     masterVolume,
     masterMuted,
@@ -53,10 +56,13 @@ export function GuideView() {
     memoryStats,
     mediaStats,
     dialOverlay,
+    galleryMode,
   } = useGuideViewStore();
   return (
     <div
-      className={`guide-shell ${playerOpen ? "player-open" : ""}`}
+      className={`guide-shell ${playerOpen ? "player-open" : ""} ${
+        galleryMode ? "gallery-mode" : ""
+      }`}
       style={gridStyle}
     >
       <div className="guide-noise" aria-hidden="true" />
@@ -117,6 +123,9 @@ export function GuideView() {
         selectedChannel={selectedChannel}
         selectedProgram={selectedProgram}
         showPlayerHud={showPlayerHud}
+        loopVideo={loopVideo}
+        onMediaEnded={onPlayerEnded}
+        onMediaError={onPlayerError}
         ambientAudio={ambientAudio}
         masterVolume={masterVolume}
         masterMuted={masterMuted}

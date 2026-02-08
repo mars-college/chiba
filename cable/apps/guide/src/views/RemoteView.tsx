@@ -6,15 +6,23 @@ import {
   type ChangeEvent,
   type PointerEvent,
 } from "react";
+import { PARAM_GALLERY, PARAM_LOCK_KEYS } from "../constants/params";
 import { DebugPanel } from "../components/DebugPanel";
 import { DialOverlay } from "../components/DialOverlay";
 import { DisplayTuningPanel } from "../components/DisplayTuningPanel";
 import { createLogger } from "../lib/logger";
+import { getFirstParam, parseBooleanParam } from "../lib/queryParams";
 import { useRemoteViewStore } from "../store/useRemoteViewStore";
 
 const log = createLogger("remote-view");
 
 export function RemoteView() {
+  const params = useRef(new URLSearchParams(window.location.search)).current;
+  const lockParam = getFirstParam(params, PARAM_LOCK_KEYS);
+  const lockParsed = parseBooleanParam(lockParam);
+  const galleryParsed = parseBooleanParam(params.get(PARAM_GALLERY));
+  const channelLocked = lockParsed ?? galleryParsed === true;
+
   const {
     status,
     uiScale,
@@ -445,15 +453,19 @@ export function RemoteView() {
         ) : (
           <>
             <div className="remote-controls">
-              <div className="rocker">
-                <button onClick={() => send({ type: "channel", dir: "up" })}>
-                  CH UP
-                </button>
-                <span>CH</span>
-                <button onClick={() => send({ type: "channel", dir: "down" })}>
-                  CH DOWN
-                </button>
-              </div>
+              {channelLocked ? null : (
+                <div className="rocker">
+                  <button onClick={() => send({ type: "channel", dir: "up" })}>
+                    CH UP
+                  </button>
+                  <span>CH</span>
+                  <button
+                    onClick={() => send({ type: "channel", dir: "down" })}
+                  >
+                    CH DOWN
+                  </button>
+                </div>
+              )}
 
               <div className="rocker">
                 <button onClick={() => send({ type: "volume", dir: "up" })}>
@@ -466,46 +478,53 @@ export function RemoteView() {
               </div>
             </div>
 
-            <div className="remote-dpad">
-              <button
-                className="up"
-                onClick={() => send({ type: "nav", dir: "up" })}
-              >
-                <svg viewBox="0 0 48 48" aria-hidden="true">
-                  <path d="M24 6l14 16h-8v20H18V22h-8L24 6z" />
-                </svg>
-              </button>
-              <button
-                className="left"
-                onClick={() => send({ type: "nav", dir: "left" })}
-              >
-                <svg viewBox="0 0 48 48" aria-hidden="true">
-                  <path d="M6 24l16-14v8h20v12H22v8L6 24z" />
-                </svg>
-              </button>
-              <button className="ok" onClick={() => send({ type: "select" })}>
-                OK
-              </button>
-              <button
-                className="right"
-                onClick={() => send({ type: "nav", dir: "right" })}
-              >
-                <svg viewBox="0 0 48 48" aria-hidden="true">
-                  <path d="M42 24L26 38v-8H6V18h20v-8l16 14z" />
-                </svg>
-              </button>
-              <button
-                className="down"
-                onClick={() => send({ type: "nav", dir: "down" })}
-              >
-                <svg viewBox="0 0 48 48" aria-hidden="true">
-                  <path d="M24 42L10 26h8V6h12v20h8L24 42z" />
-                </svg>
-              </button>
-            </div>
+            {channelLocked ? null : (
+              <div className="remote-dpad">
+                <button
+                  className="up"
+                  onClick={() => send({ type: "nav", dir: "up" })}
+                >
+                  <svg viewBox="0 0 48 48" aria-hidden="true">
+                    <path d="M24 6l14 16h-8v20H18V22h-8L24 6z" />
+                  </svg>
+                </button>
+                <button
+                  className="left"
+                  onClick={() => send({ type: "nav", dir: "left" })}
+                >
+                  <svg viewBox="0 0 48 48" aria-hidden="true">
+                    <path d="M6 24l16-14v8h20v12H22v8L6 24z" />
+                  </svg>
+                </button>
+                <button
+                  className="ok"
+                  onClick={() => send({ type: "select" })}
+                >
+                  OK
+                </button>
+                <button
+                  className="right"
+                  onClick={() => send({ type: "nav", dir: "right" })}
+                >
+                  <svg viewBox="0 0 48 48" aria-hidden="true">
+                    <path d="M42 24L26 38v-8H6V18h20v-8l16 14z" />
+                  </svg>
+                </button>
+                <button
+                  className="down"
+                  onClick={() => send({ type: "nav", dir: "down" })}
+                >
+                  <svg viewBox="0 0 48 48" aria-hidden="true">
+                    <path d="M24 42L10 26h8V6h12v20h8L24 42z" />
+                  </svg>
+                </button>
+              </div>
+            )}
 
             <div className="remote-actions">
-              <button onClick={() => send({ type: "guide" })}>Guide</button>
+              {channelLocked ? null : (
+                <button onClick={() => send({ type: "guide" })}>Guide</button>
+              )}
               <button onClick={() => send({ type: "info" })}>Info</button>
               <button onClick={() => send({ type: "mute" })}>Mute</button>
             </div>
@@ -540,24 +559,26 @@ export function RemoteView() {
               </button>
             </div>
 
-            <div className="remote-numpad">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+            {channelLocked ? null : (
+              <div className="remote-numpad">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                  <button
+                    key={num}
+                    disabled={showAppPanel || showInputPanel}
+                    onClick={() => pushDialDigit(num)}
+                  >
+                    {num}
+                  </button>
+                ))}
                 <button
-                  key={num}
+                  className="zero"
                   disabled={showAppPanel || showInputPanel}
-                  onClick={() => pushDialDigit(num)}
+                  onClick={() => pushDialDigit(0)}
                 >
-                  {num}
+                  0
                 </button>
-              ))}
-              <button
-                className="zero"
-                disabled={showAppPanel || showInputPanel}
-                onClick={() => pushDialDigit(0)}
-              >
-                0
-              </button>
-            </div>
+              </div>
+            )}
           </>
         )}
       </div>

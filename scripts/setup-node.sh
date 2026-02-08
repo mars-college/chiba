@@ -428,6 +428,7 @@ Restart=always
 RestartSec=30
 Environment=CHECK_INTERVAL=30
 Environment=FAILURE_THRESHOLD=3
+Environment=REQUIRE_INTERNET=0
 
 [Install]
 WantedBy=multi-user.target
@@ -700,8 +701,34 @@ if [ -n "$WIFI_SSID" ] && [ -n "$WIFI_PASSWORD" ]; then
     echo "=== Configuring WiFi ==="
     # Use nmcli if NetworkManager is available (newer Pi OS)
     if command -v nmcli &>/dev/null; then
-        nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASSWORD" wifi-sec.key-mgmt wpa-psk 2>/dev/null || \
-        nmcli connection modify "$WIFI_SSID" connection.autoconnect yes 2>/dev/null || true
+        # Create/ensure a persistent connection profile even if the AP is currently down.
+        # `nmcli dev wifi connect ...` can fail when the SSID isn't visible at install time.
+        if ! nmcli connection show "$WIFI_SSID" &>/dev/null; then
+            nmcli connection add type wifi ifname wlan0 con-name "$WIFI_SSID" ssid "$WIFI_SSID" 2>/dev/null || true
+        fi
+
+        # Configure credentials + robust reconnect defaults.
+        if nmcli connection show "$WIFI_SSID" &>/dev/null; then
+            nmcli connection modify "$WIFI_SSID" wifi-sec.key-mgmt wpa-psk 2>/dev/null || true
+            nmcli connection modify "$WIFI_SSID" wifi-sec.psk "$WIFI_PASSWORD" 2>/dev/null || true
+            nmcli connection modify "$WIFI_SSID" connection.autoconnect yes 2>/dev/null || true
+            nmcli connection modify "$WIFI_SSID" connection.autoconnect-priority 100 2>/dev/null || true
+            # 2 = disable powersave (NetworkManager default can be "on" depending on distro).
+            nmcli connection modify "$WIFI_SSID" 802-11-wireless.powersave 2 2>/dev/null || true
+            # Avoid randomized MACs so DHCP reservations remain stable (varies by distro defaults).
+            nmcli connection modify "$WIFI_SSID" 802-11-wireless.cloned-mac-address permanent 2>/dev/null || true
+        fi
+
+        # Try to connect now (ok if it fails when the AP is offline).
+        nmcli connection up "$WIFI_SSID" 2>/dev/null || \
+        nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASSWORD" wifi-sec.key-mgmt wpa-psk 2>/dev/null || true
+        # Make reconnection more robust and avoid WiFi powersave quirks on some Pi chipsets.
+        if nmcli connection show "$WIFI_SSID" &>/dev/null; then
+            nmcli connection modify "$WIFI_SSID" connection.autoconnect yes 2>/dev/null || true
+            nmcli connection modify "$WIFI_SSID" connection.autoconnect-priority 100 2>/dev/null || true
+            # 2 = disable powersave (NetworkManager default can be "on" depending on distro).
+            nmcli connection modify "$WIFI_SSID" 802-11-wireless.powersave 2 2>/dev/null || true
+        fi
         echo "WiFi configured via NetworkManager: $WIFI_SSID"
     # Fall back to wpa_supplicant (older Pi OS)
     elif [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then

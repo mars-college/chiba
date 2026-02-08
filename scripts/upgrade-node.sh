@@ -171,10 +171,9 @@ if [ "$MODE" = "soft" ]; then
     # Update scripts permissions
     chmod +x "$INSTALL_DIR/scripts/"*.sh 2>/dev/null || true
 
-    # Setup network watchdog if not already present
-    if ! systemctl is-enabled chiba-network-watchdog 2>/dev/null; then
-        log "Setting up network watchdog..."
-        sudo tee /etc/systemd/system/chiba-network-watchdog.service > /dev/null << WATCHDOG_EOF
+    # Ensure network watchdog unit is up to date (important for offline/solar setups).
+    log "Ensuring network watchdog unit is configured..."
+    sudo tee /etc/systemd/system/chiba-network-watchdog.service > /dev/null << WATCHDOG_EOF
 [Unit]
 Description=Chiba Network Watchdog
 After=network.target NetworkManager.service
@@ -187,16 +186,16 @@ Restart=always
 RestartSec=30
 Environment=CHECK_INTERVAL=30
 Environment=FAILURE_THRESHOLD=3
+Environment=REQUIRE_INTERNET=0
 
 [Install]
 WantedBy=multi-user.target
 WATCHDOG_EOF
-        sudo systemctl daemon-reload
-        sudo systemctl enable chiba-network-watchdog
-        sudo systemctl start chiba-network-watchdog
-        sudo systemctl enable getty@tty2.service 2>/dev/null || true
-        success "Network watchdog configured"
-    fi
+    sudo systemctl daemon-reload
+    sudo systemctl enable chiba-network-watchdog 2>/dev/null || true
+    sudo systemctl restart chiba-network-watchdog 2>/dev/null || sudo systemctl start chiba-network-watchdog 2>/dev/null || true
+    sudo systemctl enable getty@tty2.service 2>/dev/null || true
+    success "Network watchdog configured"
 
     # Regenerate chiba-node.service (in case service definition changed)
     log "Updating chiba-node service file..."

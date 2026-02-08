@@ -36,9 +36,16 @@ import {
 import {
   PARAM_ART_INDEX,
   PARAM_EMBED_DEBUG,
+  PARAM_GALLERY,
+  PARAM_GALLERY_CHANNEL_KEYS,
+  PARAM_HUD_MODE,
+  PARAM_HUD_SEC_KEYS,
+  PARAM_PLAYLIST,
   PARAM_HOURS,
+  PARAM_LOCK_KEYS,
   PARAM_MUTE_KEYS,
   PARAM_NO_SPLASH,
+  PARAM_QR_KEYS,
   PARAM_REMOTE_APP_KEYS,
   PARAM_REMOTE_HOST,
   PARAM_REMOTE_HTTPS,
@@ -66,7 +73,7 @@ import {
   getFirstParam,
   parseBooleanParam,
 } from "./lib/queryParams";
-import { buildRemoteUrls } from "./lib/remote";
+import { buildQrUrl, buildRemoteUrls } from "./lib/remote";
 import {
   loadAudioSettings,
   loadDisplaySettings,
@@ -128,6 +135,32 @@ function App() {
   const muteParam = getFirstParam(params, PARAM_MUTE_KEYS);
   const screenParam = getFirstParam(params, PARAM_SCREEN_KEYS);
   const embedDebugParam = params.get(PARAM_EMBED_DEBUG);
+  const galleryParam = params.get(PARAM_GALLERY);
+  const pinnedChannelParam = getFirstParam(params, PARAM_GALLERY_CHANNEL_KEYS);
+  const lockParam = getFirstParam(params, PARAM_LOCK_KEYS);
+  const qrParam = getFirstParam(params, PARAM_QR_KEYS);
+  const hudModeParam = params.get(PARAM_HUD_MODE);
+  const hudSecParam = getFirstParam(params, PARAM_HUD_SEC_KEYS);
+  const galleryEnabled = parseBooleanParam(galleryParam) === true;
+  const playlistEnabled = parseBooleanParam(params.get(PARAM_PLAYLIST)) === true;
+  const channelLocked =
+    parseBooleanParam(lockParam) ?? (galleryEnabled ? true : false);
+  const qrForced = parseBooleanParam(qrParam);
+  // Default to hiding the Remote QR in gallery/kiosk installs unless explicitly enabled.
+  const qrAllowed = qrForced === null ? (galleryEnabled ? false : true) : qrForced;
+  const qrLockedOff = qrAllowed === false;
+
+  const hudModeOverride = useMemo(() => {
+    const raw = (hudModeParam ?? "").trim().toLowerCase();
+    if (raw === "always" || raw === "start" || raw === "never") return raw;
+    return null;
+  }, [hudModeParam]);
+  const hudShowSecOverride = useMemo(() => {
+    if (!hudSecParam) return null;
+    const n = Number(hudSecParam);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return n;
+  }, [hudSecParam]);
   const [, setScreenId] = useState(() =>
     screenParam ? screenParam : loadScreenId()
   );
@@ -137,8 +170,11 @@ function App() {
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(() => {
     const base = loadAudioSettings();
     const forcedMuted = parseBooleanParam(muteParam);
-    if (forcedMuted === null) return base;
-    return { ...base, muted: forcedMuted };
+    if (forcedMuted !== null) return { ...base, muted: forcedMuted };
+    // Default to muted in gallery/kiosk mode so autoplay works reliably
+    // across Chromium builds and without user gestures.
+    if (galleryEnabled) return { ...base, muted: true };
+    return base;
   });
   const splashOverride = parseBooleanParam(splashParam);
   const skipSplash =
@@ -249,6 +285,19 @@ function App() {
     () => allChannels.filter((channel) => !isHiddenChannel(channel)),
     [allChannels]
   );
+  const pinnedChannel = useMemo(() => {
+    const raw = (pinnedChannelParam ?? "").trim();
+    if (!raw) return null;
+    const maybeNumber = normalizeChannelNumber(raw);
+    if (maybeNumber !== null) {
+      return (
+        allChannels.find(
+          (channel) => normalizeChannelNumber(channel.number) === maybeNumber
+        ) ?? null
+      );
+    }
+    return allChannels.find((channel) => channel.id === raw) ?? null;
+  }, [allChannels, pinnedChannelParam]);
   const currentSlotIndex = useMemo(
     () =>
       getCurrentSlotIndex(
@@ -263,7 +312,7 @@ function App() {
 
   const [selectedRow, setSelectedRow] = useState(0);
   const [selectedCol, setSelectedCol] = useState(0);
-  const [showQr, setShowQr] = useState(true);
+  const [showQr, setShowQr] = useState(() => qrAllowed);
   const [visibleRows, setVisibleRows] = useState(6);
   const [artIndex, setArtIndex] = useState(0);
   const [artPaused, setArtPaused] = useState(false);
@@ -330,6 +379,9 @@ function App() {
   const setArtViewState = useArtViewStore((state) => state.setArtViewState);
 
   const pauseUntilRef = useRef(0);
+  const didGalleryAutoplayRef = useRef(false);
+  const galleryAutoplayTargetRef = useRef<string | null>(null);
+  const pinWaitUntilRef = useRef<number | null>(null);
   const autoHoldUntilRef = useRef(0);
   const autoResetPendingRef = useRef(false);
   const lastFrameRef = useRef<number | null>(null);
@@ -352,6 +404,8 @@ function App() {
   const micGuideStreamRef = useRef<MediaStream | null>(null);
   const micAudioRef = useRef<HTMLAudioElement | null>(null);
   const playerSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const playerUrlRef = useRef<string | null>(null);
+  const hudHideTimerRef = useRef<number | null>(null);
   const remoteCursorRef = useRef<RemoteCursorState>(remoteCursor);
   const remoteCursorRafRef = useRef<number | null>(null);
   const remoteCursorHideRef = useRef<number | null>(null);
@@ -360,6 +414,20 @@ function App() {
     target: HTMLElement | null;
     doc: Document | null;
   } | null>(null);
+
+  useEffect(() => {
+    playerUrlRef.current = playerUrl;
+  }, [playerUrl]);
+
+  useEffect(() => {
+    // If a pinned channel was requested, wait briefly for the real index to load
+    // instead of autoplaying fallback content (common in dev).
+    const raw = (pinnedChannelParam ?? "").trim();
+    const pinRequested = raw.length > 0;
+    if (!galleryEnabled || !pinRequested) return;
+    if (pinWaitUntilRef.current !== null) return;
+    pinWaitUntilRef.current = Date.now() + 4000;
+  }, [galleryEnabled, pinnedChannelParam]);
 
   const getViewportMetrics = useCallback(() => {
     const viewport = viewportRef.current;
@@ -406,6 +474,7 @@ function App() {
 
   const moveSelection = useCallback(
     (dir: "up" | "down" | "left" | "right") => {
+      if (channelLocked && viewMode === "guide") return;
       pauseUntilRef.current = Date.now() + USER_PAUSE_MS;
       if (dir === "up") {
         setSelectedRow(
@@ -443,7 +512,7 @@ function App() {
         });
       }
     },
-    [channels, selectedRow, currentSlotIndex]
+    [channelLocked, channels, currentSlotIndex, selectedRow, viewMode]
   );
 
   const [isPaused, setIsPaused] = useState(false);
@@ -454,7 +523,7 @@ function App() {
     check();
     const interval = window.setInterval(check, 100);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [channelLocked, galleryEnabled]);
   const activeRow = selectedRow;
 
   const selectedChannel = channels[activeRow];
@@ -464,6 +533,25 @@ function App() {
     ) ??
     selectedChannel?.schedule[0] ??
     null;
+
+  const galleryPlaylist = useMemo(() => {
+    if (!galleryEnabled || !playlistEnabled) return [];
+    const targetChannel = pinnedChannel ?? selectedChannel ?? channels[0] ?? null;
+    if (!targetChannel) return [];
+    const items = targetChannel.schedule.filter((slot) => Boolean(slot.url));
+    const uniq: ProgramSlot[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      if (!item.url) continue;
+      if (seen.has(item.url)) continue;
+      seen.add(item.url);
+      uniq.push(item);
+    }
+    return uniq;
+  }, [galleryEnabled, playlistEnabled, pinnedChannel, selectedChannel, channels]);
+
+  const [galleryPlaylistIndex, setGalleryPlaylistIndex] = useState(0);
+  const stashPrefetchRef = useRef<{ at: number; forUrl: string; nextUrl: string } | null>(null);
   const playerChannel = useMemo(() => {
     if (playerChannelIndex === null) return selectedChannel;
     return channels[playerChannelIndex] ?? selectedChannel;
@@ -612,12 +700,45 @@ function App() {
         setPlayerReady(false);
         setPlayerUrl(programUrl);
       }
-      setShowPlayerHud(false);
+      if (hudHideTimerRef.current) {
+        window.clearTimeout(hudHideTimerRef.current);
+        hudHideTimerRef.current = null;
+      }
+
+      const rawHudShowSec = hudShowSecOverride ?? program.hudShowSec ?? 0;
+      const hudShowSec =
+        typeof rawHudShowSec === "number" && rawHudShowSec > 0
+          ? rawHudShowSec
+          : 0;
+      const hudMode =
+        hudModeOverride ??
+        program.hudMode ??
+        (hudShowSec > 0 ? "start" : null);
+
+      if (hudMode === "always") {
+        setShowPlayerHud(true);
+      } else if (hudMode === "never") {
+        setShowPlayerHud(false);
+      } else if (hudMode === "start" && hudShowSec > 0) {
+        setShowPlayerHud(true);
+        const urlKey = programUrl;
+        hudHideTimerRef.current = window.setTimeout(() => {
+          if (playerUrlRef.current === urlKey) {
+            setShowPlayerHud(false);
+          }
+        }, Math.round(hudShowSec * 1000));
+      } else {
+        setShowPlayerHud(false);
+      }
       const channelIndex = channels.findIndex((item) => item.id === channel.id);
       setPlayerChannelIndex(channelIndex >= 0 ? channelIndex : activeRow);
       setPlayerMeta({
-        title: program.title,
+        title: program.infoTitle ?? program.title,
         subtitle: program.subtitle,
+        artist: program.artist,
+        description: program.description,
+        hudShowSec,
+        hudMode: hudMode ?? undefined,
         channelName: channel.name,
         callSign: channel.callSign,
       });
@@ -629,11 +750,12 @@ function App() {
         url: program.url,
       });
     },
-    [decorateProgramUrl, playerUrl, channels, activeRow]
+    [decorateProgramUrl, playerUrl, channels, activeRow, hudModeOverride, hudShowSecOverride]
   );
 
   const handleChannelChange = useCallback(
     (dir: "up" | "down") => {
+      if (channelLocked) return;
       if (!channels.length) return;
       if (showDebug) {
         setShowDebug(false);
@@ -669,6 +791,7 @@ function App() {
       }
     },
     [
+      channelLocked,
       channels,
       activeRow,
       currentSlotIndex,
@@ -681,6 +804,7 @@ function App() {
 
   const handleTuneToNumber = useCallback(
     (value: string) => {
+      if (channelLocked) return;
       const targetNumber = normalizeChannelNumber(value);
       if (targetNumber === null) return;
       if (targetNumber === normalizeChannelNumber(GODMODE_CHANNEL_NUMBER)) {
@@ -736,6 +860,7 @@ function App() {
     },
     [
       allChannels,
+      channelLocked,
       channels,
       currentSlotIndex,
       getProgramForChannel,
@@ -746,6 +871,7 @@ function App() {
 
   const handleGodmodePick = useCallback(
     (program: ProgramSlot, channel: GuideChannel) => {
+      if (channelLocked) return;
       const channelIndex = channels.findIndex((item) => item.id === channel.id);
       if (channelIndex >= 0) {
         setSelectedRow(channelIndex);
@@ -753,10 +879,11 @@ function App() {
       }
       openProgram(program, channel);
     },
-    [channels, currentSlotIndex, openProgram]
+    [channelLocked, channels, currentSlotIndex, openProgram]
   );
 
   const handleSelect = useCallback(() => {
+    if (channelLocked) return;
     if (!selectedChannel) return;
     if (
       selectedChannel.id === GODMODE_CHANNEL_ID ||
@@ -780,7 +907,136 @@ function App() {
     const currentProgram = getProgramForChannel(selectedChannel);
     if (!currentProgram?.url) return;
     openProgram(currentProgram, selectedChannel);
-  }, [selectedChannel, getProgramForChannel, openProgram]);
+  }, [channelLocked, selectedChannel, getProgramForChannel, openProgram]);
+
+  const galleryAdvanceCooldownRef = useRef(0);
+  const advanceGalleryPlaylist = useCallback(
+    (reason: string) => {
+      if (!galleryEnabled || !playlistEnabled) return;
+      if (viewMode !== "guide") return;
+      // Avoid tight error loops if the stash cache is cold or the NAS is down.
+      // (Video elements can emit multiple errors very quickly for the same URL.)
+      const nowMs = Date.now();
+      const minGapMs = reason === "error" ? 750 : 150;
+      if (nowMs - galleryAdvanceCooldownRef.current < minGapMs) return;
+      galleryAdvanceCooldownRef.current = nowMs;
+      const targetChannel = pinnedChannel ?? selectedChannel ?? channels[0] ?? null;
+      if (!targetChannel) return;
+      if (!galleryPlaylist.length) return;
+      setGalleryPlaylistIndex((prev) => {
+        const next = (prev + 1) % Math.max(1, galleryPlaylist.length);
+        const program = galleryPlaylist[next];
+        if (program?.url) {
+          openProgram(program, targetChannel);
+          log.info("gallery-playlist-advance", { reason, next, url: program.url });
+        }
+        return next;
+      });
+    },
+    [
+      galleryEnabled,
+      playlistEnabled,
+      viewMode,
+      pinnedChannel,
+      selectedChannel,
+      channels,
+      galleryPlaylist.length,
+      openProgram,
+    ]
+  );
+
+  useEffect(() => {
+    if (!galleryEnabled) return;
+    if (viewMode !== "guide") return;
+    if (!channels.length) return;
+
+    const pinRequested = (pinnedChannelParam ?? "").trim().length > 0;
+    if (pinRequested && !pinnedChannel) {
+      const waitUntil = pinWaitUntilRef.current;
+      if (typeof waitUntil === "number" && Date.now() < waitUntil) {
+        return;
+      }
+    }
+
+    const targetChannel = pinnedChannel ?? selectedChannel ?? channels[0] ?? null;
+    if (!targetChannel) return;
+
+    // One-shot per target channel id (lets us retune when pinned channel
+    // becomes available after the initial fallback index).
+    if (galleryAutoplayTargetRef.current === targetChannel.id) return;
+    galleryAutoplayTargetRef.current = targetChannel.id;
+
+    didGalleryAutoplayRef.current = true;
+
+    const visibleIndex = channels.findIndex(
+      (channel) => channel.id === targetChannel.id
+    );
+    if (visibleIndex >= 0) {
+      setSelectedRow(visibleIndex);
+    }
+    setSelectedCol(currentSlotIndex);
+    pauseUntilRef.current = Date.now() + USER_PAUSE_MS;
+
+    const program =
+      playlistEnabled && galleryPlaylist.length
+        ? galleryPlaylist[Math.max(0, galleryPlaylistIndex) % galleryPlaylist.length]
+        : getProgramForChannel(targetChannel);
+    if (program?.url) {
+      openProgram(program, targetChannel);
+    }
+  }, [
+    channels,
+    currentSlotIndex,
+    galleryEnabled,
+    getProgramForChannel,
+    openProgram,
+    pinnedChannel,
+    pinnedChannelParam,
+    selectedChannel,
+    viewMode,
+    playlistEnabled,
+    galleryPlaylist,
+    galleryPlaylistIndex,
+  ]);
+
+  useEffect(() => {
+    // Playlist lookahead: while one item is playing, warm the next stash item
+    // so we don't stall/skip on cache misses.
+    if (!galleryEnabled || !playlistEnabled) return;
+    if (!playerOpen || !playerUrl) return;
+    if (viewMode !== "guide") return;
+    if (!galleryPlaylist.length) return;
+
+    const currentIdx = galleryPlaylist.findIndex((slot) => {
+      if (!slot.url) return false;
+      const decorated = decorateProgramUrl(slot.url);
+      return decorated === playerUrl;
+    });
+    const idx = currentIdx >= 0 ? currentIdx : 0;
+    const next = galleryPlaylist[(idx + 1) % galleryPlaylist.length];
+    if (!next?.url) return;
+
+    const url = next.url;
+    if (!url.startsWith("/stash/")) return;
+    const joiner = url.includes("?") ? "&" : "?";
+    const prefetchUrl = `${url}${joiner}fetch=1`;
+
+    const nowMs = Date.now();
+    const prev = stashPrefetchRef.current;
+    if (prev && prev.nextUrl === prefetchUrl && nowMs - prev.at < 15_000) return;
+    stashPrefetchRef.current = { at: nowMs, forUrl: playerUrl, nextUrl: prefetchUrl };
+
+    // Fire-and-forget. Ignore errors; /stash may return 404 while warming.
+    void fetch(prefetchUrl, { method: "GET" }).catch(() => {});
+  }, [
+    galleryEnabled,
+    playlistEnabled,
+    playerOpen,
+    playerUrl,
+    viewMode,
+    galleryPlaylist,
+    decorateProgramUrl,
+  ]);
 
   const fetchIndex = useCallback(async () => {
     try {
@@ -1500,52 +1756,101 @@ function App() {
 
   const { send, status } = useRemoteSocket(
     (msg) => {
+      const tuningLocked = channelLocked && viewMode === "guide";
+
       if (msg.type === "mic") {
         if (msg.from === "remote" && viewMode !== "remote") {
           void handleGuideMicMessage(msg);
         }
-      if (msg.from === "guide" && viewMode === "remote") {
-        void handleRemoteMicMessage(msg);
-      }
-      return;
-    }
-    if (msg.type === "display") {
-      applyDisplaySettings(msg);
-      return;
-    }
-    if (msg.type === "index") {
-      if (viewMode === "guide") {
-        void fetchIndex();
-      }
-      return;
-    }
-    if (msg.type === "volume") {
-      if (viewMode !== "remote") {
-        adjustVolume(msg.dir);
-      }
-      return;
-    }
-    if (msg.type === "mute") {
-      if (viewMode !== "remote") {
-        setMuted(msg.muted);
-      }
-      return;
-    }
-    if (msg.type === "mouse") {
-      handleRemoteMouse(msg);
-      return;
-    }
-    if (msg.type === "keyboard") {
-      handleRemoteKeyboard(msg);
-      return;
-    }
-    if (viewMode === "remote") {
-      if (msg.type === "app") {
-        const nextAppId = msg.appId ?? "";
-        if (!requestedRemoteAppId) {
-          setActiveRemoteAppId(nextAppId);
+        if (msg.from === "guide" && viewMode === "remote") {
+          void handleRemoteMicMessage(msg);
         }
-        setRemoteRegistrations(msg.remoteControls ?? []);
+        return;
+      }
+      if (msg.type === "display") {
+        applyDisplaySettings(msg);
+        return;
+      }
+      if (msg.type === "index") {
+        if (viewMode === "guide") {
+          void fetchIndex();
+        }
+        return;
+      }
+      if (msg.type === "volume") {
+        if (viewMode !== "remote") {
+          adjustVolume(msg.dir);
+        }
+        return;
+      }
+      if (msg.type === "mute") {
+        if (viewMode !== "remote") {
+          setMuted(msg.muted);
+        }
+        return;
+      }
+      if (msg.type === "mouse") {
+        handleRemoteMouse(msg);
+        return;
+      }
+      if (msg.type === "keyboard") {
+        handleRemoteKeyboard(msg);
+        return;
+      }
+      if (viewMode === "remote") {
+        if (msg.type === "app") {
+          const nextAppId = msg.appId ?? "";
+          if (!requestedRemoteAppId) {
+            setActiveRemoteAppId(nextAppId);
+          }
+          setRemoteRegistrations(msg.remoteControls ?? []);
+          return;
+        }
+        if (msg.type === "dial") {
+          if (msg.value) {
+            showDialOverlay(
+              msg.value,
+              msg.committed ? DIAL_OVERLAY_COMMIT_MS : DIAL_OVERLAY_IDLE_MS
+            );
+          }
+          return;
+        }
+        if (msg.type === "now") {
+          setRemoteNowChannel({
+            id: msg.channelId,
+            number: msg.number,
+            title: msg.title,
+            url: msg.url,
+          });
+          const normalized = normalizeChannelNumber(msg.number ?? "");
+          setRemoteGodmodeOpen(
+            msg.channelId === GODMODE_CHANNEL_ID || normalized === 67
+          );
+          return;
+        }
+        return;
+      }
+
+      if (msg.type === "guide") {
+        if (tuningLocked) return;
+        if (playerOpen) {
+          setPlayerOpen(false);
+          return;
+        }
+        if (viewMode !== "guide") {
+          const returnRow = Number.isFinite(returnRowParam)
+            ? Math.floor(returnRowParam)
+            : null;
+          const target = returnRow === null ? "/" : `/?r=${returnRow}`;
+          window.location.assign(target);
+        }
+        return;
+      }
+      if (msg.type === "info") {
+        if (playerOpen) {
+          setShowPlayerHud((prev) => !prev);
+        }
+        return;
       }
       if (msg.type === "dial") {
         if (msg.value) {
@@ -1554,96 +1859,59 @@ function App() {
             msg.committed ? DIAL_OVERLAY_COMMIT_MS : DIAL_OVERLAY_IDLE_MS
           );
         }
-      }
-      if (msg.type === "now") {
-        setRemoteNowChannel({
-          id: msg.channelId,
-          number: msg.number,
-          title: msg.title,
-          url: msg.url,
-        });
-        const normalized = normalizeChannelNumber(msg.number ?? "");
-        setRemoteGodmodeOpen(
-          msg.channelId === GODMODE_CHANNEL_ID || normalized === 67
-        );
-      }
-      return;
-    }
-
-    if (msg.type === "guide") {
-      if (playerOpen) {
-        setPlayerOpen(false);
         return;
       }
-      if (viewMode !== "guide") {
-        const returnRow = Number.isFinite(returnRowParam)
-          ? Math.floor(returnRowParam)
-          : null;
-        const target = returnRow === null ? "/" : `/?r=${returnRow}`;
-        window.location.assign(target);
-      }
-      return;
-    }
-    if (msg.type === "info") {
-      if (playerOpen) {
-        setShowPlayerHud((prev) => !prev);
-      }
-      return;
-    }
-    if (msg.type === "dial") {
-      if (msg.value) {
-        showDialOverlay(
-          msg.value,
-          msg.committed ? DIAL_OVERLAY_COMMIT_MS : DIAL_OVERLAY_IDLE_MS
-        );
-      }
-      return;
-    }
-    if (msg.type === "tune") {
-      if (viewMode === "guide") {
-        handleTuneToNumber(msg.number);
-      }
-      return;
-    }
-    if (msg.type === "godselect") {
-      if (viewMode === "guide") {
-        const channel = channels.find((item) => item.id === msg.channelId);
-        const program = channel?.schedule.find((slot) => slot.url === msg.url);
-        if (channel && program) {
-          handleGodmodePick(program, channel);
-        }
-      }
-      return;
-    }
-    if (msg.type === "channel") {
-      if (viewMode === "guide") {
-        handleChannelChange(msg.dir);
-      }
-      return;
-    }
-    if (msg.type === "nav") {
-      if (viewMode === "art") {
-        const artItems =
-          channels
-            .find((channel) => channel.id === (channelId ?? "jensen-art"))
-            ?.schedule.filter((slot) => slot.url) ?? [];
-        if (msg.dir === "left" || msg.dir === "up") {
-          setArtIndex((prev) => (prev - 1 + artItems.length) % artItems.length);
-        } else if (msg.dir === "right" || msg.dir === "down") {
-          setArtIndex((prev) => (prev + 1) % artItems.length);
+      if (msg.type === "tune") {
+        if (tuningLocked) return;
+        if (viewMode === "guide") {
+          handleTuneToNumber(msg.number);
         }
         return;
       }
-      moveSelection(msg.dir);
-    }
-    if (msg.type === "select") {
-      if (viewMode === "art") {
-        setArtPaused((prev) => !prev);
-      } else {
+      if (msg.type === "godselect") {
+        if (tuningLocked) return;
+        if (viewMode === "guide") {
+          const channel = channels.find((item) => item.id === msg.channelId);
+          const program = channel?.schedule.find((slot) => slot.url === msg.url);
+          if (channel && program) {
+            handleGodmodePick(program, channel);
+          }
+        }
+        return;
+      }
+      if (msg.type === "channel") {
+        if (tuningLocked) return;
+        if (viewMode === "guide") {
+          handleChannelChange(msg.dir);
+        }
+        return;
+      }
+      if (msg.type === "nav") {
+        if (viewMode === "art") {
+          const artItems =
+            channels
+              .find((channel) => channel.id === (channelId ?? "jensen-art"))
+              ?.schedule.filter((slot) => slot.url) ?? [];
+          if (msg.dir === "left" || msg.dir === "up") {
+            setArtIndex((prev) => (prev - 1 + artItems.length) % artItems.length);
+          } else if (msg.dir === "right" || msg.dir === "down") {
+            setArtIndex((prev) => (prev + 1) % artItems.length);
+          }
+          return;
+        }
+        if (tuningLocked) return;
+        moveSelection(msg.dir);
+        return;
+      }
+      if (msg.type === "select") {
+        if (viewMode === "art") {
+          setArtPaused((prev) => !prev);
+          return;
+        }
+        if (tuningLocked) return;
         handleSelect();
       }
-    }
-  },
+    },
     { role: viewMode === "remote" ? "remote" : "guide" }
   );
 
@@ -2206,6 +2474,7 @@ function App() {
         key === "ChannelDown" ||
         code === "BracketRight";
       if (key === "q" || key === "Q") {
+        if (qrLockedOff) return;
         setShowQr((prev) => !prev);
         return;
       }
@@ -2229,7 +2498,12 @@ function App() {
         setShowPlayerHud((prev) => !prev);
         return;
       }
-      if (viewMode === "guide" && playerOpen && (channelUp || channelDown)) {
+      if (
+        viewMode === "guide" &&
+        playerOpen &&
+        !channelLocked &&
+        (channelUp || channelDown)
+      ) {
         event.preventDefault();
         handleChannelChange(channelUp ? "up" : "down");
         return;
@@ -2237,12 +2511,13 @@ function App() {
       if (
         viewMode === "guide" &&
         playerOpen &&
+        !channelLocked &&
         (key === "Escape" || key === "Backspace")
       ) {
         setPlayerOpen(false);
         return;
       }
-      if (viewMode === "guide") {
+      if (viewMode === "guide" && !channelLocked) {
         if (channelUp) {
           event.preventDefault();
           moveSelection("up");
@@ -2275,6 +2550,7 @@ function App() {
         return;
       }
       if (key === "Enter") {
+        if (viewMode === "guide" && channelLocked) return;
         handleSelect();
         return;
       }
@@ -2294,6 +2570,8 @@ function App() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [
     adjustVolume,
+    channelLocked,
+    qrLockedOff,
     moveSelection,
     viewMode,
     channels,
@@ -2356,10 +2634,18 @@ function App() {
           // ignore storage errors
         }
       }
+      let remoteUrl = (data.remoteUrl as string) ?? "";
+      if (galleryEnabled) {
+        remoteUrl = appendQueryParam(remoteUrl, PARAM_GALLERY, "1");
+      }
+      if (channelLocked) {
+        remoteUrl = appendQueryParam(remoteUrl, "lock", "1");
+      }
+      const qrUrl = remoteUrl ? buildQrUrl(remoteUrl) : (data.qrUrl as string);
       setRemoteOverride({
         baseUrl: data.baseUrl as string,
-        remoteUrl: data.remoteUrl as string,
-        qrUrl: data.qrUrl as string,
+        remoteUrl,
+        qrUrl,
         wsUrl: data.wsUrl as string | undefined,
       });
     };
@@ -2393,12 +2679,20 @@ function App() {
       alive = false;
     };
   }, []);
-  const { qrUrl } = buildRemoteUrls({
+  const fallbackRemote = buildRemoteUrls({
     hostOverride,
     forceHttps,
     metaRemote: remoteOverride?.baseUrl ?? metaRemote,
   });
-  const qrImageUrl = remoteOverride?.qrUrl ?? qrUrl;
+  let fallbackRemoteUrl = fallbackRemote.remoteUrl;
+  if (galleryEnabled) {
+    fallbackRemoteUrl = appendQueryParam(fallbackRemoteUrl, PARAM_GALLERY, "1");
+  }
+  if (channelLocked) {
+    fallbackRemoteUrl = appendQueryParam(fallbackRemoteUrl, "lock", "1");
+  }
+  const fallbackQrUrl = buildQrUrl(fallbackRemoteUrl);
+  const qrImageUrl = remoteOverride?.qrUrl ?? fallbackQrUrl;
 
   useEffect(() => {
     if (viewMode !== "guide") return;
@@ -2544,6 +2838,8 @@ function App() {
     setGuideViewState({
       gridStyle,
       now,
+      galleryMode: galleryEnabled,
+      channelLocked,
       selectedChannel,
       selectedProgram,
       playerOpen,
@@ -2571,6 +2867,7 @@ function App() {
       playerKind,
       playerMeta,
       showPlayerHud,
+      loopVideo: !(galleryEnabled && playlistEnabled),
       ambientAudio,
       masterVolume,
       masterMuted,
@@ -2583,6 +2880,8 @@ function App() {
   }, [
     gridStyle,
     now,
+    galleryEnabled,
+    channelLocked,
     selectedChannel,
     selectedProgram,
     playerOpen,
@@ -2609,6 +2908,8 @@ function App() {
     playerKind,
     playerMeta,
     showPlayerHud,
+    galleryEnabled,
+    playlistEnabled,
     ambientAudio,
     masterVolume,
     masterMuted,
@@ -2628,6 +2929,8 @@ function App() {
       onOpenProgram: openProgram,
       onToggleDebug: handleToggleDebug,
       setPlayerReady,
+      onPlayerEnded: () => advanceGalleryPlaylist("ended"),
+      onPlayerError: (_kind, _url) => advanceGalleryPlaylist("error"),
     });
   }, [
     setPosterImageReady,
@@ -2636,6 +2939,7 @@ function App() {
     openProgram,
     handleToggleDebug,
     setPlayerReady,
+    advanceGalleryPlaylist,
     setGuideViewHandlers,
   ]);
 

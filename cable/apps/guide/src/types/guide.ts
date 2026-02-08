@@ -2,6 +2,11 @@ export type ProgramSlot = {
   title: string;
   subtitle?: string;
   tag?: string;
+  artist?: string;
+  infoTitle?: string;
+  description?: string;
+  hudMode?: "always" | "start" | "never";
+  hudShowSec?: number;
   url?: string;
   durationSec?: number;
   remoteControls?: RemoteRegistration[];
@@ -37,6 +42,11 @@ export type GuideIndex = {
 export type PlayerMeta = {
   title: string;
   subtitle?: string;
+  artist?: string;
+  infoTitle?: string;
+  description?: string;
+  hudMode?: "always" | "start" | "never";
+  hudShowSec?: number;
   channelName?: string;
   callSign?: string;
 };

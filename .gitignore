@@ -38,6 +38,7 @@ Thumbs.db
 
 # Media files (cached content, too large for git)
 media/
+media-cache/
 *.mp4
 *.webm
 *.mov
@@ -50,3 +51,6 @@ media/
 *.db-shm
 *.db-wal
 *.db
+
+# Explicitly ignore the media assets folder
+config/assets

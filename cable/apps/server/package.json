@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "ops:apply-mode": "pnpm -s build && node dist/ops-cli.js apply-mode"
   },
   "dependencies": {
     "@iarna/toml": "^3.0.0",

@@ -19,10 +19,14 @@ set -e
 CHECK_INTERVAL=${CHECK_INTERVAL:-30}        # Check every 30 seconds
 FAILURE_THRESHOLD=${FAILURE_THRESHOLD:-3}   # Consecutive failures before action
 PING_TIMEOUT=${PING_TIMEOUT:-5}             # Ping timeout in seconds
+# In solar/offline setups you often still want local WiFi/LAN to be considered "online"
+# even if the WAN uplink is down. Set to 1 to require internet pings too.
+REQUIRE_INTERNET=${REQUIRE_INTERNET:-0}
 LOG_PREFIX="[network-watchdog]"
 
 # Auto-reboot configuration
-AUTO_REBOOT_FLAG="/tmp/chiba-auto-reboot-enabled"
+# Use /var/tmp so the flag survives reboots (unlike /tmp).
+AUTO_REBOOT_FLAG="/var/tmp/chiba-auto-reboot-enabled"
 REBOOT_FAILURE_THRESHOLD=${REBOOT_FAILURE_THRESHOLD:-20}  # ~10 min of failures before reboot
 REBOOT_COOLDOWN=${REBOOT_COOLDOWN:-3600}                  # Min 1 hour between reboots
 REBOOT_TRACKING_FILE="/var/tmp/chiba-last-reboot"         # Persists across script restarts
@@ -106,6 +110,22 @@ get_connected_ssid() {
     fi
 }
 
+# Best-effort: disable WiFi power save. Some Pi WiFi chipsets get "sticky" after AP outages.
+disable_wifi_powersave() {
+    local iface
+    iface=$(get_wifi_interface 2>/dev/null || true)
+    if [ -z "${iface:-}" ]; then
+        return 0
+    fi
+
+    if command -v iw &>/dev/null; then
+        iw dev "$iface" set power_save off 2>/dev/null || true
+    fi
+    if command -v iwconfig &>/dev/null; then
+        iwconfig "$iface" power off 2>/dev/null || true
+    fi
+}
+
 # Recovery Level 1: Restart the WiFi interface
 recover_wifi_interface() {
     local iface=$(get_wifi_interface)
@@ -126,6 +146,10 @@ recover_wifi_interface() {
     if command -v dhclient &>/dev/null; then
         sudo dhclient -r "$iface" 2>/dev/null || true
         sudo dhclient "$iface" 2>/dev/null || true
+    elif command -v dhcpcd &>/dev/null; then
+        # Common on Raspberry Pi OS.
+        sudo dhcpcd -n "$iface" 2>/dev/null || true
+        sudo systemctl restart dhcpcd 2>/dev/null || true
     fi
 
     return 0
@@ -362,10 +386,12 @@ check_network() {
         return 1
     fi
 
-    if ! can_reach_internet; then
-        status="no_internet"
-        log_error "Cannot reach internet (IP: $ip, Gateway: $gateway)"
-        return 1
+    if [ "$REQUIRE_INTERNET" -eq 1 ]; then
+        if ! can_reach_internet; then
+            status="no_internet"
+            log_error "Cannot reach internet (IP: $ip, Gateway: $gateway)"
+            return 1
+        fi
     fi
 
     status="online"
@@ -376,6 +402,7 @@ check_network() {
 main() {
     log "Starting network watchdog"
     log "Check interval: ${CHECK_INTERVAL}s, Failure threshold: $FAILURE_THRESHOLD"
+    log "Require internet: $REQUIRE_INTERNET"
 
     # Show auto-reboot status
     if is_auto_reboot_enabled; then
@@ -390,6 +417,7 @@ main() {
     log "Initial state - IP: ${ip:-none}, SSID: ${ssid:-none}"
 
     while true; do
+        disable_wifi_powersave
         if check_network; then
             if [ $failure_count -gt 0 ]; then
                 log "Network recovered after $failure_count failures"

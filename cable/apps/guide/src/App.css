@@ -589,6 +589,12 @@
   opacity: 1;
 }
 
+.guide-shell.gallery-mode .guide-header,
+.guide-shell.gallery-mode .guide-grid,
+.guide-shell.gallery-mode .guide-footer {
+  display: none;
+}
+
 .player-overlay {
   position: absolute;
   inset: 0;
@@ -797,9 +803,22 @@
   font-weight: 600;
 }
 
+.player-artist {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(230, 240, 255, 0.85);
+}
+
 .player-subtitle {
   font-size: 0.85rem;
   color: rgba(230, 240, 255, 0.7);
+}
+
+.player-description {
+  font-size: 0.88rem;
+  line-height: 1.35;
+  color: rgba(230, 240, 255, 0.6);
+  max-width: 52ch;
 }
 
 .player-hint {

@@ -7,7 +7,7 @@
 #   ./auto-reboot.sh off      # Disable auto-reboot
 #   ./auto-reboot.sh reset    # Reset reboot counter (after manual intervention)
 
-FLAG_FILE="/tmp/chiba-auto-reboot-enabled"
+FLAG_FILE="/var/tmp/chiba-auto-reboot-enabled"
 REBOOT_COUNT_FILE="/var/tmp/chiba-reboot-count"
 
 show_status() {

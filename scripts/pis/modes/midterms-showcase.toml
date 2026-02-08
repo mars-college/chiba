@@ -1,0 +1,88 @@
+# Midterms gallery showcase mode (committable).
+#
+# This describes how each Pi + Chiba Cable instance should be launched for a
+# gallery installation.
+#
+# Apply via the reusable fleet CLI (calls each Pi's Node API on :8080):
+#
+#   pnpm -C cable/apps/server ops:apply-mode -- \
+#     --inventory scripts/pis/registry.toml \
+#     --mode scripts/pis/modes/midterms-showcase.toml \
+#     --all
+#
+# Secrets (SSH password) come from env, not this file.
+[defaults]
+[defaults.cable]
+mode = "gallery"
+theme = "gallery"
+nosplash = true
+lock = true
+qr = true
+
+# ---- Upper West ----
+[pis.upper-west-1.cable]
+orientation = "portrait"
+channel = ""
+
+[pis.upper-west-2.cable]
+orientation = "landscape"
+channel = ""
+
+[pis.upper-west-3.cable]
+orientation = "landscape"
+channel = ""
+
+[pis.upper-west-4.cable]
+orientation = "landscape"
+channel = ""
+
+# ---- Upper East ----
+[pis.upper-east-1.cable]
+orientation = "portrait"
+channel = ""
+
+[pis.upper-east-2.cable]
+orientation = "landscape"
+channel = ""
+
+[pis.upper-east-3.cable]
+orientation = "landscape"
+channel = ""
+
+[pis.upper-east-4.cable]
+orientation = "portrait"
+channel = ""
+
+# ---- Lower West ----
+[pis.lower-west-1.cable]
+orientation = "landscape"
+channel = ""
+
+[pis.lower-west-2.cable]
+orientation = "landscape"
+channel = ""
+
+[pis.lower-west-3.cable]
+orientation = "landscape"
+channel = ""
+
+[pis.lower-west-4.cable]
+orientation = "portrait"
+channel = ""
+
+# ---- Lower East ----
+[pis.lower-east-1.cable]
+orientation = "portrait"
+channel = ""
+
+[pis.lower-east-2.cable]
+orientation = "landscape"
+channel = ""
+
+[pis.lower-east-3.cable]
+orientation = "landscape"
+channel = ""
+
+[pis.lower-east-4.cable]
+orientation = "portrait"
+channel = ""

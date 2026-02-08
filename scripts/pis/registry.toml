@@ -1,0 +1,95 @@
+# Committable Pi registry (no secrets).
+#
+# Secrets are loaded from environment variables (optionally via a local env file),
+# so this file can live in source control.
+#
+# See: ./scripts/pis/pis-secrets.env.example
+
+[defaults]
+user = "pi"
+controller_url = "http://10.10.13.9:24422/"
+guide_port = 5173
+server_port = 8787
+
+[defaults.nas]
+host = "nas.mars.college"
+share = "share"
+mount = "/Volumes/share"
+
+# ---- Upper East ----
+[pis.upper-east-1]
+host = "mars32.local"
+node_name = "upper-east-1"
+
+[pis.upper-east-2]
+host = "mars31.local"
+node_name = "upper-east-2"
+
+[pis.upper-east-3]
+host = "mars29.local"
+node_name = "upper-east-3"
+
+[pis.upper-east-4]
+host = "mars07.local"
+node_name = "upper-east-4"
+
+# ---- Upper West ----
+[pis.upper-west-1]
+host = "mars15.local"
+node_name = "upper-west-1"
+
+[pis.upper-west-2]
+host = "mars19.local"
+node_name = "upper-west-2"
+
+[pis.upper-west-3]
+host = "mars23.local"
+node_name = "upper-west-3"
+
+[pis.upper-west-4]
+host = "mars03.local"
+node_name = "upper-west-4"
+
+[pis.upper-west-4.cable]
+mode = "gallery"
+theme = "gallery"
+channel = "earl"
+playlist = true
+nosplash = true
+lock = true
+qr = false
+
+# ---- Lower East ----
+[pis.lower-east-1]
+host = "mars26.local"
+node_name = "lower-east-1"
+
+[pis.lower-east-2]
+# External / not on mars.local network in the current source-of-truth list.
+host = ""
+node_name = "lower-east-2"
+
+[pis.lower-east-3]
+host = "mars10.local"
+node_name = "lower-east-3"
+
+[pis.lower-east-4]
+host = "mars16.local"
+node_name = "lower-east-4"
+
+# ---- Lower West ----
+[pis.lower-west-1]
+host = "mars21.local"
+node_name = "lower-west-1"
+
+[pis.lower-west-2]
+host = "mars22.local"
+node_name = "lower-west-2"
+
+[pis.lower-west-3]
+host = "mars18.local"
+node_name = "lower-west-3"
+
+[pis.lower-west-4]
+host = "mars27.local"
+node_name = "lower-west-4"

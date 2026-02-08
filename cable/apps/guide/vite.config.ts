@@ -15,6 +15,12 @@ export default defineConfig({
       "/media": {
         target: "http://localhost:8787",
       },
+      "/cache": {
+        target: "http://localhost:8787",
+      },
+      "/stash": {
+        target: "http://localhost:8787",
+      },
       "/village": {
         target: "http://localhost:8787",
       },

@@ -9,11 +9,18 @@ export function getWsUrl(): string {
   const params = new URLSearchParams(window.location.search);
   const wsParam = params.get(PARAM_WS);
   if (wsParam) return wsParam;
-  try {
-    const stored = window.localStorage.getItem(WS_STORAGE_KEY);
-    if (stored && stored.trim().length > 0) return stored.trim();
-  } catch {
-    // ignore storage errors
+  // In kiosk/gallery mode, ignore persisted WS targets. These are usually set
+  // during debugging and can cause a kiosk to "stick" to a stale LAN host.
+  const gallery = (params.get("gallery") ?? "").trim().toLowerCase();
+  const isGallery =
+    gallery === "1" || gallery === "true" || gallery === "yes" || gallery === "on";
+  if (!isGallery) {
+    try {
+      const stored = window.localStorage.getItem(WS_STORAGE_KEY);
+      if (stored && stored.trim().length > 0) return stored.trim();
+    } catch {
+      // ignore storage errors
+    }
   }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/ws`;
@@ -66,6 +73,10 @@ export function resolveRemoteBaseUrl(options: RemoteUrlOptions): string {
 export function buildRemoteUrls(options: RemoteUrlOptions) {
   const baseUrl = resolveRemoteBaseUrl(options);
   const remoteUrl = `${baseUrl}/remote`;
-  const qrUrl = `${QR_BASE}${encodeURIComponent(remoteUrl)}`;
+  const qrUrl = buildQrUrl(remoteUrl);
   return { baseUrl, remoteUrl, qrUrl };
+}
+
+export function buildQrUrl(remoteUrl: string): string {
+  return `${QR_BASE}${encodeURIComponent(remoteUrl)}`;
 }

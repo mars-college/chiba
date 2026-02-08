@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
+import crypto from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -12,23 +15,47 @@ import { buildIndexFromConfig } from './index-builder-config.js';
 import { loadConfig, type ChannelEmbedConfig, type LoadedConfig } from './config.js';
 import { createVillageCapture } from './village-capture.js';
 import { createWeatherstarCapture } from './weatherstar-capture.js';
+import { buildFleetResponse, loadFleetFromRegistry, probeFleetHealth, probePiHealth } from './ops-fleet.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT ?? 8787);
 const app = express();
+app.use(express.json({ limit: '2mb' }));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 const proxyWss = new WebSocketServer({ noServer: true });
 const WS_HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS ?? 25000);
 const wsAlive = new WeakMap<WebSocket, boolean>();
 
-const repoRoot = path.resolve(__dirname, '../../..');
+// Monorepo root (for registries, git sha, shared assets).
+const repoRoot = path.resolve(__dirname, '../../../..');
+// Cable root (for cable-local config defaults).
+const cableRoot = path.resolve(__dirname, '../../..');
 const distDir = path.resolve(__dirname, '../../guide/dist');
 const indexFile = path.join(distDir, 'index.html');
+const opsDistDir = path.resolve(__dirname, '../../ops/dist');
+const opsIndexFile = path.join(opsDistDir, 'index.html');
 const sourcesFile = path.resolve(__dirname, '../data/sources.json');
-const configPath = process.env.CHIBA_CONFIG ?? path.resolve(repoRoot, 'config/chiba.toml');
+const configPath =
+  process.env.CHIBA_CONFIG ??
+  (() => {
+    const cableConfig = path.resolve(cableRoot, 'config/chiba.toml');
+    if (fs.existsSync(cableConfig)) return cableConfig;
+    return path.resolve(repoRoot, 'config/chiba.toml');
+  })();
+
+// Ops dashboard registry:
+// Prefer explicit env override, otherwise default to committable source-of-truth registry.
+const OPS_REGISTRY_PATH =
+  process.env.CHIBA_OPS_REGISTRY ??
+  process.env.CHIBA_PIS_REGISTRY ??
+  'scripts/pis/registry.toml';
+const OPS_CONCURRENCY = Number(process.env.CHIBA_OPS_CONCURRENCY ?? 8);
+const OPS_TIMEOUT_MS = Number(process.env.CHIBA_OPS_TIMEOUT_MS ?? 1200);
+
+let opsFleetCache: { at: number; payload: any } | null = null;
 
 let guideIndex: GuideIndex | null = null;
 let rebuildTimer: NodeJS.Timeout | null = null;
@@ -36,6 +63,12 @@ const villageCapture = createVillageCapture();
 const weatherstarCapture = createWeatherstarCapture();
 let loadedConfig: LoadedConfig | null = null;
 let mediaRoots: string[] = [];
+const mediaCacheDir = process.env.CHIBA_MEDIA_CACHE_DIR
+  ? path.resolve(process.env.CHIBA_MEDIA_CACHE_DIR)
+  : path.resolve(repoRoot, 'media-cache');
+const mediaCacheInflight = new Map<string, Promise<string>>();
+const stashCacheDir = path.join(mediaCacheDir, 'stash');
+const stashInflight = new Map<string, Promise<string>>();
 let configWatchers: Array<ReturnType<typeof fs.watch>> = [];
 let configPollTimer: NodeJS.Timeout | null = null;
 let lastConfigFingerprint = '';
@@ -132,6 +165,23 @@ const parseBooleanQuery = (value: unknown): boolean => {
   if (typeof raw !== "string") return false;
   const normalized = raw.trim().toLowerCase();
   return ["1", "true", "yes", "on"].includes(normalized);
+};
+
+const clampInt = (
+  value: unknown,
+  min: number,
+  max: number
+): number | null => {
+  if (value === undefined || value === null) return null;
+  const raw = Array.isArray(value) ? value[0] : value;
+  const num =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string'
+        ? Number(raw)
+        : NaN;
+  if (!Number.isFinite(num)) return null;
+  return Math.max(min, Math.min(max, Math.floor(num)));
 };
 
 const buildOverlayHtml = (embed: ChannelEmbedConfig | null) => {
@@ -951,6 +1001,219 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/version', async (_req, res) => {
+  // Minimal version endpoint so fleet probes can check which code is deployed.
+  // Avoid spawning git; prefer an explicit deploy stamp because Pi installs rsync without .git/.
+  const envGitSha =
+    process.env.CHIBA_CABLE_GIT_SHA ??
+    process.env.CHIBA_GIT_SHA ??
+    null;
+
+  const deployMetaPath =
+    process.env.CHIBA_DEPLOY_META ??
+    path.resolve(process.cwd(), '.chiba-deploy.json');
+
+  const deployMeta = await (async () => {
+    try {
+      if (!fs.existsSync(deployMetaPath)) return null;
+      const raw = await fsp.readFile(deployMetaPath, 'utf-8');
+      const parsed = JSON.parse(raw) as any;
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const stampGitSha =
+    typeof deployMeta?.gitSha === 'string'
+      ? deployMeta.gitSha
+      : typeof deployMeta?.git?.sha === 'string'
+        ? deployMeta.git.sha
+        : null;
+
+  // Fallback: read .git refs if available.
+  const gitShaFromRepo = (() => {
+    try {
+      const headPath = path.join(repoRoot, '.git/HEAD');
+      if (!fs.existsSync(headPath)) return null;
+      const head = fs.readFileSync(headPath, 'utf-8').trim();
+      if (head.startsWith('ref:')) {
+        const ref = head.replace('ref:', '').trim();
+        const refPath = path.join(repoRoot, '.git', ref);
+        if (fs.existsSync(refPath)) return fs.readFileSync(refPath, 'utf-8').trim().slice(0, 12);
+        return null;
+      }
+      return head.slice(0, 12);
+    } catch {
+      return null;
+    }
+  })();
+
+  const gitSha = envGitSha ?? stampGitSha ?? gitShaFromRepo;
+
+  let version = '0.0.0';
+  try {
+    const pkgPath = path.resolve(__dirname, '../package.json');
+    const pkg = JSON.parse(await fsp.readFile(pkgPath, 'utf-8')) as any;
+    if (typeof pkg?.version === 'string') version = pkg.version;
+  } catch {
+    // ignore
+  }
+
+  res.json({
+    app: 'chiba-cable-server',
+    version,
+    gitSha,
+    git: { sha: gitSha },
+    deployedAt:
+      typeof deployMeta?.deployedAt === 'string'
+        ? deployMeta.deployedAt
+        : typeof deployMeta?.deployed_at === 'string'
+          ? deployMeta.deployed_at
+          : null,
+    deployMetaPath: fs.existsSync(deployMetaPath) ? deployMetaPath : null,
+  });
+});
+
+app.get('/api/ops/fleet', async (req, res) => {
+  const refresh = parseBooleanQuery(req.query.refresh);
+  const timeoutMs =
+    clampInt(req.query.timeoutMs, 150, 8000) ??
+    (Number.isFinite(OPS_TIMEOUT_MS) ? OPS_TIMEOUT_MS : 1200);
+  const concurrency =
+    clampInt(req.query.parallel ?? req.query.concurrency, 1, 64) ??
+    (Number.isFinite(OPS_CONCURRENCY) ? OPS_CONCURRENCY : 8);
+  const now = Date.now();
+  if (!refresh && opsFleetCache && now - opsFleetCache.at < 2000) {
+    res.json(opsFleetCache.payload);
+    return;
+  }
+
+  try {
+    const payload = await buildFleetResponse({
+      repoRoot,
+      registryPath: OPS_REGISTRY_PATH || null,
+      concurrency,
+      timeoutMs,
+    });
+    opsFleetCache = { at: Date.now(), payload };
+    res.json(payload);
+  } catch (err) {
+    res.status(500).json({ error: 'ops_fleet_failed', message: (err as Error).message });
+  }
+});
+
+app.get('/api/ops/pi', async (req, res) => {
+  const idRaw = req.query.id;
+  const id = Array.isArray(idRaw) ? idRaw[0] : idRaw;
+  if (!id || typeof id !== 'string' || !id.trim()) {
+    res.status(400).json({ error: 'missing_id', message: 'Provide ?id=upper-east-3 (registry id)' });
+    return;
+  }
+
+  const timeoutMs =
+    clampInt(req.query.timeoutMs, 150, 8000) ??
+    (Number.isFinite(OPS_TIMEOUT_MS) ? OPS_TIMEOUT_MS : 1200);
+
+  try {
+    const { registryPath, pis } = await loadFleetFromRegistry(
+      repoRoot,
+      OPS_REGISTRY_PATH || null
+    );
+    const target = pis.find((pi) => pi.id === id.trim());
+    if (!target) {
+      res.status(404).json({ error: 'unknown_pi', message: `Unknown pi in registry: ${id.trim()}` });
+      return;
+    }
+    const health = await probePiHealth({
+      repoRoot,
+      registryPath,
+      timeoutMs,
+      pi: target,
+    });
+    res.json(health);
+  } catch (err) {
+    res.status(500).json({ error: 'ops_pi_failed', message: (err as Error).message });
+  }
+});
+
+app.get('/api/ops/fleet/stream', async (req, res) => {
+  // Stream per-node results as they finish (SSE), so UI isn't blocked by offline nodes.
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+
+  const timeoutMs =
+    clampInt(req.query.timeoutMs, 150, 8000) ??
+    (Number.isFinite(OPS_TIMEOUT_MS) ? OPS_TIMEOUT_MS : 1200);
+  const concurrency =
+    clampInt(req.query.parallel ?? req.query.concurrency, 1, 64) ??
+    (Number.isFinite(OPS_CONCURRENCY) ? OPS_CONCURRENCY : 8);
+
+  const writeEvent = (event: string, data: any) => {
+    try {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    } catch {
+      // client likely disconnected
+    }
+  };
+
+  const close = () => {
+    try { res.end(); } catch {}
+  };
+  req.on('close', close);
+
+  try {
+    const now = Date.now();
+    const localGitSha = (() => {
+      try {
+        const headPath = path.join(repoRoot, '.git/HEAD');
+        if (!fs.existsSync(headPath)) return null;
+        const head = fs.readFileSync(headPath, 'utf-8').trim();
+        if (head.startsWith('ref:')) {
+          const ref = head.replace('ref:', '').trim();
+          const refPath = path.join(repoRoot, '.git', ref);
+          if (fs.existsSync(refPath)) return fs.readFileSync(refPath, 'utf-8').trim().slice(0, 12);
+          return null;
+        }
+        return head.slice(0, 12);
+      } catch {
+        return null;
+      }
+    })();
+
+    const { registryPath, pis } = await loadFleetFromRegistry(
+      repoRoot,
+      OPS_REGISTRY_PATH || null
+    );
+
+    writeEvent('meta', {
+      now,
+      local: { gitSha: localGitSha, registryPath },
+      pis,
+      probes: { timeoutMs, concurrency },
+    });
+
+    const stream = await probeFleetHealth({
+      repoRoot,
+      registryPath,
+      pis,
+      concurrency,
+      timeoutMs,
+    });
+    for await (const pi of stream) {
+      writeEvent('pi', pi);
+    }
+
+    writeEvent('done', { ok: true });
+    close();
+  } catch (err) {
+    writeEvent('error', { error: 'ops_fleet_stream_failed', message: (err as Error).message });
+    close();
+  }
+});
+
 app.get('/api/index', (_req, res) => {
   if (!guideIndex) {
     res.status(503).json({ error: 'index_not_ready' });
@@ -1010,6 +1273,212 @@ app.get('/api/remote', (req, res) => {
   res.json({ baseUrl, remoteUrl, qrUrl, wsUrl });
 });
 
+function cachedMediaFilenameForUrl(remoteUrl: string): string {
+  let ext = '';
+  let base = '';
+  try {
+    const parsed = new URL(remoteUrl);
+    ext = path.extname(parsed.pathname).toLowerCase();
+    base = path
+      .basename(parsed.pathname, ext)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '')
+      .slice(0, 32);
+  } catch {
+    ext = '';
+    base = '';
+  }
+  const hash = crypto
+    .createHash('sha1')
+    .update(remoteUrl)
+    .digest('hex')
+    .slice(0, 10);
+  const safeExt = ext && ext.length <= 10 ? ext : '.bin';
+  return base ? `${base}-${hash}${safeExt}` : `${hash}${safeExt}`;
+}
+
+function stashedFilenameForPath(sourcePath: string): string {
+  // Deterministic key from the source path only (do not stat the NAS path here).
+  // This lets us check "is it cached?" without touching the NAS when offline.
+  const ext = path.extname(sourcePath).toLowerCase();
+  const base = path
+    .basename(sourcePath, ext)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+    .slice(0, 32);
+  const hash = crypto
+    .createHash('sha1')
+    .update(sourcePath)
+    .digest('hex')
+    .slice(0, 10);
+  const safeExt = ext && ext.length <= 10 ? ext : '.bin';
+  return base ? `${base}-${hash}${safeExt}` : `${hash}${safeExt}`;
+}
+
+async function ensureCached(remoteUrl: string): Promise<string> {
+  const name = cachedMediaFilenameForUrl(remoteUrl);
+  const targetPath = path.join(mediaCacheDir, name);
+  if (fs.existsSync(targetPath)) return targetPath;
+
+  const key = name;
+  const inflight = mediaCacheInflight.get(key);
+  if (inflight) return inflight;
+
+  const work = (async () => {
+    await fsp.mkdir(mediaCacheDir, { recursive: true });
+    if (fs.existsSync(targetPath)) return targetPath;
+
+    let parsed: URL;
+    try {
+      parsed = new URL(remoteUrl);
+    } catch {
+      throw new Error('invalid_url');
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('invalid_protocol');
+    }
+
+    const maxBytes = Number(process.env.CHIBA_MEDIA_CACHE_MAX_BYTES ?? '') || 1024 * 1024 * 1024;
+    const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
+    const res = await fetch(remoteUrl, { redirect: 'follow' });
+    if (!res.ok || !res.body) {
+      throw new Error(`fetch_failed:${res.status}`);
+    }
+    const lengthHeader = res.headers.get('content-length');
+    if (lengthHeader) {
+      const length = Number.parseInt(lengthHeader, 10);
+      if (Number.isFinite(length) && length > maxBytes) {
+        throw new Error('too_large');
+      }
+    }
+
+    const stream = Readable.fromWeb(res.body as any);
+    const file = fs.createWriteStream(tmpPath, { flags: 'wx' });
+    let bytes = 0;
+    stream.on('data', (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        stream.destroy(new Error('too_large'));
+      }
+    });
+    try {
+      await pipeline(stream, file);
+      await fsp.rename(tmpPath, targetPath);
+    } catch (err) {
+      try {
+        await fsp.rm(tmpPath, { force: true });
+      } catch {
+        // ignore cleanup errors
+      }
+      if (fs.existsSync(targetPath)) return targetPath;
+      throw err;
+    }
+    return targetPath;
+  })();
+
+  mediaCacheInflight.set(key, work);
+  try {
+    return await work;
+  } finally {
+    mediaCacheInflight.delete(key);
+  }
+}
+
+async function ensureStashed(sourcePath: string): Promise<string> {
+  const name = stashedFilenameForPath(sourcePath);
+  const targetPath = path.join(stashCacheDir, name);
+  if (fs.existsSync(targetPath)) return targetPath;
+
+  const inflight = stashInflight.get(name);
+  if (inflight) return inflight;
+
+  const work = (async () => {
+    await fsp.mkdir(stashCacheDir, { recursive: true });
+    if (fs.existsSync(targetPath)) return targetPath;
+
+    // Copy with a timeout so a dead NAS mount doesn't hang the process forever.
+    const timeoutMs =
+      Number(process.env.CHIBA_STASH_COPY_TIMEOUT_MS ?? '') || 120_000;
+    const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
+
+    const withTimeout = async <T>(fn: () => Promise<T>): Promise<T> => {
+      let timer: NodeJS.Timeout | null = null;
+      const timeout = new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+      });
+      try {
+        return await Promise.race([fn(), timeout]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+
+    const copyWithTimeout = async () => {
+      return await new Promise<void>((resolve, reject) => {
+        const read = fs.createReadStream(sourcePath);
+        const write = fs.createWriteStream(tmpPath, { flags: 'wx' });
+        let settled = false;
+
+        const done = (err?: unknown) => {
+          if (settled) return;
+          settled = true;
+          if (err) reject(err);
+          else resolve();
+        };
+
+        const timer = setTimeout(() => {
+          const err = new Error('timeout');
+          read.destroy(err);
+          write.destroy(err);
+          done(err);
+        }, timeoutMs);
+
+        read.on('error', (err) => {
+          clearTimeout(timer);
+          done(err);
+        });
+        write.on('error', (err) => {
+          clearTimeout(timer);
+          done(err);
+        });
+        write.on('finish', () => {
+          clearTimeout(timer);
+          done();
+        });
+
+        // Don't use pipeline here because it can hang indefinitely in some IO-failure modes.
+        read.pipe(write);
+      });
+    };
+    try {
+      // Validate source exists and is a file.
+      const stat = await withTimeout(() => fsp.stat(sourcePath));
+      if (!stat.isFile()) throw new Error('not_file');
+
+      await copyWithTimeout();
+      await fsp.rename(tmpPath, targetPath);
+      return targetPath;
+    } catch (err) {
+      try {
+        await fsp.rm(tmpPath, { force: true });
+      } catch {
+        // ignore
+      }
+      if (fs.existsSync(targetPath)) return targetPath;
+      throw err;
+    }
+  })();
+
+  stashInflight.set(name, work);
+  try {
+    return await work;
+  } finally {
+    stashInflight.delete(name);
+  }
+}
+
 function isPathAllowed(target: string): boolean {
   if (!mediaRoots.length) return false;
   const resolved = path.resolve(target);
@@ -1018,6 +1487,294 @@ function isPathAllowed(target: string): boolean {
     return resolved === base || resolved.startsWith(`${base}${path.sep}`);
   });
 }
+
+app.get('/cache/:id', async (req, res) => {
+  const remoteUrl = typeof req.query.url === 'string' ? req.query.url : '';
+  if (!remoteUrl) {
+    res.status(400).send('missing_url');
+    return;
+  }
+  const expected = cachedMediaFilenameForUrl(remoteUrl);
+  if (req.params.id !== expected) {
+    res.redirect(302, `/cache/${expected}?url=${encodeURIComponent(remoteUrl)}`);
+    return;
+  }
+
+  let cachedPath = '';
+  try {
+    cachedPath = await ensureCached(remoteUrl);
+  } catch (err: any) {
+    const message = err?.message ?? String(err);
+    if (message === 'invalid_url' || message === 'invalid_protocol') {
+      res.status(400).send('bad_url');
+      return;
+    }
+    if (message === 'too_large') {
+      res.status(413).send('too_large');
+      return;
+    }
+    console.warn('[cache] fetch failed', remoteUrl, message);
+    res.status(502).send('fetch_failed');
+    return;
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = await fsp.stat(cachedPath);
+  } catch {
+    res.status(404).send('not_found');
+    return;
+  }
+  if (!stat.isFile()) {
+    res.status(404).send('not_found');
+    return;
+  }
+
+  const mimeType =
+    mime.contentType(path.extname(cachedPath)) || 'application/octet-stream';
+  const range = req.headers.range;
+
+  if (!range) {
+    res.status(200);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Accept-Ranges', 'bytes');
+    const stream = fs.createReadStream(cachedPath);
+    stream.on('error', (error) => {
+      console.warn('[cache] stream error', cachedPath, error?.message ?? error);
+      if (!res.headersSent) {
+        res.status(500).end();
+      } else {
+        res.destroy(error as Error);
+      }
+    });
+    stream.pipe(res);
+    return;
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
+  if (!match) {
+    res.status(416).setHeader('Content-Range', `bytes */${stat.size}`).end();
+    return;
+  }
+
+  let start = match[1] ? Number.parseInt(match[1], 10) : NaN;
+  let end = match[2] ? Number.parseInt(match[2], 10) : NaN;
+
+  if (Number.isNaN(start)) {
+    const suffix = Number.isNaN(end) ? 0 : end;
+    start = Math.max(stat.size - suffix, 0);
+    end = stat.size - 1;
+  } else if (Number.isNaN(end)) {
+    end = stat.size - 1;
+  }
+
+  if (start < 0 || end >= stat.size || start > end) {
+    res.status(416).setHeader('Content-Range', `bytes */${stat.size}`).end();
+    return;
+  }
+
+  res.status(206);
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+  res.setHeader('Content-Length', end - start + 1);
+  const stream = fs.createReadStream(cachedPath, { start, end });
+  stream.on('error', (error) => {
+    console.warn('[cache] stream error', cachedPath, error?.message ?? error);
+    if (!res.headersSent) {
+      res.status(500).end();
+    } else {
+      res.destroy(error as Error);
+    }
+  });
+  stream.pipe(res);
+});
+
+app.get('/stash/:id', async (req, res) => {
+  const rawPath = req.query.path;
+  if (typeof rawPath !== 'string' || !rawPath) {
+    res.status(400).send('missing_path');
+    return;
+  }
+  const decoded = decodeURIComponent(rawPath);
+  if (!isPathAllowed(decoded)) {
+    res.status(403).send('forbidden');
+    return;
+  }
+
+  const expected = stashedFilenameForPath(decoded);
+  if (req.params.id !== expected) {
+    res.redirect(302, `/stash/${expected}?path=${encodeURIComponent(decoded)}`);
+    return;
+  }
+
+  const targetPath = path.join(stashCacheDir, expected);
+  if (!fs.existsSync(targetPath)) {
+    // "skip-if-not-cached" behavior: fast 404 without touching the NAS.
+    // Optionally warm in the background so it shows up on the next loop.
+    // Default: warm on demand (best effort). Set CHIBA_STASH_AUTOFETCH=0 to disable.
+    const autoFetch =
+      process.env.CHIBA_STASH_AUTOFETCH === undefined ||
+      process.env.CHIBA_STASH_AUTOFETCH === '' ||
+      process.env.CHIBA_STASH_AUTOFETCH === '1' ||
+      process.env.CHIBA_STASH_AUTOFETCH === 'true' ||
+      process.env.CHIBA_STASH_AUTOFETCH === 'yes';
+    const fetchParam =
+      req.query.fetch === '1' ||
+      req.query.fetch === 'true' ||
+      req.query.fetch === 'yes';
+    if (autoFetch || fetchParam) {
+      // Fire-and-forget: don't block the response.
+      void ensureStashed(decoded).catch((err) => {
+        console.warn('[stash] fetch failed', decoded, (err as Error).message);
+      });
+    }
+    res.status(404).send('not_cached');
+    return;
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = await fsp.stat(targetPath);
+  } catch {
+    res.status(404).send('not_found');
+    return;
+  }
+  if (!stat.isFile()) {
+    res.status(404).send('not_found');
+    return;
+  }
+
+  const mimeType =
+    mime.contentType(path.extname(targetPath)) || 'application/octet-stream';
+  const range = req.headers.range;
+
+  if (!range) {
+    res.status(200);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Accept-Ranges', 'bytes');
+    fs.createReadStream(targetPath).pipe(res);
+    return;
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
+  if (!match) {
+    res.status(416).setHeader('Content-Range', `bytes */${stat.size}`).end();
+    return;
+  }
+
+  let start = match[1] ? Number.parseInt(match[1], 10) : NaN;
+  let end = match[2] ? Number.parseInt(match[2], 10) : NaN;
+
+  if (Number.isNaN(start)) {
+    const suffix = Number.isNaN(end) ? 0 : end;
+    start = Math.max(stat.size - suffix, 0);
+    end = stat.size - 1;
+  } else if (Number.isNaN(end)) {
+    end = stat.size - 1;
+  }
+
+  if (start < 0 || end >= stat.size || start > end) {
+    res.status(416).setHeader('Content-Range', `bytes */${stat.size}`).end();
+    return;
+  }
+
+  res.status(206);
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+  res.setHeader('Content-Length', end - start + 1);
+  fs.createReadStream(targetPath, { start, end }).pipe(res);
+});
+
+app.post('/api/stash/prefetch', async (req, res) => {
+  // Best-effort prefetch of stashed files (NAS -> local cache).
+  const body = (req.body ?? {}) as any;
+  const rawPaths = Array.isArray(body.paths) ? body.paths : null;
+  const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
+
+  let paths: string[] = [];
+  if (rawPaths) {
+    paths = rawPaths.filter((p: any) => typeof p === 'string' && p.trim()).map((p: string) => p.trim());
+  } else if (channelId && loadedConfig?.channels?.length) {
+    const channel = loadedConfig.channels.find((c) => c.id === channelId);
+    if (channel) {
+      paths = channel.programs
+        .map((p) => (p.source?.type === 'path' && p.source.cache ? p.source.value : null))
+        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
+    }
+  }
+
+  const filtered = Array.from(new Set(paths))
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+    .filter((p) => isPathAllowed(p));
+
+  // Kick off background copies (do not await).
+  filtered.forEach((p) => {
+    void ensureStashed(p).catch((err) => {
+      console.warn('[stash] prefetch failed', p, (err as Error).message);
+    });
+  });
+
+  res.json({
+    ok: true,
+    queued: filtered.length,
+    channelId: channelId || null,
+  });
+});
+
+app.get('/api/stash/status', async (req, res) => {
+  // Report stash cache status without touching the NAS.
+  // Query:
+  // - ?channelId=earl  (checks cached status for all cached path programs in that channel)
+  // - ?path=...        (single path)
+  // - ?paths=...       (repeatable)
+  const channelId = typeof req.query.channelId === 'string' ? req.query.channelId.trim() : '';
+  const pathParam = typeof req.query.path === 'string' ? req.query.path : '';
+  const pathsParam = Array.isArray(req.query.paths)
+    ? req.query.paths
+    : typeof req.query.paths === 'string'
+    ? [req.query.paths]
+    : [];
+
+  let paths: string[] = [];
+  if (channelId && loadedConfig?.channels?.length) {
+    const channel = loadedConfig.channels.find((c) => c.id === channelId);
+    if (channel) {
+      paths = channel.programs
+        .map((p) => (p.source?.type === 'path' && p.source.cache ? p.source.value : null))
+        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
+    }
+  } else if (pathParam) {
+    paths = [pathParam];
+  } else if (pathsParam.length) {
+    paths = pathsParam.filter((p): p is string => typeof p === 'string');
+  }
+
+  const uniq = Array.from(new Set(paths.map((p) => p.trim()).filter(Boolean)))
+    .filter((p) => isPathAllowed(p));
+
+  const items = uniq.map((p) => {
+    const name = stashedFilenameForPath(p);
+    const cachedPath = path.join(stashCacheDir, name);
+    return {
+      path: p,
+      name,
+      cached: fs.existsSync(cachedPath),
+    };
+  });
+
+  res.json({
+    ok: true,
+    channelId: channelId || null,
+    items,
+    cached: items.filter((i) => i.cached).length,
+    total: items.length,
+  });
+});
 
 app.get('/media/:id', async (req, res) => {
   const rawPath = req.query.path;
@@ -1920,6 +2677,7 @@ app.use(
   })
 );
 app.use(express.static(distDir, { index: false }));
+app.use('/ops', express.static(opsDistDir, { index: false }));
 
 function getBaseUrl(req: express.Request): string {
   const forwardedProto = req.headers['x-forwarded-proto'];
@@ -2061,9 +2819,25 @@ async function sendIndex(req: express.Request, res: express.Response) {
   }
 }
 
+async function sendOpsIndex(_req: express.Request, res: express.Response) {
+  try {
+    const html = await fsp.readFile(opsIndexFile, 'utf-8');
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (err) {
+    res
+      .status(500)
+      .send('Missing ops build. Run: pnpm -C cable/apps/ops build');
+  }
+}
+
 app.get('*', (req, res) => {
   if (req.path.startsWith('/ws')) {
     res.status(426).send('WebSocket only');
+    return;
+  }
+  if (req.path.startsWith('/ops')) {
+    sendOpsIndex(req, res);
     return;
   }
   sendIndex(req, res);

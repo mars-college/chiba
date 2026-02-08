@@ -1,11 +1,21 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import type { ChannelManifest, LoadedConfig, RemoteRegistration } from "./config.js";
+import type {
+  ChannelInfoCard,
+  ChannelManifest,
+  LoadedConfig,
+  RemoteRegistration,
+} from "./config.js";
 
 export type ProgramSlot = {
   title: string;
   subtitle?: string;
   tag?: string;
+  artist?: string;
+  infoTitle?: string;
+  description?: string;
+  hudMode?: "always" | "start" | "never";
+  hudShowSec?: number;
   url?: string;
   durationSec?: number;
   remoteControls?: RemoteRegistration[];
@@ -83,10 +93,53 @@ function mediaUrlForPath(filePath: string): string {
   return `/media/${name}?path=${encodeURIComponent(filePath)}`;
 }
 
+function stashedMediaUrlForPath(filePath: string): string {
+  // Local stash cache for NAS paths. If not cached, server returns 404 quickly so
+  // gallery playlist mode can skip it (and the server may warm it in the background).
+  const ext = path.extname(filePath).toLowerCase();
+  const base = path
+    .basename(filePath, ext)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 32);
+  const hash = crypto.createHash("sha1").update(filePath).digest("hex").slice(0, 10);
+  const safeExt = ext && ext.length <= 10 ? ext : ".bin";
+  const name = base ? `${base}-${hash}${safeExt}` : `${hash}${safeExt}`;
+  return `/stash/${name}?path=${encodeURIComponent(filePath)}`;
+}
+
+function cachedMediaUrlForRemote(remoteUrl: string): string {
+  let ext = "";
+  let base = "";
+  try {
+    const parsed = new URL(remoteUrl);
+    ext = path.extname(parsed.pathname).toLowerCase();
+    base = path
+      .basename(parsed.pathname, ext)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 32);
+  } catch {
+    ext = "";
+    base = "";
+  }
+  const hash = crypto
+    .createHash("sha1")
+    .update(remoteUrl)
+    .digest("hex")
+    .slice(0, 10);
+  const safeExt = ext && ext.length <= 10 ? ext : ".bin";
+  const name = base ? `${base}-${hash}${safeExt}` : `${hash}${safeExt}`;
+  return `/cache/${name}?url=${encodeURIComponent(remoteUrl)}`;
+}
+
 function buildSchedule(
   programs: ChannelManifest["programs"],
   slotCount: number,
-  slotMinutes: number
+  slotMinutes: number,
+  info?: ChannelInfoCard
 ): ProgramSlot[] {
   const schedule: ProgramSlot[] = [];
   let cursor = 0;
@@ -117,15 +170,31 @@ function buildSchedule(
     const durationSec = Math.max(1, span) * slotMinutes * 60;
     const url =
       program.source?.type === "path"
-        ? mediaUrlForPath(program.source.value)
+        ? program.source.cache
+          ? stashedMediaUrlForPath(program.source.value)
+          : mediaUrlForPath(program.source.value)
         : program.source?.type === "url"
-        ? program.source.value
+        ? program.source.cache
+          ? cachedMediaUrlForRemote(program.source.value)
+          : program.source.value
         : undefined;
 
     schedule.push({
       title: program.title,
       subtitle: program.subtitle,
       tag: program.tag,
+      // Channel-level [info] takes precedence (so a show can brand all pieces
+      // consistently without per-program titles leaking into the HUD).
+      artist: info?.artist ?? program.artist,
+      infoTitle: info?.title ?? program.info_title,
+      description: info?.description ?? program.description,
+      hudMode: info?.mode ?? (program as any).info_mode,
+      hudShowSec:
+        typeof info?.show_sec === "number"
+          ? info.show_sec
+          : typeof program.show_sec === "number"
+          ? program.show_sec
+          : undefined,
       url,
       durationSec,
       remoteControls: program.remote_controls,
@@ -168,7 +237,9 @@ export function buildIndexFromConfig(loaded: LoadedConfig): GuideIndex {
       channel.audio_source?.type === "path"
         ? mediaUrlForPath(channel.audio_source.value)
         : channel.audio_source?.type === "url"
-        ? channel.audio_source.value
+        ? channel.audio_source.cache
+          ? cachedMediaUrlForRemote(channel.audio_source.value)
+          : channel.audio_source.value
         : undefined,
     audioVolume: channel.audio_volume,
     audioOffsetMinSec: channel.audio_offset_min_sec,
@@ -180,7 +251,7 @@ export function buildIndexFromConfig(loaded: LoadedConfig): GuideIndex {
     description: channel.description,
     accent: normalizeAccent(channel.accent),
     previewUrl: undefined,
-    schedule: buildSchedule(channel.programs, slotCount, slotMinutes),
+    schedule: buildSchedule(channel.programs, slotCount, slotMinutes, channel.info),
   }));
 
   return {

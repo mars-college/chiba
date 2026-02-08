@@ -5,14 +5,29 @@ import toml from "@iarna/toml";
 export type ChannelProgramSource = {
   type: "path" | "url";
   value: string;
+  cache?: boolean;
 };
 
 export type RemoteRegistration = "mic" | "app" | "keyboard_mouse";
+
+export type ChannelInfoCard = {
+  // Defaults for the player info card (HUD) when a program starts.
+  artist?: string;
+  title?: string;
+  description?: string;
+  mode?: "always" | "start" | "never";
+  show_sec?: number;
+};
 
 export type ChannelProgram = {
   title: string;
   subtitle?: string;
   tag?: string;
+  artist?: string;
+  info_title?: string;
+  description?: string;
+  info_mode?: "always" | "start" | "never";
+  show_sec?: number;
   duration_slots?: number;
   remote_controls?: RemoteRegistration[];
   source?: ChannelProgramSource;
@@ -25,6 +40,7 @@ export type ChannelManifest = {
   call_sign: string;
   accent?: string;
   description?: string;
+  info?: ChannelInfoCard;
   audio_source?: ChannelProgramSource;
   audio_volume?: number;
   audio_offset_min_sec?: number;
@@ -113,10 +129,23 @@ function resolvePath(baseDir: string, target: string): string {
 function normalizePrograms(programs: ChannelProgram[] | undefined): ChannelProgram[] {
   return ensureArray(programs ?? []).map((program) => ({
     ...program,
+    artist: isString((program as any).artist) ? (program as any).artist : undefined,
+    info_title: isString((program as any).info_title) ? (program as any).info_title : undefined,
+    description: isString((program as any).description) ? (program as any).description : undefined,
+    info_mode:
+      (program as any).info_mode === "always" ||
+      (program as any).info_mode === "start" ||
+      (program as any).info_mode === "never"
+        ? ((program as any).info_mode as any)
+        : undefined,
     duration_slots:
       typeof program.duration_slots === "number" && program.duration_slots > 0
         ? program.duration_slots
         : 1,
+    show_sec:
+      typeof program.show_sec === "number" && program.show_sec >= 0
+        ? program.show_sec
+        : undefined,
     remote_controls: normalizeRemoteControls(program.remote_controls),
   }));
 }
@@ -210,6 +239,34 @@ function normalizeEmbed(value: unknown): ChannelEmbedConfig | undefined {
   return embed;
 }
 
+function normalizeInfo(value: unknown): ChannelInfoCard | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  const info: ChannelInfoCard = {
+    artist: isString(raw.artist) ? (raw.artist as string) : undefined,
+    title: isString(raw.title) ? (raw.title as string) : undefined,
+    description: isString(raw.description) ? (raw.description as string) : undefined,
+    mode:
+      raw.mode === "always" || raw.mode === "start" || raw.mode === "never"
+        ? (raw.mode as any)
+        : undefined,
+    show_sec: normalizeNumber(raw.show_sec),
+  };
+  if (
+    !info.artist &&
+    !info.title &&
+    !info.description &&
+    info.mode === undefined &&
+    info.show_sec === undefined
+  ) {
+    return undefined;
+  }
+  if (typeof info.show_sec === "number" && info.show_sec < 0) {
+    info.show_sec = 0;
+  }
+  return info;
+}
+
 async function loadChannelManifest(filePath: string): Promise<ChannelManifest> {
   const raw = await fs.readFile(filePath, "utf-8");
   const parsed = toml.parse(raw) as Partial<ChannelManifest> & {
@@ -227,6 +284,7 @@ async function loadChannelManifest(filePath: string): Promise<ChannelManifest> {
     call_sign: parsed.call_sign ?? "",
     accent: parsed.accent,
     description: parsed.description,
+    info: normalizeInfo((parsed as any).info),
     audio_source: parsed.audio_source,
     audio_volume: normalizeNumber(parsed.audio_volume),
     audio_offset_min_sec: normalizeNumber(parsed.audio_offset_min_sec),

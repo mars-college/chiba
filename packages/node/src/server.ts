@@ -306,16 +306,33 @@ function setDisplayRotation(rotation: DisplayRotation): { success: boolean; erro
  */
 function getIpAddress(): string {
   const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    const iface = interfaces[name];
-    if (!iface) continue;
-
-    for (const addr of iface) {
-      if (addr.family === 'IPv4' && !addr.internal) {
-        return addr.address;
+  const pickFrom = (names: string[]): string | null => {
+    for (const name of names) {
+      const iface = interfaces[name];
+      if (!iface) continue;
+      for (const addr of iface) {
+        if (addr.family === 'IPv4' && !addr.internal) return addr.address;
       }
     }
+    return null;
+  };
+
+  // Prefer LAN-facing interfaces so the dashboard doesn't end up showing overlay
+  // addresses (e.g., tailscale0) that aren't reachable from the local network.
+  const preferred = pickFrom(['wlan0', 'eth0', 'wlan1', 'eth1']);
+  if (preferred) return preferred;
+
+  // Exclude common virtual/overlay interfaces.
+  const excluded = new Set(['lo', 'docker0', 'tailscale0', 'wg0', 'tun0']);
+  for (const name of Object.keys(interfaces)) {
+    if (excluded.has(name)) continue;
+    const iface = interfaces[name];
+    if (!iface) continue;
+    for (const addr of iface) {
+      if (addr.family === 'IPv4' && !addr.internal) return addr.address;
+    }
   }
+
   return '127.0.0.1';
 }
 

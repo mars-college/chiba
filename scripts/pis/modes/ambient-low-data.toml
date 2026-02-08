@@ -1,0 +1,24 @@
+# Ambient low-data mode (template).
+#
+# This is a starting point for a "quiet" gallery mode where you might:
+# - pin a single lightweight channel
+# - hide QR
+# - reduce animation via theme params (if you add them)
+#
+# Apply with:
+#   pnpm -C cable/apps/server ops:apply-mode -- \
+#     --inventory scripts/pis/registry.toml \
+#     --mode scripts/pis/modes/ambient-low-data.toml \
+#     --all
+[defaults]
+[defaults.cable]
+mode = "gallery"
+theme = "gallery"
+nosplash = true
+lock = true
+qr = false
+
+# Fill in per-node channels as desired.
+[pis.upper-west-1.cable]
+orientation = "portrait"
+channel = ""

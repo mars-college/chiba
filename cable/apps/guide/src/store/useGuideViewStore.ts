@@ -13,6 +13,8 @@ import type {
 type GuideViewData = {
   gridStyle: CSSProperties;
   now: Date;
+  galleryMode: boolean;
+  channelLocked: boolean;
   selectedChannel?: GuideChannel;
   selectedProgram?: ProgramSlot | null;
   playerOpen: boolean;
@@ -41,6 +43,7 @@ type GuideViewData = {
   playerKind: MediaKind | null;
   playerMeta: PlayerMeta | null;
   showPlayerHud: boolean;
+  loopVideo: boolean;
   ambientAudio: {
     url: string;
     volume?: number;
@@ -63,6 +66,8 @@ type GuideViewHandlers = {
   onOpenProgram: (program: ProgramSlot, channel: GuideChannel) => void;
   onToggleDebug: () => void;
   setPlayerReady: (ready: boolean) => void;
+  onPlayerEnded: () => void;
+  onPlayerError: (kind: MediaKind, url: string) => void;
 };
 
 type GuideViewStore = GuideViewData &
@@ -80,6 +85,8 @@ const nullRef = { current: null } as RefObject<HTMLDivElement | null>;
 export const useGuideViewStore = create<GuideViewStore>((set) => ({
   gridStyle: {},
   now: new Date(),
+  galleryMode: false,
+  channelLocked: false,
   selectedChannel: undefined,
   selectedProgram: null,
   playerOpen: false,
@@ -115,6 +122,7 @@ export const useGuideViewStore = create<GuideViewStore>((set) => ({
   playerKind: null,
   playerMeta: null,
   showPlayerHud: false,
+  loopVideo: true,
   ambientAudio: null,
   masterVolume: 1,
   masterMuted: false,
@@ -129,6 +137,8 @@ export const useGuideViewStore = create<GuideViewStore>((set) => ({
   onOpenProgram: noopProgram,
   onToggleDebug: noop,
   setPlayerReady: noopBool,
+  onPlayerEnded: noop,
+  onPlayerError: (_kind: MediaKind, _url: string) => {},
   setGuideViewState: (partial) => set(partial),
   setGuideViewHandlers: (partial) => set(partial),
 }));
