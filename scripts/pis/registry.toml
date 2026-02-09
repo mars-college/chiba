@@ -20,6 +20,7 @@ mount = "/Volumes/share"
 host = "mars32.local"
 ip = "100.128.0.120"
 node_name = "upper-east-1"
+orientation = "portrait"
 
 [pis.upper-east-2]
 host = "mars31.local"
@@ -35,12 +36,14 @@ node_name = "upper-east-3"
 host = "mars07.local"
 ip = "100.128.0.112"
 node_name = "upper-east-4"
+orientation = "portrait"
 
 # ---- Upper West ----
 [pis.upper-west-1]
 host = "mars15.local"
 ip = "100.128.0.114"
 node_name = "upper-west-1"
+orientation = "portrait"
 
 [pis.upper-west-2]
 host = "mars19.local"
@@ -57,20 +60,12 @@ host = "mars03.local"
 ip = "100.128.0.111"
 node_name = "upper-west-4"
 
-[pis.upper-west-4.cable]
-mode = "gallery"
-theme = "gallery"
-channel = "earl"
-playlist = true
-nosplash = true
-lock = true
-qr = false
-
 # ---- Lower East ----
 [pis.lower-east-1]
 host = "mars26.local"
 ip = "100.128.0.121"
 node_name = "lower-east-1"
+orientation = "portrait"
 
 [pis.lower-east-2]
 # External / not on mars.local network in the current source-of-truth list.
@@ -86,6 +81,7 @@ node_name = "lower-east-3"
 host = "mars16.local"
 ip = "100.128.0.122"
 node_name = "lower-east-4"
+orientation = "portrait"
 
 # ---- Lower West ----
 [pis.lower-west-1]
@@ -107,3 +103,4 @@ node_name = "lower-west-3"
 host = "mars27.local"
 ip = "100.128.0.126"
 node_name = "lower-west-4"
+orientation = "portrait"

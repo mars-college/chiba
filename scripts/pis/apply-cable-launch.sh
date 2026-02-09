@@ -17,10 +17,8 @@ load_env() {
 }
 load_env
 
-REGISTRY_PATH="$SCRIPT_DIR/registry.toml"
-if [ ! -f "$REGISTRY_PATH" ] && [ -f "$SCRIPT_DIR/registry.local.toml" ]; then
-  REGISTRY_PATH="$SCRIPT_DIR/registry.local.toml"
-fi
+INVENTORY_PATH="$SCRIPT_DIR/registry.toml"
+MODE_PATH=""
 PI_NAME=""
 APPLY_ALL=0
 DRY_RUN=0
@@ -28,8 +26,13 @@ DRY_RUN=0
 usage() {
   cat <<'EOF'
 Usage:
+  # Legacy: single combined registry (contains host + cable settings)
   ./scripts/pis/apply-cable-launch.sh --registry path --pi <pi-name> [--dry-run]
   ./scripts/pis/apply-cable-launch.sh --registry path --all [--dry-run]
+
+  # Composable: base inventory + mode/profile overrides
+  ./scripts/pis/apply-cable-launch.sh --inventory ./scripts/pis/registry.toml --mode ./scripts/pis/mode.toml --pi <pi-name> [--dry-run]
+  ./scripts/pis/apply-cable-launch.sh --inventory ./scripts/pis/registry.toml --mode ./scripts/pis/mode.toml --all [--dry-run]
 
 This reads a Pi registry TOML and sets the kiosk URL to launch Chiba Cable with
 gallery/kiosk parameters (channel pinning, QR hide/lock, etc).
@@ -39,12 +42,31 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --inventory)
+      INVENTORY_PATH="$2"
+      shift 2
+      ;;
+    --inventory=*)
+      INVENTORY_PATH="${1#*=}"
+      shift
+      ;;
+    --mode)
+      MODE_PATH="$2"
+      shift 2
+      ;;
+    --mode=*)
+      MODE_PATH="${1#*=}"
+      shift
+      ;;
     --registry)
-      REGISTRY_PATH="$2"
+      # Back-compat: a single file with both inventory + cable fields.
+      INVENTORY_PATH="$2"
+      MODE_PATH=""
       shift 2
       ;;
     --registry=*)
-      REGISTRY_PATH="${1#*=}"
+      INVENTORY_PATH="${1#*=}"
+      MODE_PATH=""
       shift
       ;;
     --pi)
@@ -73,19 +95,23 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ ! -f "$REGISTRY_PATH" ]; then
-  echo "Missing registry: $REGISTRY_PATH"
+if [ ! -f "$INVENTORY_PATH" ]; then
+  echo "Missing inventory: $INVENTORY_PATH"
+  exit 1
+fi
+if [ -n "$MODE_PATH" ] && [ ! -f "$MODE_PATH" ]; then
+  echo "Missing mode: $MODE_PATH"
   exit 1
 fi
 
 PYTHON_BIN="$(command -v python3 || command -v python || true)"
 if [ -z "$PYTHON_BIN" ]; then
-  echo "python3 is required to parse $REGISTRY_PATH"
+  echo "python3 is required to parse registry TOML"
   exit 1
 fi
 
 list_pis() {
-  "$PYTHON_BIN" - "$REGISTRY_PATH" <<'PY'
+  "$PYTHON_BIN" - "$INVENTORY_PATH" <<'PY'
 import sys
 try:
     import tomllib as toml_parser
@@ -104,7 +130,7 @@ PY
 eval_pi() {
   local name="$1"
   # shellcheck disable=SC2046
-  "$PYTHON_BIN" - "$REGISTRY_PATH" "$name" <<'PY'
+  "$PYTHON_BIN" - "$INVENTORY_PATH" "$MODE_PATH" "$name" <<'PY'
 import sys
 import shlex
 import os
@@ -113,10 +139,17 @@ try:
 except Exception:
     import tomli as toml_parser  # type: ignore
 
-path = sys.argv[1]
-name = sys.argv[2]
-with open(path, "rb") as f:
-    data = toml_parser.load(f)
+inventory_path = sys.argv[1]
+mode_path = sys.argv[2] or ""
+name = sys.argv[3]
+
+with open(inventory_path, "rb") as f:
+    inventory = toml_parser.load(f)
+
+mode = {}
+if mode_path.strip():
+    with open(mode_path, "rb") as f:
+        mode = toml_parser.load(f)
 
 def q(val):
     return shlex.quote("" if val is None else str(val))
@@ -143,27 +176,61 @@ def env_first(*keys: str) -> str:
             return v
     return ""
 
-defaults = data.get("defaults", {}) or {}
-pis = data.get("pis", {}) or {}
-node = pis.get(name) or {}
+inv_defaults = inventory.get("defaults", {}) or {}
+inv_pis = inventory.get("pis", {}) or {}
+node = inv_pis.get(name) or {}
 pi_suffix = suffix(name)
 
 def get_node(key, default=""):
-    return node.get(key, defaults.get(key, default))
+    return node.get(key, inv_defaults.get(key, default))
 
 def get_bool(section, key, default=False):
-    raw = (node.get(section, {}) or {}).get(key, (defaults.get(section, {}) or {}).get(key, default))
+    raw = (node.get(section, {}) or {}).get(key, (inv_defaults.get(section, {}) or {}).get(key, default))
     return bool(raw) if isinstance(raw, bool) else default
 
 def get_str(section, key, default=""):
-    raw = (node.get(section, {}) or {}).get(key, (defaults.get(section, {}) or {}).get(key, default))
+    raw = (node.get(section, {}) or {}).get(key, (inv_defaults.get(section, {}) or {}).get(key, default))
     return raw if isinstance(raw, str) else default
 
 def get_num(section, key):
-    raw = (node.get(section, {}) or {}).get(key, (defaults.get(section, {}) or {}).get(key))
+    raw = (node.get(section, {}) or {}).get(key, (inv_defaults.get(section, {}) or {}).get(key))
     if isinstance(raw, int) or isinstance(raw, float):
         return raw
     return None
+
+def ensure_dict(v):
+    return v if isinstance(v, dict) else {}
+
+# Cable settings:
+# - If MODE_PATH is provided, use mode/profile defaults + per-pi overrides.
+# - Otherwise (legacy), read cable settings directly from the inventory/registry file.
+if mode_path.strip():
+    d = ensure_dict(ensure_dict(mode.get("defaults")).get("cable"))
+    p = ensure_dict(ensure_dict(ensure_dict(mode.get("pis")).get(name)).get("cable"))
+    cable_mode = dict(d)
+    cable_mode.update(p)
+else:
+    d = ensure_dict(inv_defaults.get("cable"))
+    p = ensure_dict(node.get("cable"))
+    cable_mode = dict(d)
+    cable_mode.update(p)
+
+def cable_get(key: str, default=None):
+    v = cable_mode.get(key, default)
+    return v
+
+orientation = (
+    (node.get("orientation") if isinstance(node.get("orientation"), str) else "")
+    or (node.get("cable", {}).get("orientation") if isinstance((node.get("cable", {}) or {}).get("orientation"), str) else "")
+    or (cable_mode.get("orientation") if isinstance(cable_mode.get("orientation"), str) else "")
+)
+orientation = (orientation or "").strip().lower()
+
+rotation = ""
+if orientation == "portrait":
+    rotation = "90"
+elif orientation == "landscape" or orientation == "":
+    rotation = "0"
 
 out = {
     "PI_NAME": name,
@@ -172,24 +239,26 @@ out = {
     "PI_USER": get_node("user", "pi"),
     "PI_PASSWORD": (
         (node.get("password") or "").strip()
-        or (defaults.get("password") or "").strip()
+        or (inv_defaults.get("password") or "").strip()
         or env_first(f"CHIBA_PI_PASSWORD_{pi_suffix}", "CHIBA_PI_PASSWORD", "PI_PASSWORD")
     ),
     "NODE_NAME": get_node("node_name", name),
-    "GUIDE_PORT": str(get_node("guide_port", defaults.get("guide_port", 5173))),
-    "INSTALL_DIR": get_node("install_dir", defaults.get("install_dir", "/home/pi/chiba")),
-    "CABLE_MODE": get_str("cable", "mode", ""),
-    "CABLE_THEME": get_str("cable", "theme", ""),
-    "CABLE_CHANNEL": get_str("cable", "channel", ""),
-    "CABLE_QR": "1" if get_bool("cable", "qr", True) else "0",
-    "CABLE_LOCK": "1" if get_bool("cable", "lock", True) else "0",
-    "CABLE_PLAYLIST": "1" if get_bool("cable", "playlist", False) else "0",
-    "CABLE_NOSPLASH": "1" if get_bool("cable", "nosplash", False) else "0",
+    "GUIDE_PORT": str(get_node("guide_port", inv_defaults.get("guide_port", 5173))),
+    "INSTALL_DIR": get_node("install_dir", inv_defaults.get("install_dir", "/home/pi/chiba")),
+    "CABLE_MODE": (str(cable_get("mode", "")) if cable_get("mode", "") is not None else "").strip(),
+    "CABLE_THEME": (str(cable_get("theme", "")) if cable_get("theme", "") is not None else "").strip(),
+    "CABLE_CHANNEL": (str(cable_get("channel", "")) if cable_get("channel", "") is not None else "").strip(),
+    "CABLE_QR": "0" if cable_get("qr", True) is False else "1",
+    "CABLE_LOCK": "1" if cable_get("lock", False) is True else "0",
+    "CABLE_PLAYLIST": "1" if cable_get("playlist", False) is True else "0",
+    "CABLE_NOSPLASH": "1" if cable_get("nosplash", False) is True else "0",
+    "CABLE_ORIENTATION": orientation,
+    "DISPLAY_ROTATE": rotation,
 }
 
-scale = get_num("cable", "scale")
-text_scale = get_num("cable", "text_scale")
-hours = get_num("cable", "hours")
+scale = cable_get("scale")
+text_scale = cable_get("text_scale")
+hours = cable_get("hours")
 if scale is not None:
     out["CABLE_SCALE"] = str(scale)
 if text_scale is not None:
@@ -271,6 +340,7 @@ apply_one() {
     "${CABLE_CHANNEL:-}" \
     "${CABLE_QR:-1}" \
     "${CABLE_LOCK:-0}" \
+    "${CABLE_PLAYLIST:-0}" \
     "${CABLE_NOSPLASH:-0}" \
     "${CABLE_SCALE:-}" \
     "${CABLE_TEXT_SCALE:-}" \
@@ -290,10 +360,11 @@ apply_one() {
   fi
 
   local SSH_TARGET="${PI_USER}@${PI_HOST}"
-  "${SSH_BASE[@]}" "$SSH_TARGET" bash -s -- "$kiosk_url" "$INSTALL_DIR" <<'EOF'
+  "${SSH_BASE[@]}" "$SSH_TARGET" bash -s -- "$kiosk_url" "$INSTALL_DIR" "${DISPLAY_ROTATE:-}" <<'EOF'
 set -euo pipefail
 URL="$1"
 INSTALL_DIR="$2"
+ROT="$3"
 
 API_SET=0
 if curl -sS -X POST http://localhost:8080/kiosk-url \
@@ -308,6 +379,20 @@ else
   # Keep file in sync too, so run-kiosk can recover if node API is down.
   echo "$URL" > "$INSTALL_DIR/.kiosk-url" || true
 fi
+
+# Best-effort: rotate the display for portrait screens (persists on the Pi).
+# This uses the local node API; if it's not running or auth blocks it, we ignore.
+case "${ROT:-}" in
+  0|90|180|270)
+    curl -sS -X POST http://localhost:8080/rotate \
+      -H "Content-Type: application/json" \
+      -d "{\"rotation\":${ROT}}" >/dev/null 2>&1 || true
+    ;;
+  "" )
+    ;;
+  * )
+    ;;
+esac
 
 touch /tmp/chiba-kiosk-restart
 EOF

@@ -85,7 +85,6 @@ function getDefaultRegistryPath(repoRoot: string): string | null {
   const candidates = [
     path.resolve(repoRoot, 'scripts/pis/registry.toml'),
     path.resolve(repoRoot, 'scripts/pis/registry.local.toml'),
-    path.resolve(repoRoot, 'scripts/pis/midterms-gallery-registry.local.toml'),
   ];
   for (const p of candidates) {
     try {
@@ -113,9 +112,15 @@ export async function loadFleetFromRegistry(
     const host = normalizeHost(String(node?.host ?? ''));
     const ip = normalizeHost(String(node?.ip ?? ''));
     const nodeName = String(node?.node_name ?? node?.nodeName ?? id);
+    const orientation =
+      typeof node?.orientation === 'string'
+        ? node.orientation
+        : typeof node?.cable?.orientation === 'string'
+          ? node.cable.orientation
+          : undefined;
     const cable = node?.cable
       ? {
-          orientation: typeof node.cable.orientation === 'string' ? node.cable.orientation : undefined,
+          orientation,
           channel:
             typeof node.cable.channel === 'string'
               ? node.cable.channel
@@ -123,7 +128,9 @@ export async function loadFleetFromRegistry(
                 ? String(node.cable.channel)
                 : undefined,
         }
-      : undefined;
+      : orientation
+        ? { orientation }
+        : undefined;
     pis.push({ id, host, ip: ip || undefined, nodeName, cable });
   }
   pis.sort((a, b) => a.id.localeCompare(b.id));

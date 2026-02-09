@@ -48,16 +48,29 @@ Minimal, fast updates (no full bootstrap, no dependency installs):
 
 ## Gallery Modes
 
-Apply a "gallery mode" (kiosk URL parameters, channel pinning, QR hide/lock) from a file.
+Apply a "mode/profile" (kiosk URL parameters, channel pinning, QR hide/lock) from a file.
 This uses each Pi's Node API on port 8080 (`POST /kiosk-url`), so it requires per-node API keys in env:
 `CHIBA_API_KEY_<PI_ID_SUFFIX>` (see `pis-secrets.env.example`).
 
 ```sh
 pnpm -C cable/apps/server ops:apply-mode -- \
   --inventory scripts/pis/registry.toml \
-  --mode scripts/pis/modes/midterms-showcase.toml \
+  --mode cable/config/profiles/default.toml \
   --all
 ```
+
+If you want to apply a local (ssh-based) launch profile that merges inventory + mode, use:
+
+```sh
+./scripts/pis/apply-cable-launch.sh \
+  --inventory ./scripts/pis/registry.toml \
+  --mode ./cable/config/profiles/midterms-gallery.toml \
+  --pi upper-west-4
+```
+
+Portrait screens:
+- Mark `orientation = "portrait"` in `registry.toml` for that Pi.
+- `apply-cable-launch.sh` will best-effort call the node rotate endpoint so Chromium runs in portrait.
 
 ## Stash Prefetch (NAS -> Pi Cache)
 
@@ -69,7 +82,8 @@ then run:
 
 ```sh
 ./scripts/pis/prefetch-stash.sh \
-  --registry ./scripts/pis/midterms-gallery-registry.local.toml \
+  --inventory ./scripts/pis/registry.toml \
+  --mode ./cable/config/profiles/midterms-gallery.toml \
   --pi upper-west-4 --wait
 ```
 

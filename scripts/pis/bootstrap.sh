@@ -172,6 +172,11 @@ def get_node(key, default=""):
 def get_nested_node(section, key, default=""):
     return node.get(section, {}).get(key, get_nested_default(section, key, default))
 
+orientation = (node.get("orientation") or "").strip().lower() if isinstance(node.get("orientation"), str) else ""
+rotation = "0"
+if orientation == "portrait":
+    rotation = "90"
+
 out = {
     "PI_NAME": name,
     # Prefer static IPs to avoid flaky mDNS + client-to-client Wi-Fi isolation.
@@ -184,6 +189,8 @@ out = {
     ),
     "CONTROLLER_URL": get_node("controller_url"),
     "NODE_NAME": get_node("node_name", name),
+    "ORIENTATION": orientation,
+    "DISPLAY_ROTATE": rotation,
     "API_KEY": (
         (node.get("api_key") or "").strip()
         or (get_default("api_key", "") or "").strip()
@@ -417,6 +424,17 @@ curl -sS -X POST http://localhost:8080/kiosk-url \
 if [ ! -f "$REMOTE_DIR/.kiosk-url" ]; then
   echo "$KIOSK_URL" > "$REMOTE_DIR/.kiosk-url"
 fi
+
+# Best-effort: rotate display for portrait screens (persists on the Pi).
+case "${DISPLAY_ROTATE:-}" in
+  0|90|180|270)
+    curl -sS -X POST http://localhost:8080/rotate \
+      -H "Content-Type: application/json" \
+      -d "{\"rotation\":${DISPLAY_ROTATE}}" >/dev/null 2>&1 || true
+    ;;
+  * )
+    ;;
+esac
 
 if [ "$REBOOT_AFTER" -eq 1 ]; then
   echo "Rebooting $NODE_NAME..."

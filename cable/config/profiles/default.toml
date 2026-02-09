@@ -1,0 +1,10 @@
+# Default launch profile for Chiba Cable.
+#
+# This is intentionally minimal: it should resemble "open the web app normally",
+# with splash + QR enabled and no gallery lock-in.
+
+[defaults.cable]
+nosplash = false
+lock = false
+qr = true
+

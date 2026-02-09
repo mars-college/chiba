@@ -5,8 +5,10 @@ import toml from '@iarna/toml';
 export type InventoryPi = {
   id: string;
   host: string;
+  ip?: string;
   nodeName: string;
   guidePort: number;
+  orientation?: string; // "portrait" | "landscape" (best-effort; treated as hardware property)
 };
 
 export type CableModeDefaults = {
@@ -121,7 +123,17 @@ export async function loadInventoryFromRegistry(
   const pis: InventoryPi[] = [];
   for (const [id, node] of Object.entries<any>(pisObj)) {
     const host = normalizeHost(node?.host ?? '');
+    const ip = normalizeHost(node?.ip ?? '');
     const nodeName = String(node?.node_name ?? node?.nodeName ?? id);
+    const orientationRaw =
+      typeof node?.orientation === 'string'
+        ? node.orientation
+        : typeof node?.cable?.orientation === 'string'
+          ? node.cable.orientation
+          : '';
+    const orientation = String(orientationRaw ?? '')
+      .trim()
+      .toLowerCase();
     const guidePort =
       typeof node?.guide_port === 'number'
         ? node.guide_port
@@ -131,8 +143,10 @@ export async function loadInventoryFromRegistry(
     pis.push({
       id,
       host,
+      ip: ip || undefined,
       nodeName,
       guidePort: Number.isFinite(guidePort) ? guidePort : 5173,
+      orientation: orientation || undefined,
     });
   }
   pis.sort((a, b) => a.id.localeCompare(b.id));
@@ -207,6 +221,34 @@ async function postKioskUrl(opts: {
   }
 }
 
+async function postRotate(opts: {
+  host: string;
+  apiKey: string;
+  rotation: 0 | 90 | 180 | 270;
+  timeoutMs: number;
+}): Promise<{ ok: boolean; status: number | null; ms: number | null; error?: string }> {
+  const started = Date.now();
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), opts.timeoutMs);
+  try {
+    const res = await fetch(`http://${opts.host}:8080/rotate`, {
+      method: 'POST',
+      signal: ac.signal,
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${opts.apiKey}`,
+      },
+      body: JSON.stringify({ rotation: opts.rotation }),
+    });
+    const ok = res.ok;
+    return { ok, status: res.status, ms: Date.now() - started, error: ok ? undefined : `http_${res.status}` };
+  } catch (err) {
+    return { ok: false, status: null, ms: null, error: (err as Error).message };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function applyModeToFleet(opts: {
   repoRoot: string;
   inventoryPath: string;
@@ -236,8 +278,9 @@ export async function applyModeToFleet(opts: {
           return { pi, url, ok: true, status: null, ms: null } satisfies ApplyModeResult;
         }
 
-        if (!pi.host) {
-          return { pi, url, ok: false, status: null, ms: null, error: 'missing_host' } satisfies ApplyModeResult;
+        const addr = pi.ip || pi.host;
+        if (!addr) {
+          return { pi, url, ok: false, status: null, ms: null, error: 'missing_host_or_ip' } satisfies ApplyModeResult;
         }
         const apiKey = getApiKeyForPi(pi.id);
         if (!apiKey) {
@@ -251,7 +294,21 @@ export async function applyModeToFleet(opts: {
           } satisfies ApplyModeResult;
         }
 
-        const res = await postKioskUrl({ host: pi.host, apiKey, url, timeoutMs });
+        const res = await postKioskUrl({ host: addr, apiKey, url, timeoutMs });
+
+        // Best-effort: rotate portrait screens as part of "apply mode", so portrait hardware
+        // doesn't require per-Pi manual intervention.
+        //
+        // We treat missing orientation as landscape-by-default (rotation 0).
+        if (res.ok) {
+          const o = String(pi.orientation ?? '')
+            .trim()
+            .toLowerCase();
+          const rotation: 0 | 90 | 180 | 270 = o === 'portrait' ? 90 : 0;
+          // Ignore failures; kiosk URL is the primary contract.
+          await postRotate({ host: addr, apiKey, rotation, timeoutMs }).catch(() => {});
+        }
+
         return {
           pi,
           url,
@@ -264,4 +321,3 @@ export async function applyModeToFleet(opts: {
     )
   );
 }
-

@@ -3,8 +3,14 @@ set -euo pipefail
 
 # Prefetch NAS-backed (stash-cached) media onto a Pi before launching gallery playlist mode.
 #
-# Typical usage:
-#   ./scripts/pis/prefetch-stash.sh --registry ./scripts/pis/midterms-gallery-registry.local.toml --pi upper-west-4 --wait
+# Typical usage (composable):
+#   ./scripts/pis/prefetch-stash.sh \
+#     --inventory ./scripts/pis/registry.toml \
+#     --mode ./cable/config/profiles/midterms-gallery.toml \
+#     --pi upper-west-4 --wait
+#
+# Legacy usage (single combined registry):
+#   ./scripts/pis/prefetch-stash.sh --registry ./scripts/pis/registry.toml --pi upper-west-4 --wait
 #
 # Notes:
 # - Prefetch uses the Cable server endpoint on the Pi: POST /api/stash/prefetch
@@ -26,10 +32,8 @@ load_env() {
 }
 load_env
 
-REGISTRY_PATH="$SCRIPT_DIR/registry.toml"
-if [ ! -f "$REGISTRY_PATH" ] && [ -f "$SCRIPT_DIR/registry.local.toml" ]; then
-  REGISTRY_PATH="$SCRIPT_DIR/registry.local.toml"
-fi
+INVENTORY_PATH="$SCRIPT_DIR/registry.toml"
+MODE_PATH=""
 
 PI_NAME=""
 APPLY_ALL=0
@@ -41,13 +45,18 @@ DRY_RUN=0
 usage() {
   cat <<'EOF'
 Usage:
+  # Legacy: single combined registry (contains host + cable settings)
   ./scripts/pis/prefetch-stash.sh --registry path --pi <pi-name> [--wait] [--timeout-sec N] [--dry-run]
   ./scripts/pis/prefetch-stash.sh --registry path --all [--jobs N] [--wait] [--timeout-sec N] [--dry-run]
 
+  # Composable: base inventory + mode/profile overrides
+  ./scripts/pis/prefetch-stash.sh --inventory ./scripts/pis/registry.toml --mode ./scripts/pis/mode.toml --pi <pi-name> [--wait] [--timeout-sec N] [--dry-run]
+  ./scripts/pis/prefetch-stash.sh --inventory ./scripts/pis/registry.toml --mode ./scripts/pis/mode.toml --all [--jobs N] [--wait] [--timeout-sec N] [--dry-run]
+
 Behavior:
-  - Determines which channels to prefetch from the registry:
-    1) [pis.<name>.cable] prefetch_channels = ["earl", ...] (preferred)
-    2) otherwise falls back to [pis.<name>.cable] channel = "earl"
+  - Determines which channels to prefetch from the cable settings:
+    1) prefetch_channels = ["earl", ...] (preferred)
+    2) otherwise falls back to channel = "earl"
   - SSHes into the Pi and calls:
       POST http://localhost:<server_port>/api/stash/prefetch
   - With --wait, polls /api/stash/status until all items are cached (or timeout).
@@ -57,12 +66,30 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --inventory)
+      INVENTORY_PATH="$2"
+      shift 2
+      ;;
+    --inventory=*)
+      INVENTORY_PATH="${1#*=}"
+      shift
+      ;;
+    --mode)
+      MODE_PATH="$2"
+      shift 2
+      ;;
+    --mode=*)
+      MODE_PATH="${1#*=}"
+      shift
+      ;;
     --registry)
-      REGISTRY_PATH="$2"
+      INVENTORY_PATH="$2"
+      MODE_PATH=""
       shift 2
       ;;
     --registry=*)
-      REGISTRY_PATH="${1#*=}"
+      INVENTORY_PATH="${1#*=}"
+      MODE_PATH=""
       shift
       ;;
     --pi)
@@ -111,19 +138,23 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ ! -f "$REGISTRY_PATH" ]; then
-  echo "Missing registry: $REGISTRY_PATH"
+if [ ! -f "$INVENTORY_PATH" ]; then
+  echo "Missing inventory: $INVENTORY_PATH"
+  exit 1
+fi
+if [ -n "$MODE_PATH" ] && [ ! -f "$MODE_PATH" ]; then
+  echo "Missing mode: $MODE_PATH"
   exit 1
 fi
 
 PYTHON_BIN="$(command -v python3 || command -v python || true)"
 if [ -z "$PYTHON_BIN" ]; then
-  echo "python3 is required to parse $REGISTRY_PATH"
+  echo "python3 is required to parse registry TOML"
   exit 1
 fi
 
 list_pis() {
-  "$PYTHON_BIN" - "$REGISTRY_PATH" <<'PY'
+  "$PYTHON_BIN" - "$INVENTORY_PATH" <<'PY'
 import sys
 try:
     import tomllib as toml_parser
@@ -141,8 +172,7 @@ PY
 
 eval_pi() {
   local name="$1"
-  # shellcheck disable=SC2046
-  "$PYTHON_BIN" - "$REGISTRY_PATH" "$name" <<'PY'
+  "$PYTHON_BIN" - "$INVENTORY_PATH" "$MODE_PATH" "$name" <<'PY'
 import sys
 import shlex
 import os
@@ -151,10 +181,17 @@ try:
 except Exception:
     import tomli as toml_parser  # type: ignore
 
-path = sys.argv[1]
-name = sys.argv[2]
-with open(path, "rb") as f:
-    data = toml_parser.load(f)
+inventory_path = sys.argv[1]
+mode_path = sys.argv[2] or ""
+name = sys.argv[3]
+
+with open(inventory_path, "rb") as f:
+    inventory = toml_parser.load(f)
+
+mode = {}
+if mode_path.strip():
+    with open(mode_path, "rb") as f:
+        mode = toml_parser.load(f)
 
 def q(val):
     return shlex.quote("" if val is None else str(val))
@@ -171,8 +208,7 @@ def suffix(name: str) -> str:
             if not last_us:
                 out.append("_")
                 last_us = True
-    s = "".join(out).strip("_")
-    return s
+    return "".join(out).strip("_")
 
 def env_first(*keys: str) -> str:
     for k in keys:
@@ -181,20 +217,30 @@ def env_first(*keys: str) -> str:
             return v
     return ""
 
-defaults = data.get("defaults", {}) or {}
-pis = data.get("pis", {}) or {}
-node = pis.get(name) or {}
+inv_defaults = inventory.get("defaults", {}) or {}
+inv_pis = inventory.get("pis", {}) or {}
+node = inv_pis.get(name) or {}
 pi_suffix = suffix(name)
 
 def get_node(key, default=""):
-    return node.get(key, defaults.get(key, default))
+    return node.get(key, inv_defaults.get(key, default))
 
-def get_str(section, key, default=""):
-    raw = (node.get(section, {}) or {}).get(key, (defaults.get(section, {}) or {}).get(key, default))
-    return raw if isinstance(raw, str) else default
+def ensure_dict(v):
+    return v if isinstance(v, dict) else {}
 
-def get_list(section, key):
-    raw = (node.get(section, {}) or {}).get(key, (defaults.get(section, {}) or {}).get(key))
+if mode_path.strip():
+    d = ensure_dict(ensure_dict(mode.get("defaults")).get("cable"))
+    p = ensure_dict(ensure_dict(ensure_dict(mode.get("pis")).get(name)).get("cable"))
+    cable = dict(d)
+    cable.update(p)
+else:
+    d = ensure_dict(inv_defaults.get("cable"))
+    p = ensure_dict(node.get("cable"))
+    cable = dict(d)
+    cable.update(p)
+
+def get_list_from_cable(key):
+    raw = cable.get(key)
     if isinstance(raw, list):
         out = []
         for item in raw:
@@ -203,9 +249,13 @@ def get_list(section, key):
         return out
     return []
 
-prefetch_channels = get_list("cable", "prefetch_channels")
+def get_str_from_cable(key, default=""):
+    v = cable.get(key, default)
+    return v if isinstance(v, str) else default
+
+prefetch_channels = get_list_from_cable("prefetch_channels")
 if not prefetch_channels:
-    ch = get_str("cable", "channel", "").strip()
+    ch = get_str_from_cable("channel", "").strip()
     if ch:
         prefetch_channels = [ch]
 
@@ -216,10 +266,10 @@ out = {
     "PI_USER": get_node("user", "pi"),
     "PI_PASSWORD": (
         (node.get("password") or "").strip()
-        or (defaults.get("password") or "").strip()
+        or (inv_defaults.get("password") or "").strip()
         or env_first(f"CHIBA_PI_PASSWORD_{pi_suffix}", "CHIBA_PI_PASSWORD", "PI_PASSWORD")
     ),
-    "SERVER_PORT": str(get_node("server_port", defaults.get("server_port", 8787))),
+    "SERVER_PORT": str(get_node("server_port", inv_defaults.get("server_port", 8787))),
     "PREFETCH_CHANNELS": ",".join(prefetch_channels),
 }
 
@@ -315,7 +365,23 @@ EOF
 
 if [ "$APPLY_ALL" -eq 1 ]; then
   # Run in parallel locally; each worker SSHes to a Pi.
-  list_pis | xargs -I{} -P "$JOBS" bash -lc "$(printf '%q ' "$0") --registry $(printf '%q' "$REGISTRY_PATH") --pi {} $( [ "$WAIT" -eq 1 ] && echo --wait ) --timeout-sec $(printf '%q' "$TIMEOUT_SEC") $( [ "$DRY_RUN" -eq 1 ] && echo --dry-run )"
+  # Re-invoke this script per-pi so the parent shell doesn't need to export functions.
+  extra=()
+  if [ -n "$MODE_PATH" ]; then
+    extra+=(--mode "$MODE_PATH")
+  fi
+  if [ "$WAIT" -eq 1 ]; then
+    extra+=(--wait)
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    extra+=(--dry-run)
+  fi
+
+  list_pis | xargs -I{} -P "$JOBS" "$0" \
+    --inventory "$INVENTORY_PATH" \
+    "${extra[@]}" \
+    --timeout-sec "$TIMEOUT_SEC" \
+    --pi {}
 else
   if [ -z "$PI_NAME" ]; then
     usage
