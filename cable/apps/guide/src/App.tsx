@@ -999,6 +999,69 @@ function App() {
     galleryPlaylistIndex,
   ]);
 
+  const stashErrorRetryRef = useRef<Record<string, { attempts: number; lastAt: number }>>({});
+  const retryTimerRef = useRef<number | null>(null);
+
+  const handleGalleryPlaylistError = useCallback(
+    (_kind: string, url: string) => {
+      if (!galleryEnabled || !playlistEnabled) {
+        advanceGalleryPlaylist("error");
+        return;
+      }
+      if (viewMode !== "guide") {
+        advanceGalleryPlaylist("error");
+        return;
+      }
+
+      const effectiveUrl = (playerUrlRef.current ?? url ?? "").trim();
+      const isStash = effectiveUrl.startsWith("/stash/");
+      if (!isStash) {
+        advanceGalleryPlaylist("error");
+        return;
+      }
+
+      // If this is a stash-backed media item and it's not cached yet, browsers can emit
+      // rapid error events (404 while warming). Instead of skipping through the whole
+      // playlist and snapping back to the one cached item, retry a few times with a delay.
+      const nowMs = Date.now();
+      const prev = stashErrorRetryRef.current[effectiveUrl] ?? { attempts: 0, lastAt: 0 };
+      const attempts = prev.attempts + 1;
+      stashErrorRetryRef.current[effectiveUrl] = { attempts, lastAt: nowMs };
+
+      // Kick off a warm in the background.
+      const joiner = effectiveUrl.includes("?") ? "&" : "?";
+      void fetch(`${effectiveUrl}${joiner}fetch=1`, { method: "GET" }).catch(() => {});
+
+      // Retry this same URL a few times before giving up and advancing.
+      const maxAttempts = 4;
+      if (attempts <= maxAttempts) {
+        if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+        const urlKey = effectiveUrl;
+        retryTimerRef.current = window.setTimeout(() => {
+          const current = playerUrlRef.current;
+          // Only retry if we're still on the same failing URL.
+          if (current && current === urlKey) {
+            // Force a reload attempt by mutating the URL (React ignores setState to same value).
+            const joiner2 = current.includes("?") ? "&" : "?";
+            const retryUrl = `${current}${joiner2}retry=${attempts}&ts=${Date.now()}`;
+            setPlayerReady(false);
+            setPlayerUrl(retryUrl);
+          }
+        }, 1500);
+        return;
+      }
+
+      advanceGalleryPlaylist("error");
+    },
+    [
+      galleryEnabled,
+      playlistEnabled,
+      viewMode,
+      advanceGalleryPlaylist,
+      setPlayerReady,
+    ]
+  );
+
   useEffect(() => {
     // Playlist lookahead: while one item is playing, warm the next stash item
     // so we don't stall/skip on cache misses.
@@ -2930,7 +2993,7 @@ function App() {
       onToggleDebug: handleToggleDebug,
       setPlayerReady,
       onPlayerEnded: () => advanceGalleryPlaylist("ended"),
-      onPlayerError: (_kind, _url) => advanceGalleryPlaylist("error"),
+      onPlayerError: (kind, url) => handleGalleryPlaylistError(kind, url),
     });
   }, [
     setPosterImageReady,
@@ -2940,6 +3003,7 @@ function App() {
     handleToggleDebug,
     setPlayerReady,
     advanceGalleryPlaylist,
+    handleGalleryPlaylistError,
     setGuideViewHandlers,
   ]);
 

@@ -30,6 +30,7 @@ export type RemoteNodeStatus = {
 export type FleetPi = {
   id: string
   host: string
+  ip?: string
   nodeName: string
   cable?: {
     orientation?: string
@@ -65,4 +66,3 @@ export type FleetResponse = {
   }
   pis: FleetPiHealth[]
 }
-

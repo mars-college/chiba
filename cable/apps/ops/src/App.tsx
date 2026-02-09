@@ -18,7 +18,9 @@ function Pill({ kind, label }: { kind: 'ok' | 'warn' | 'bad' | 'muted'; label: s
 function rowKind(pi: FleetPi | FleetPiHealth | null): 'ok' | 'warn' | 'bad' | 'muted' {
   if (!pi) return 'muted'
   // Registry can contain external/unaddressable nodes with host="".
-  if (!('host' in pi) || !pi.host) return 'muted'
+  // When static IPs are configured, `ip` may be present even if `host` is empty.
+  const addr = (pi as any).ip || (pi as any).host
+  if (!addr) return 'muted'
   if (!('dnsOk' in pi)) return 'muted'
   if (!pi.dnsOk) return 'bad'
   const anyTcpOk = pi.tcp.ssh22.ok || pi.tcp.node8080.ok || pi.tcp.cable8787.ok
@@ -184,7 +186,7 @@ export default function App() {
           <div className="page-header-row">
             <div>
               <h1 className="page-title">Fleet Health</h1>
-              <div className="page-subtitle">Active probes: DNS, ping (best effort), TCP(22/8080/8787), HTTP(/status, /api/version)</div>
+              <div className="page-subtitle">Active probes: addr (static IP preferred), ping (best effort), TCP(22/8080/8787), HTTP(/status, /api/version)</div>
             </div>
             <div className="actions">
               <label className="toggle">
@@ -252,7 +254,7 @@ export default function App() {
                       </td>
                       <td>
                         <div className="mono">{pi.host || '-'}</div>
-                        <div className="muted mono">{health?.resolvedIp ?? ''}</div>
+                        <div className="muted mono">{pi.ip ?? health?.resolvedIp ?? ''}</div>
                       </td>
                       <td>
                         {kind === 'muted'
@@ -268,11 +270,12 @@ export default function App() {
                       <td>{health?.http?.cableVersion?.ok ? <Pill kind="ok" label="version" /> : <Pill kind="muted" label={health ? '-' : '...'} />}</td>
                       <td>
                         <div className="muted mono">node: {health?.chibaNode?.version ?? '?'}</div>
-                        <div className="muted mono">cable: {health?.cableServer?.gitSha ?? '?'}</div>
+                        <div className="muted mono">cable: {health?.cableServer?.version ?? '?'}</div>
+                        <div className="muted mono">sha: {health?.cableServer?.gitSha ?? '-'}</div>
                       </td>
                       <td className="muted">{health ? `${fmtAge(Date.now() - health.lastCheckedAt)} ago` : '...'}</td>
                       <td className="actions-cell">
-                        {pi.host ? (
+                        {(pi.ip || pi.host) ? (
                           <button
                             className="btn btn-small"
                             onClick={() => refreshOne(pi.id)}

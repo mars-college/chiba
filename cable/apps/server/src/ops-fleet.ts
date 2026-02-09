@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 export type FleetPi = {
   id: string;
   host: string;
+  ip?: string;
   nodeName: string;
   cable?: { orientation?: string; channel?: string };
 };
@@ -110,6 +111,7 @@ export async function loadFleetFromRegistry(
   const pis: FleetPi[] = [];
   for (const [id, node] of Object.entries<any>(pisObj)) {
     const host = normalizeHost(String(node?.host ?? ''));
+    const ip = normalizeHost(String(node?.ip ?? ''));
     const nodeName = String(node?.node_name ?? node?.nodeName ?? id);
     const cable = node?.cable
       ? {
@@ -122,7 +124,7 @@ export async function loadFleetFromRegistry(
                 : undefined,
         }
       : undefined;
-    pis.push({ id, host, nodeName, cable });
+    pis.push({ id, host, ip: ip || undefined, nodeName, cable });
   }
   pis.sort((a, b) => a.id.localeCompare(b.id));
   return { registryPath: resolved, pis };
@@ -290,38 +292,42 @@ async function probeOnePi(opts: {
   const { registryDefaults, localGitSha, timeoutMs } = opts;
   const lastCheckedAt = Date.now();
   const host = normalizeHost(opts.pi.host);
+  const ip = normalizeHost(String(opts.pi.ip ?? ''));
+  const addr = ip || host;
 
-  if (!host) {
+  if (!addr) {
     return {
       ...opts.pi,
-      host: '',
+      host,
+      ip: ip || undefined,
       resolvedIp: null,
       dnsOk: false,
-      ping: { ok: false, ms: null, error: 'missing_host' },
+      ping: { ok: false, ms: null, error: 'missing_host_or_ip' },
       tcp: {
-        ssh22: { ok: false, ms: null, error: 'missing_host' },
-        node8080: { ok: false, ms: null, error: 'missing_host' },
-        cable8787: { ok: false, ms: null, error: 'missing_host' },
+        ssh22: { ok: false, ms: null, error: 'missing_host_or_ip' },
+        node8080: { ok: false, ms: null, error: 'missing_host_or_ip' },
+        cable8787: { ok: false, ms: null, error: 'missing_host_or_ip' },
       },
       http: {
-        nodeStatus: { ok: false, ms: null, status: null, error: 'missing_host' },
-        cableVersion: { ok: false, ms: null, status: null, error: 'missing_host' },
+        nodeStatus: { ok: false, ms: null, status: null, error: 'missing_host_or_ip' },
+        cableVersion: { ok: false, ms: null, status: null, error: 'missing_host_or_ip' },
       },
       chibaNode: { version: null, ipReported: null },
       cableServer: null,
       needsUpdate: null,
       lastCheckedAt,
-      errorSummary: 'missing_host',
+      errorSummary: 'missing_host_or_ip',
     } satisfies FleetPiHealth;
   }
 
-  // Resolve + ping in one shot to avoid Node-level DNS hangs on flakey mDNS.
-  const pingProbe = await pingOnce(host, timeoutMs);
-  const resolvedIp = pingProbe.resolvedIp;
-  const dnsOk = pingProbe.dnsOk;
+  // Prefer static IP from registry (avoids flaky mDNS + broken client-to-client networks).
+  // If no IP is configured, fall back to host (often .local).
+  const pingProbe = await pingOnce(addr, timeoutMs);
+  const resolvedIp = ip || pingProbe.resolvedIp;
+  const dnsOk = Boolean(ip) || pingProbe.dnsOk;
   const ping = { ok: pingProbe.ok, ms: pingProbe.ms, error: pingProbe.ok ? undefined : pingProbe.error };
 
-  const target = resolvedIp ?? host;
+  const target = ip || resolvedIp || host;
   const [ssh22, node8080, cable8787] = await Promise.all([
     tcpCheck(target, 22, timeoutMs),
     tcpCheck(target, 8080, timeoutMs),

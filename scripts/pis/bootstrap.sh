@@ -29,9 +29,11 @@ PI_NAME=""
 HOST_OVERRIDE=""
 REBOOT_AFTER=0
 ENABLE_AUTO_REBOOT=0
+RSYNC_PROGRESS=0
+RSYNC_TIMEOUT_SEC=""
 
 usage() {
-  echo "Usage: $0 <pi-name> [--registry path] [--host host-or-ip] [--enable-auto-reboot] [--reboot]"
+  echo "Usage: $0 <pi-name> [--registry path] [--host host-or-ip] [--enable-auto-reboot] [--reboot] [--rsync-progress] [--rsync-timeout-sec N]"
   exit 1
 }
 
@@ -62,6 +64,20 @@ while [ $# -gt 0 ]; do
       ;;
     --reboot)
       REBOOT_AFTER=1
+      shift
+      ;;
+    --rsync-progress)
+      # Shows overall progress during the initial repo sync.
+      RSYNC_PROGRESS=1
+      shift
+      ;;
+    --rsync-timeout-sec)
+      # rsync I/O timeout (seconds). If nothing transfers for this long, rsync aborts.
+      RSYNC_TIMEOUT_SEC="$2"
+      shift 2
+      ;;
+    --rsync-timeout-sec=*)
+      RSYNC_TIMEOUT_SEC="${1#*=}"
       shift
       ;;
     *)
@@ -158,7 +174,8 @@ def get_nested_node(section, key, default=""):
 
 out = {
     "PI_NAME": name,
-    "PI_HOST": get_node("host"),
+    # Prefer static IPs to avoid flaky mDNS + client-to-client Wi-Fi isolation.
+    "PI_HOST": (get_node("ip") or "").strip() or get_node("host"),
     "PI_USER": get_node("user", get_default("user", "pi")),
     "PI_PASSWORD": (
         (node.get("password") or "").strip()
@@ -235,12 +252,21 @@ if [ -z "$PI_HOST" ] || [ -z "$CONTROLLER_URL" ]; then
   exit 1
 fi
 
-SSH_BASE=(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
-RSYNC_RSH=(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+SSH_OPTS=(
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o ConnectTimeout=10
+  -o ConnectionAttempts=1
+  -o ServerAliveInterval=5
+  -o ServerAliveCountMax=1
+)
+
+SSH_BASE=(ssh "${SSH_OPTS[@]}")
+RSYNC_RSH=(ssh "${SSH_OPTS[@]}")
 
 if [ -n "$PI_PASSWORD" ] && command -v sshpass >/dev/null 2>&1; then
-  SSH_BASE=(sshpass -p "$PI_PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
-  RSYNC_RSH=(sshpass -p "$PI_PASSWORD" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+  SSH_BASE=(sshpass -p "$PI_PASSWORD" ssh "${SSH_OPTS[@]}")
+  RSYNC_RSH=(sshpass -p "$PI_PASSWORD" ssh "${SSH_OPTS[@]}")
 fi
 
 SSH_TARGET="${PI_USER}@${PI_HOST}"
@@ -250,7 +276,27 @@ KIOSK_URL="http://localhost:${GUIDE_PORT}/?screenId=${NODE_NAME}"
 printf "\nSyncing repo to %s...\n" "$SSH_TARGET"
 "${SSH_BASE[@]}" "$SSH_TARGET" "mkdir -p $REMOTE_DIR"
 
-rsync -az --delete \
+RSYNC_ARGS=(-az --delete)
+if [ "$RSYNC_PROGRESS" -eq 1 ]; then
+  # macOS ships an ancient rsync (2.6.x) that doesn't support --info=progress2.
+  # Use progress2 only on rsync 3+.
+  RSYNC_V_RAW="$(rsync --version 2>/dev/null | head -n 1 || true)"
+  RSYNC_V="$(printf "%s" "$RSYNC_V_RAW" | awk '{print $3}' | tr -d '[:space:]')"
+  RSYNC_MAJOR="$(printf "%s" "$RSYNC_V" | cut -d. -f1 | tr -cd '0-9')"
+  if [ -n "$RSYNC_MAJOR" ] && [ "$RSYNC_MAJOR" -ge 3 ]; then
+    RSYNC_ARGS+=(--info=progress2)
+  else
+    RSYNC_ARGS+=(--progress)
+  fi
+fi
+if [ -n "$RSYNC_TIMEOUT_SEC" ]; then
+  RSYNC_ARGS+=(--timeout="$RSYNC_TIMEOUT_SEC")
+fi
+
+# Avoid hanging forever in initial connect / handshake.
+RSYNC_ARGS+=(--contimeout=10)
+
+rsync "${RSYNC_ARGS[@]}" \
   --exclude-from="$SCRIPT_DIR/rsync.exclude" \
   -e "${RSYNC_RSH[*]}" \
   "$REPO_ROOT/" "$SSH_TARGET:$REMOTE_DIR/"

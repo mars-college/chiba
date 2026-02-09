@@ -8,6 +8,10 @@ node_modules/
 /media/
 /media-cache/
 /data/
+/cable/config/assets/
+cable/config/assets/
+/cable/config/assets/**
+cable/config/assets/**
 dist/
 build/
 **/node_modules/

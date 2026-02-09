@@ -211,7 +211,8 @@ if not prefetch_channels:
 
 out = {
     "PI_NAME": name,
-    "PI_HOST": get_node("host"),
+    # Prefer static IPs to avoid flaky mDNS + client-to-client Wi-Fi isolation.
+    "PI_HOST": (get_node("ip") or "").strip() or get_node("host"),
     "PI_USER": get_node("user", "pi"),
     "PI_PASSWORD": (
         (node.get("password") or "").strip()
@@ -321,4 +322,3 @@ else
   fi
   apply_one "$PI_NAME"
 fi
-
