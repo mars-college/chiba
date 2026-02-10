@@ -18,6 +18,12 @@ nosplash = true
 lock = true
 qr = false
 
+# Option A: pin a single channel everywhere:
+# channel = "ambient-gradient"
+#
+# Option B: choose a channel per-pi from a pool (recommended for ambient installs):
+# ambient_channels = ["ambient-gradient", "ambient-stars", "aurora-north", "solar-wind", "weatherstar"]
+
 # Fill in per-node channels as desired.
 [pis.upper-west-1.cable]
 orientation = "portrait"

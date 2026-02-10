@@ -75,6 +75,25 @@ export type DisplaySettings = {
   theme?: string;
 };
 
+// Persisted on the cable server and pushed to running kiosk clients over WS.
+export type KioskState = {
+  mode?: "gallery" | "guide";
+  channel?: string;
+  lock?: boolean;
+  qr?: boolean;
+  playlist?: boolean;
+  nosplash?: boolean;
+  theme?: string;
+  scale?: number;
+  textScale?: number;
+  hours?: number;
+};
+
+export type KioskStateRecord = {
+  updatedAt: number;
+  state: KioskState;
+};
+
 export type AudioSettings = {
   volume: number;
   muted: boolean;
@@ -176,6 +195,17 @@ export type RemoteMessage =
       hours?: number | null;
       theme?: string | null;
       screenId?: string | null;
+    }
+  | {
+      type: "kiosk_state";
+      screenId: string;
+      record: KioskStateRecord | null;
+    }
+  | {
+      type: "open_art";
+      screenId: string;
+      channelId: string;
+      index: number;
     }
   | {
       type: "mic";

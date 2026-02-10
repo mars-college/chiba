@@ -37,6 +37,7 @@ host = "mars07.local"
 ip = "100.128.0.112"
 node_name = "upper-east-4"
 orientation = "portrait"
+display_rotate = 270
 
 # ---- Upper West ----
 [pis.upper-west-1]
@@ -44,6 +45,7 @@ host = "mars15.local"
 ip = "100.128.0.114"
 node_name = "upper-west-1"
 orientation = "portrait"
+display_rotate = 270
 
 [pis.upper-west-2]
 host = "mars19.local"

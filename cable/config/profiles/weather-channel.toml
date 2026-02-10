@@ -1,0 +1,8 @@
+# Weather Channel profile (force all screens to WeatherStar).
+
+[defaults.cable]
+mode = "gallery"
+channel = "weatherstar"
+lock = false
+qr = false
+nosplash = true

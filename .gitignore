@@ -54,3 +54,4 @@ media-cache/
 
 # Explicitly ignore the media assets folder
 config/assets
+.tmp

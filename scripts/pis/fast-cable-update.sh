@@ -354,6 +354,17 @@ apply_one() {
         -e "$rsync_rsh" \
         "$REPO_ROOT/cable/apps/guide/dist/" "$SSH_TARGET:$INSTALL_DIR/cable/apps/guide/dist/"
     fi
+
+    # The Pi runs `vite preview` as a long-lived service; proxy configuration lives
+    # in vite.config.ts (not in dist). Keep it in sync with dist updates.
+    echo "  sync: cable/apps/guide/vite.config.ts"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] rsync $REPO_ROOT/cable/apps/guide/vite.config.ts -> $INSTALL_DIR/cable/apps/guide/vite.config.ts"
+    else
+      rsync -az \
+        -e "$rsync_rsh" \
+        "$REPO_ROOT/cable/apps/guide/vite.config.ts" "$SSH_TARGET:$INSTALL_DIR/cable/apps/guide/vite.config.ts"
+    fi
   fi
 
   # Stamp deploy metadata so /api/version returns a meaningful git sha even without .git/.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchFleet, fetchPiHealth, openFleetStream, type FleetStreamMeta } from './lib/api'
-import type { FleetPi, FleetPiHealth } from './types'
+import { applyProfile, fetchFleet, fetchGuideIndex, fetchPiHealth, fetchProfiles, openFleetStream, openProgram, setChannel, type FleetStreamMeta } from './lib/api'
+import type { FleetPi, FleetPiHealth, GuideIndex, OpsProfile } from './types'
 
 function fmtAge(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
@@ -37,6 +37,19 @@ export default function App() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [filter, setFilter] = useState<'all' | 'bad' | 'warn' | 'ok'>('all')
   const [checkingById, setCheckingById] = useState<Record<string, boolean>>({})
+  const [profiles, setProfiles] = useState<OpsProfile[]>([])
+  const [guideIndex, setGuideIndex] = useState<GuideIndex | null>(null)
+  const [selectedById, setSelectedById] = useState<Record<string, boolean>>({})
+  const [profileId, setProfileId] = useState<string>('')
+  const [channelId, setChannelId] = useState<string>('')
+  const [channelLock, setChannelLock] = useState(false)
+  const [channelShowQr, setChannelShowQr] = useState(false)
+  const [channelPlaylist, setChannelPlaylist] = useState(false)
+  const [programChannelId, setProgramChannelId] = useState<string>('')
+  const [programIndex, setProgramIndex] = useState(0)
+  const [controlBusy, setControlBusy] = useState(false)
+  const [controlMsg, setControlMsg] = useState<string | null>(null)
+  const [controlErr, setControlErr] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const streamRef = useRef<{ close: () => void } | null>(null)
 
@@ -116,6 +129,28 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    // Load static-ish ops data once (profiles + channel index).
+    const ac = new AbortController()
+    ;(async () => {
+      try {
+        const [p, idx] = await Promise.all([fetchProfiles(ac.signal), fetchGuideIndex(ac.signal)])
+        setProfiles(p.profiles ?? [])
+        setGuideIndex(idx)
+        if (!profileId && p.profiles?.length) setProfileId(p.profiles[0].id)
+        const firstChannel = idx.channels?.find((c) => c.id)?.id ?? ''
+        if (!channelId && firstChannel) setChannelId(firstChannel)
+        if (!programChannelId && firstChannel) setProgramChannelId(firstChannel)
+      } catch (e) {
+        // Don't block fleet health UI if these fail.
+        // eslint-disable-next-line no-console
+        console.warn('[ops] preload failed', e)
+      }
+    })()
+    return () => ac.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
     if (!autoRefresh) return
     const t = window.setInterval(() => {
       startStream({ reset: false })
@@ -146,6 +181,68 @@ export default function App() {
   }, [meta, healthById, filter])
 
   const now = meta?.now ?? Date.now()
+  const selectedIds = useMemo(
+    () => Object.entries(selectedById).filter(([, v]) => v).map(([k]) => k),
+    [selectedById]
+  )
+
+  const visibleIds = useMemo(() => rows.map((r) => r.id), [rows])
+
+  const allChannels = useMemo(() => guideIndex?.channels ?? [], [guideIndex])
+  const channelOptions = useMemo(() => {
+    const items = allChannels
+      .map((c) => {
+        const labelBits = [c.number ? String(c.number).trim() : '', c.name ? String(c.name).trim() : '', c.id]
+          .filter(Boolean)
+          .join(' ')
+        return { id: c.id, label: labelBits }
+      })
+      .sort((a, b) => a.label.localeCompare(b.label))
+    return items
+  }, [allChannels])
+
+  const programOptions = useMemo(() => {
+    const ch = allChannels.find((c) => c.id === programChannelId)
+    const artItems = (ch?.schedule ?? []).filter((s) => Boolean(s.url))
+    return artItems.map((slot, i) => ({
+      i,
+      label: `${String(i).padStart(2, '0')}  ${slot.title ?? 'Untitled'}${slot.subtitle ? `  (${slot.subtitle})` : ''}`,
+      url: slot.url ?? '',
+    }))
+  }, [allChannels, programChannelId])
+
+  const summarizeResults = (results: Array<{ ok: boolean; id: string; error?: string | null }>) => {
+    const ok = results.filter((r) => r.ok).length
+    const bad = results.length - ok
+    if (!results.length) return 'No targets.'
+    if (bad === 0) return `Applied to ${ok}/${results.length}.`
+    const firstErr = results.find((r) => !r.ok)?.error ?? 'unknown_error'
+    return `Applied to ${ok}/${results.length}. Failures: ${bad}. First error: ${firstErr}`
+  }
+
+  const runApply = async (fn: () => Promise<{ ok: boolean; results: Array<{ id: string; ok: boolean; error: string | null }> }>) => {
+    if (!selectedIds.length) {
+      setControlErr('Select at least one node.')
+      return
+    }
+    setControlBusy(true)
+    setControlErr(null)
+    setControlMsg(null)
+    try {
+      const res = await fn()
+      if (!res.ok) {
+        setControlErr('request_failed')
+        return
+      }
+      setControlMsg(summarizeResults(res.results))
+      // Refresh health so the table reflects new kiosk urls quickly.
+      startStream({ reset: false })
+    } catch (e) {
+      setControlErr((e as Error).message)
+    } finally {
+      setControlBusy(false)
+    }
+  }
 
   return (
     <div className="app-layout">
@@ -205,6 +302,159 @@ export default function App() {
           {error ? (
             <div className="alert alert-error">Error: {error}</div>
           ) : null}
+          {controlErr ? (
+            <div className="alert alert-error">Control: {controlErr}</div>
+          ) : null}
+          {controlMsg ? (
+            <div className="alert">Control: {controlMsg}</div>
+          ) : null}
+        </div>
+
+        <div className="card control-card">
+          <div className="card-header">
+            <div className="card-title">Control</div>
+            <div className="card-meta">
+              Selected: <span className="mono">{selectedIds.length}</span> / visible: <span className="mono">{visibleIds.length}</span>
+            </div>
+          </div>
+          <div className="control-body">
+            <div className="control-row">
+              <button
+                className="btn btn-small"
+                onClick={() => {
+                  const next: Record<string, boolean> = {}
+                  for (const id of visibleIds) next[id] = true
+                  setSelectedById(next)
+                }}
+                disabled={controlBusy || loading || !visibleIds.length}
+              >
+                Select visible
+              </button>
+              <button className="btn btn-small" onClick={() => setSelectedById({})} disabled={controlBusy || loading}>
+                Clear
+              </button>
+            </div>
+
+            <div className="control-grid">
+              <div className="control-block">
+                <div className="control-title">Apply Profile</div>
+                <div className="control-fields">
+                  <select className="input" value={profileId} onChange={(e) => setProfileId(e.target.value)} disabled={controlBusy}>
+                    {profiles.length ? (
+                      profiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.id}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">(no profiles)</option>
+                    )}
+                  </select>
+                  <button
+                    className="btn btn-small"
+                    onClick={() =>
+                      runApply(async () => await applyProfile({ profileId, piIds: selectedIds }))
+                    }
+                    disabled={controlBusy || !profiles.length || !profileId}
+                  >
+                    Apply
+                  </button>
+                </div>
+                <div className="muted small">
+                  Source: <span className="mono">cable/config/profiles/*.toml</span>
+                </div>
+              </div>
+
+              <div className="control-block">
+                <div className="control-title">Pin To Channel (Gallery)</div>
+                <div className="control-fields">
+                  <select className="input" value={channelId} onChange={(e) => setChannelId(e.target.value)} disabled={controlBusy}>
+                    {channelOptions.length ? (
+                      channelOptions.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">(no channels)</option>
+                    )}
+                  </select>
+                  <button
+                    className="btn btn-small"
+                    onClick={() =>
+                      runApply(async () => await setChannel({ channelId, piIds: selectedIds, lock: channelLock, showQr: channelShowQr, playlist: channelPlaylist }))
+                    }
+                    disabled={controlBusy || !channelId}
+                  >
+                    Set
+                  </button>
+                </div>
+                <div className="control-toggles">
+                  <label className="toggle">
+                    <input type="checkbox" checked={channelLock} onChange={(e) => setChannelLock(e.target.checked)} disabled={controlBusy} />
+                    <span>Lock</span>
+                  </label>
+                  <label className="toggle">
+                    <input type="checkbox" checked={channelPlaylist} onChange={(e) => setChannelPlaylist(e.target.checked)} disabled={controlBusy} />
+                    <span>Playlist</span>
+                  </label>
+                  <label className="toggle">
+                    <input type="checkbox" checked={channelShowQr} onChange={(e) => setChannelShowQr(e.target.checked)} disabled={controlBusy} />
+                    <span>QR</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="control-block">
+                <div className="control-title">Open Program (Art View)</div>
+                <div className="control-fields">
+                  <select className="input" value={programChannelId} onChange={(e) => setProgramChannelId(e.target.value)} disabled={controlBusy}>
+                    {channelOptions.length ? (
+                      channelOptions.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">(no channels)</option>
+                    )}
+                  </select>
+                </div>
+                <div className="control-fields">
+                  <select
+                    className="input"
+                    value={String(programIndex)}
+                    onChange={(e) => setProgramIndex(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                    disabled={controlBusy || !programOptions.length}
+                  >
+                    {programOptions.length ? (
+                      programOptions.map((p) => (
+                        <option key={p.i} value={String(p.i)}>
+                          {p.label}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="0">(no URL programs)</option>
+                    )}
+                  </select>
+                  <button
+                    className="btn btn-small"
+                    onClick={() =>
+                      runApply(async () => await openProgram({ channelId: programChannelId, index: programIndex, piIds: selectedIds }))
+                    }
+                    disabled={controlBusy || !programChannelId || !programOptions.length}
+                  >
+                    Open
+                  </button>
+                </div>
+                {programOptions[programIndex]?.url ? (
+                  <div className="muted small mono truncate" title={programOptions[programIndex]?.url}>
+                    {programOptions[programIndex]?.url}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="card">
@@ -218,6 +468,25 @@ export default function App() {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="sel-col">
+                    <input
+                      type="checkbox"
+                      checked={visibleIds.length > 0 && visibleIds.every((id) => selectedById[id])}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          const next: Record<string, boolean> = { ...selectedById }
+                          for (const id of visibleIds) next[id] = true
+                          setSelectedById(next)
+                        } else {
+                          const next: Record<string, boolean> = { ...selectedById }
+                          for (const id of visibleIds) delete next[id]
+                          setSelectedById(next)
+                        }
+                      }}
+                      disabled={controlBusy || loading || !visibleIds.length}
+                      title="Select visible rows"
+                    />
+                  </th>
                   <th>Node</th>
                   <th>Host</th>
                   <th>DNS</th>
@@ -242,6 +511,15 @@ export default function App() {
 
                   return (
                     <tr key={pi.id} className={`row-${kind}`}>
+                      <td className="sel-col">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedById[pi.id])}
+                          onChange={(e) => setSelectedById((prev) => ({ ...prev, [pi.id]: e.target.checked }))}
+                          disabled={controlBusy || loading}
+                          title={`Select ${pi.id}`}
+                        />
+                      </td>
                       <td>
                         <div className="node-cell">
                           <div className="node-name">{pi.nodeName || pi.id}</div>
@@ -272,6 +550,11 @@ export default function App() {
                         <div className="muted mono">node: {health?.chibaNode?.version ?? '?'}</div>
                         <div className="muted mono">cable: {health?.cableServer?.version ?? '?'}</div>
                         <div className="muted mono">sha: {health?.cableServer?.gitSha ?? '-'}</div>
+                        {health?.chibaNode?.kioskUrl ? (
+                          <div className="muted mono truncate" title={health.chibaNode.kioskUrl}>
+                            kiosk: {health.chibaNode.kioskUrl}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="muted">{health ? `${fmtAge(Date.now() - health.lastCheckedAt)} ago` : '...'}</td>
                       <td className="actions-cell">
@@ -293,7 +576,7 @@ export default function App() {
                 })}
                 {!rows.length ? (
                   <tr>
-                    <td colSpan={10} className="empty">
+                    <td colSpan={11} className="empty">
                       {loading ? 'Loading...' : 'No nodes (check registry config on the server).'}
                     </td>
                   </tr>

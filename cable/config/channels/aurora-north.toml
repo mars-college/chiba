@@ -1,0 +1,14 @@
+id = "aurora-north"
+number = "182"
+name = "Aurora Forecast (North)"
+call_sign = "AURN"
+accent = "#9fd6a6"
+description = "NOAA SWPC aurora forecast map (northern hemisphere)."
+
+[[program]]
+title = "Aurora Forecast"
+subtitle = "Northern Hemisphere"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/swpc/aurora-north" }
+

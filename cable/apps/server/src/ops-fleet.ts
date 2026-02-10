@@ -30,7 +30,7 @@ export type FleetPiHealth = FleetPi & {
     nodeStatus: { ok: boolean; ms: number | null; status: number | null; error?: string };
     cableVersion: { ok: boolean; ms: number | null; status: number | null; error?: string };
   };
-  chibaNode: { version: string | null; ipReported: string | null };
+  chibaNode: { version: string | null; ipReported: string | null; kioskUrl: string | null };
   cableServer: { version: string; gitSha: string | null } | null;
   needsUpdate: boolean | null;
   lastCheckedAt: number;
@@ -319,7 +319,7 @@ async function probeOnePi(opts: {
         nodeStatus: { ok: false, ms: null, status: null, error: 'missing_host_or_ip' },
         cableVersion: { ok: false, ms: null, status: null, error: 'missing_host_or_ip' },
       },
-      chibaNode: { version: null, ipReported: null },
+      chibaNode: { version: null, ipReported: null, kioskUrl: null },
       cableServer: null,
       needsUpdate: null,
       lastCheckedAt,
@@ -355,11 +355,13 @@ async function probeOnePi(opts: {
   const chibaNode = {
     version: null as string | null,
     ipReported: null as string | null,
+    kioskUrl: null as string | null,
   };
   if (nodeStatusHttp.ok && nodeStatusHttp.json?.data?.node) {
     const n = nodeStatusHttp.json.data.node;
     if (typeof n.version === 'string') chibaNode.version = n.version;
     if (typeof n.ip === 'string') chibaNode.ipReported = n.ip;
+    if (typeof n.kioskUrl === 'string') chibaNode.kioskUrl = n.kioskUrl;
   }
 
   let needsUpdate: boolean | null = null;

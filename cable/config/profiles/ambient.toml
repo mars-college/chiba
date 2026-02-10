@@ -1,0 +1,31 @@
+# Ambient profile: assign a random low-data channel per screen.
+#
+# Apply fleet-wide:
+#   pnpm -C cable/apps/server ops:apply-mode -- \
+#     --inventory scripts/pis/registry.toml \
+#     --mode cable/config/profiles/ambient.toml \
+#     --all
+#
+# Notes:
+# - Randomization happens in the launcher (ops apply-mode or apply-cable-launch.sh),
+#   not in the Guide. Re-apply to reshuffle.
+# - Override the seed via env: CHIBA_AMBIENT_SEED=... (defaults to YYYY-MM-DD).
+
+[defaults.cable]
+mode = "gallery"
+theme = "gallery"
+nosplash = true
+lock = true
+qr = false
+
+# If `channel` is blank/unset, a channel is selected deterministically per Pi
+# from this pool (seeded by date + pi id).
+ambient_channels = [
+  "ambient-gradient",
+  "ambient-stars",
+  "aurora-north",
+  "aurora-south",
+  "solar-wind",
+  "weatherstar",
+]
+

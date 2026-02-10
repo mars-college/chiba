@@ -1,4 +1,4 @@
-import type { FleetPi, FleetPiHealth, FleetResponse } from '../types'
+import type { FleetPi, FleetPiHealth, FleetResponse, GuideIndex, OpsApplyResponse, OpsProfilesResponse } from '../types'
 
 export async function fetchFleet(signal?: AbortSignal): Promise<FleetResponse> {
   const res = await fetch('/api/ops/fleet', { signal })
@@ -17,6 +17,81 @@ export async function fetchPiHealth(id: string, signal?: AbortSignal): Promise<F
     throw new Error(`pi_fetch_failed:${res.status}:${text.slice(0, 120)}`)
   }
   return (await res.json()) as FleetPiHealth
+}
+
+export async function fetchProfiles(signal?: AbortSignal): Promise<OpsProfilesResponse> {
+  const res = await fetch('/api/ops/profiles', { signal })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`profiles_fetch_failed:${res.status}:${text.slice(0, 120)}`)
+  }
+  return (await res.json()) as OpsProfilesResponse
+}
+
+export async function fetchGuideIndex(signal?: AbortSignal): Promise<GuideIndex> {
+  const res = await fetch('/api/index', { signal })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`index_fetch_failed:${res.status}:${text.slice(0, 120)}`)
+  }
+  return (await res.json()) as GuideIndex
+}
+
+export async function applyProfile(opts: { profileId: string; piIds: string[]; dryRun?: boolean }): Promise<OpsApplyResponse> {
+  const res = await fetch('/api/ops/apply-profile', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ profileId: opts.profileId, piIds: opts.piIds, dryRun: opts.dryRun === true }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`apply_profile_failed:${res.status}:${text.slice(0, 240)}`)
+  }
+  return (await res.json()) as OpsApplyResponse
+}
+
+export async function setChannel(opts: {
+  channelId: string
+  piIds: string[]
+  lock?: boolean
+  showQr?: boolean
+  playlist?: boolean
+  nosplash?: boolean
+  theme?: string
+  dryRun?: boolean
+}): Promise<OpsApplyResponse> {
+  const res = await fetch('/api/ops/set-channel', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      channelId: opts.channelId,
+      piIds: opts.piIds,
+      lock: opts.lock === true,
+      showQr: opts.showQr === true,
+      playlist: opts.playlist === true,
+      nosplash: opts.nosplash !== false,
+      theme: opts.theme,
+      dryRun: opts.dryRun === true,
+    }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`set_channel_failed:${res.status}:${text.slice(0, 240)}`)
+  }
+  return (await res.json()) as OpsApplyResponse
+}
+
+export async function openProgram(opts: { channelId: string; index: number; piIds: string[]; dryRun?: boolean }): Promise<OpsApplyResponse> {
+  const res = await fetch('/api/ops/open-program', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ channelId: opts.channelId, index: opts.index, piIds: opts.piIds, dryRun: opts.dryRun === true }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`open_program_failed:${res.status}:${text.slice(0, 240)}`)
+  }
+  return (await res.json()) as OpsApplyResponse
 }
 
 export type FleetStreamMeta = {

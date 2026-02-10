@@ -15,7 +15,44 @@ import { buildIndexFromConfig } from './index-builder-config.js';
 import { loadConfig, type ChannelEmbedConfig, type LoadedConfig } from './config.js';
 import { createVillageCapture } from './village-capture.js';
 import { createWeatherstarCapture } from './weatherstar-capture.js';
+import { createImagePoller } from './image-poller.js';
 import { buildFleetResponse, loadFleetFromRegistry, probeFleetHealth, probePiHealth } from './ops-fleet.js';
+import {
+  applyKioskUrlToFleet,
+  applyModeToFleet,
+  applyModeToFleetFromObject,
+  applyKioskStateToFleetFromObject,
+  loadModeFromFile,
+  openArtOnFleet,
+  type CableModeDefaults,
+  type ApplyModeResult,
+} from './ops-apply-mode.js';
+import { KioskStateStore, getDefaultKioskStatePath, sanitizeKioskState, type KioskState } from './kiosk-state.js';
+
+function loadEnvFileIfPresent(p: string) {
+  // Keep this tiny and dependency-free; we run on Pis and in local dev.
+  try {
+    if (!fs.existsSync(p)) return;
+    const raw = fs.readFileSync(p, 'utf-8');
+    for (const line of raw.split('\n')) {
+      const s = line.trim();
+      if (!s || s.startsWith('#')) continue;
+      const m = s.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (!m) continue;
+      const key = m[1];
+      let val = (m[2] ?? '').trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+  } catch {
+    // ignore; best-effort only
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,11 +70,19 @@ const wsAlive = new WeakMap<WebSocket, boolean>();
 const repoRoot = path.resolve(__dirname, '../../../..');
 // Cable root (for cable-local config defaults).
 const cableRoot = path.resolve(__dirname, '../../..');
+
+// Load local env files so ops endpoints can authenticate to node APIs (8080).
+// On Pis, `scripts/setup-node.sh` writes `/home/pi/chiba/.env` with API_KEY.
+loadEnvFileIfPresent(path.resolve(repoRoot, '.env'));
+loadEnvFileIfPresent(path.resolve(repoRoot, '.env.pis.local'));
+loadEnvFileIfPresent(path.resolve(repoRoot, 'scripts/pis/.env.pis.local'));
+
 const distDir = path.resolve(__dirname, '../../guide/dist');
 const indexFile = path.join(distDir, 'index.html');
 const opsDistDir = path.resolve(__dirname, '../../ops/dist');
 const opsIndexFile = path.join(opsDistDir, 'index.html');
 const sourcesFile = path.resolve(__dirname, '../data/sources.json');
+const kioskStatePath = getDefaultKioskStatePath(repoRoot);
 const configPath =
   process.env.CHIBA_CONFIG ??
   (() => {
@@ -61,8 +106,21 @@ let guideIndex: GuideIndex | null = null;
 let rebuildTimer: NodeJS.Timeout | null = null;
 const villageCapture = createVillageCapture();
 const weatherstarCapture = createWeatherstarCapture();
+const swpcAuroraNorth = createImagePoller({
+  url: 'https://services.swpc.noaa.gov/images/aurora-forecast-northern-hemisphere.jpg',
+  intervalMs: Number(process.env.SWPC_AURORA_INTERVAL_MS ?? 5 * 60 * 1000),
+});
+const swpcAuroraSouth = createImagePoller({
+  url: 'https://services.swpc.noaa.gov/images/aurora-forecast-southern-hemisphere.jpg',
+  intervalMs: Number(process.env.SWPC_AURORA_INTERVAL_MS ?? 5 * 60 * 1000),
+});
+const swpcSwepam24h = createImagePoller({
+  url: 'https://services.swpc.noaa.gov/images/ace-swepam-24-hour.gif',
+  intervalMs: Number(process.env.SWPC_ACE_INTERVAL_MS ?? 5 * 60 * 1000),
+});
 let loadedConfig: LoadedConfig | null = null;
 let mediaRoots: string[] = [];
+let kioskStateStore: KioskStateStore | null = null;
 const mediaCacheDir = process.env.CHIBA_MEDIA_CACHE_DIR
   ? path.resolve(process.env.CHIBA_MEDIA_CACHE_DIR)
   : path.resolve(repoRoot, 'media-cache');
@@ -72,6 +130,19 @@ const stashInflight = new Map<string, Promise<string>>();
 let configWatchers: Array<ReturnType<typeof fs.watch>> = [];
 let configPollTimer: NodeJS.Timeout | null = null;
 let lastConfigFingerprint = '';
+
+function broadcastWs(payload: unknown) {
+  const message = JSON.stringify(payload);
+  wss.clients.forEach((client) => {
+    if (client.readyState === client.OPEN) {
+      try {
+        client.send(message);
+      } catch {
+        // ignore send failures
+      }
+    }
+  });
+}
 type RemoteControl =
   | {
       id: string;
@@ -997,8 +1068,104 @@ const startConfigPolling = () => {
 
 startConfigPolling();
 
+// Kiosk state store lets Ops push per-screen overrides (channel, lock, QR, etc)
+// without restarting Chromium. This is persisted locally on each cable server.
+void (async () => {
+  try {
+    kioskStateStore = await KioskStateStore.open(kioskStatePath);
+    const count = kioskStateStore.list().length;
+    console.log(`[kiosk-state] loaded (${count} screens) -> ${kioskStatePath}`);
+  } catch (err) {
+    console.warn('[kiosk-state] failed to open', (err as Error).message);
+    kioskStateStore = null;
+  }
+})();
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
+});
+
+app.get('/api/kiosk/state', (req, res) => {
+  const screenId = typeof req.query.screenId === 'string' ? req.query.screenId.trim() : '';
+  if (!screenId) {
+    res.status(400).json({ ok: false, error: 'missing_screenId', message: 'Provide ?screenId=lower-east-3' });
+    return;
+  }
+  if (!kioskStateStore) {
+    res.status(503).json({ ok: false, error: 'kiosk_state_unavailable' });
+    return;
+  }
+  const record = kioskStateStore.get(screenId);
+  res.json({ ok: true, screenId, record });
+});
+
+app.get('/api/kiosk/state/all', (_req, res) => {
+  if (!kioskStateStore) {
+    res.status(503).json({ ok: false, error: 'kiosk_state_unavailable' });
+    return;
+  }
+  res.json({ ok: true, items: kioskStateStore.list() });
+});
+
+app.post('/api/kiosk/state', async (req, res) => {
+  const screenIdRaw = (req.body as any)?.screenId ?? (req.body as any)?.screen;
+  const screenId = typeof screenIdRaw === 'string' ? screenIdRaw.trim() : '';
+  if (!screenId) {
+    res.status(400).json({ ok: false, error: 'missing_screenId', message: 'Provide { screenId: \"lower-east-3\", state: {...} }' });
+    return;
+  }
+  if (!kioskStateStore) {
+    res.status(503).json({ ok: false, error: 'kiosk_state_unavailable' });
+    return;
+  }
+  const replace = Boolean((req.body as any)?.replace);
+  const state = sanitizeKioskState((req.body as any)?.state);
+  try {
+    const record = replace
+      ? await kioskStateStore.replace(screenId, state)
+      : await kioskStateStore.set(screenId, state);
+    // Broadcast so the running guide applies immediately (no restart).
+    broadcastWs({ type: 'kiosk_state', screenId, record });
+    res.json({ ok: true, screenId, record });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'kiosk_state_set_failed', message: (err as Error).message });
+  }
+});
+
+app.post('/api/kiosk/clear', async (req, res) => {
+  const screenIdRaw = (req.body as any)?.screenId ?? (req.body as any)?.screen;
+  const screenId = typeof screenIdRaw === 'string' ? screenIdRaw.trim() : '';
+  if (!screenId) {
+    res.status(400).json({ ok: false, error: 'missing_screenId' });
+    return;
+  }
+  if (!kioskStateStore) {
+    res.status(503).json({ ok: false, error: 'kiosk_state_unavailable' });
+    return;
+  }
+  try {
+    await kioskStateStore.clear(screenId);
+    broadcastWs({ type: 'kiosk_state', screenId, record: null });
+    res.json({ ok: true, screenId });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'kiosk_state_clear_failed', message: (err as Error).message });
+  }
+});
+
+app.post('/api/kiosk/open-art', (req, res) => {
+  const screenIdRaw = (req.body as any)?.screenId ?? (req.body as any)?.screen;
+  const screenId = typeof screenIdRaw === 'string' ? screenIdRaw.trim() : '';
+  const channelIdRaw = (req.body as any)?.channelId ?? (req.body as any)?.channel;
+  const channelId = typeof channelIdRaw === 'string' ? channelIdRaw.trim() : '';
+  const indexRaw = (req.body as any)?.index ?? (req.body as any)?.i;
+  const index = typeof indexRaw === 'number' ? Math.floor(indexRaw) : typeof indexRaw === 'string' ? Math.floor(Number(indexRaw)) : NaN;
+  if (!screenId || !channelId || !Number.isFinite(index) || index < 0) {
+    res.status(400).json({ ok: false, error: 'invalid_payload', message: 'Provide { screenId, channelId, index }' });
+    return;
+  }
+  // Broadcast a targeted navigation command.
+  broadcastWs({ type: 'open_art', screenId, channelId, index });
+  res.json({ ok: true, screenId, channelId, index });
 });
 
 app.get('/api/version', async (_req, res) => {
@@ -1211,6 +1378,280 @@ app.get('/api/ops/fleet/stream', async (req, res) => {
   } catch (err) {
     writeEvent('error', { error: 'ops_fleet_stream_failed', message: (err as Error).message });
     close();
+  }
+});
+
+type OpsApplyResult = {
+  id: string;
+  host: string;
+  ip: string | null;
+  nodeName: string;
+  guidePort: number;
+  url: string;
+  ok: boolean;
+  status: number | null;
+  ms: number | null;
+  error: string | null;
+};
+
+function simplifyApplyResult(r: ApplyModeResult): OpsApplyResult {
+  return {
+    id: r.pi.id,
+    host: r.pi.host,
+    ip: r.pi.ip ?? null,
+    nodeName: r.pi.nodeName,
+    guidePort: r.pi.guidePort,
+    url: r.url,
+    ok: r.ok,
+    status: r.status,
+    ms: r.ms,
+    error: r.error ?? null,
+  };
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const s = entry.trim();
+    if (!s) continue;
+    out.push(s);
+  }
+  return Array.from(new Set(out));
+}
+
+app.get('/api/ops/profiles', async (_req, res) => {
+  // These profiles map to kiosk URL query params.
+  const profilesDir = path.resolve(cableRoot, 'config', 'profiles');
+  try {
+    const entries = await fsp.readdir(profilesDir, { withFileTypes: true });
+    const tomls = entries
+      .filter((e) => e.isFile() && e.name.endsWith('.toml'))
+      .map((e) => e.name)
+      .sort();
+
+    const profiles = await Promise.all(
+      tomls.map(async (file) => {
+        const id = file.replace(/\.toml$/i, '');
+        const modePath = path.join('cable', 'config', 'profiles', file);
+        const mode = await loadModeFromFile(repoRoot, modePath);
+        const defaults = (mode?.defaults?.cable ?? {}) as CableModeDefaults;
+        const overridePis = Object.keys(mode?.pis ?? {}).sort();
+        return {
+          id,
+          file,
+          modePath,
+          defaults,
+          overridePis,
+        };
+      })
+    );
+
+    res.json({ ok: true, profiles });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'ops_profiles_failed', message: (err as Error).message });
+  }
+});
+
+app.post('/api/ops/apply-profile', async (req, res) => {
+  const profileIdRaw = (req.body as any)?.profileId ?? (req.body as any)?.id ?? (req.body as any)?.profile;
+  const profileId = typeof profileIdRaw === 'string' ? profileIdRaw.trim() : '';
+  if (!profileId) {
+    res.status(400).json({ ok: false, error: 'missing_profileId', message: 'Provide { profileId: \"weather-channel\" }' });
+    return;
+  }
+
+  const methodRaw = (req.body as any)?.method ?? req.query.method;
+  const method = methodRaw === 'kiosk-url' ? 'kiosk-url' : 'state';
+
+  const timeoutMs =
+    clampInt((req.body as any)?.timeoutMs, 150, 8000) ??
+    clampInt(req.query.timeoutMs, 150, 8000) ??
+    2500;
+  const concurrency =
+    clampInt((req.body as any)?.concurrency, 1, 64) ??
+    clampInt((req.body as any)?.parallel, 1, 64) ??
+    clampInt(req.query.concurrency ?? req.query.parallel, 1, 64) ??
+    8;
+  const dryRun = parseBooleanQuery((req.body as any)?.dryRun) || parseBooleanQuery(req.query.dryRun);
+
+  const file = profileId.endsWith('.toml') ? profileId : `${profileId}.toml`;
+  // Resolve via repoRoot for parity with CLI behavior.
+  const modePath = path.join('cable', 'config', 'profiles', file);
+  const piIds = parseStringArray((req.body as any)?.piIds ?? (req.body as any)?.pis);
+
+  try {
+    const results = await (async () => {
+      if (method === 'kiosk-url') {
+        return await applyModeToFleet({
+          repoRoot,
+          inventoryPath: OPS_REGISTRY_PATH,
+          modePath,
+          piIds: piIds.length ? piIds : undefined,
+          concurrency,
+          timeoutMs,
+          dryRun,
+        });
+      }
+      const mode = await loadModeFromFile(repoRoot, modePath);
+      return await applyKioskStateToFleetFromObject({
+        repoRoot,
+        inventoryPath: OPS_REGISTRY_PATH,
+        mode,
+        piIds: piIds.length ? piIds : undefined,
+        concurrency,
+        timeoutMs,
+        dryRun,
+      });
+    })();
+    res.json({ ok: true, modePath, results: results.map(simplifyApplyResult) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'ops_apply_profile_failed', message: (err as Error).message });
+  }
+});
+
+app.post('/api/ops/set-channel', async (req, res) => {
+  const channelIdRaw = (req.body as any)?.channelId ?? (req.body as any)?.channel;
+  const channelId = typeof channelIdRaw === 'string' ? channelIdRaw.trim() : '';
+  if (!channelId) {
+    res.status(400).json({ ok: false, error: 'missing_channelId', message: 'Provide { channelId: \"weatherstar\" }' });
+    return;
+  }
+
+  const methodRaw = (req.body as any)?.method ?? req.query.method;
+  const method = methodRaw === 'kiosk-url' ? 'kiosk-url' : 'state';
+
+  const timeoutMs =
+    clampInt((req.body as any)?.timeoutMs, 150, 8000) ??
+    clampInt(req.query.timeoutMs, 150, 8000) ??
+    2500;
+  const concurrency =
+    clampInt((req.body as any)?.concurrency, 1, 64) ??
+    clampInt((req.body as any)?.parallel, 1, 64) ??
+    clampInt(req.query.concurrency ?? req.query.parallel, 1, 64) ??
+    8;
+  const dryRun = parseBooleanQuery((req.body as any)?.dryRun) || parseBooleanQuery(req.query.dryRun);
+
+  const showQr = parseBooleanQuery((req.body as any)?.showQr);
+  const lock = parseBooleanQuery((req.body as any)?.lock);
+  const playlist = parseBooleanQuery((req.body as any)?.playlist);
+  const nosplash = parseBooleanQuery((req.body as any)?.nosplash ?? true);
+  const themeRaw = (req.body as any)?.theme;
+  const theme = typeof themeRaw === 'string' && themeRaw.trim() ? themeRaw.trim() : undefined;
+  const piIds = parseStringArray((req.body as any)?.piIds ?? (req.body as any)?.pis);
+
+  const defaults: CableModeDefaults = {
+    mode: 'gallery',
+    channel: channelId,
+    nosplash,
+    // Schema uses qr=false to hide (default behavior in gallery is hidden anyway).
+    qr: showQr ? true : false,
+    lock,
+    playlist,
+    theme,
+  };
+
+  try {
+    const results = await (async () => {
+      if (method === 'kiosk-url') {
+        return await applyModeToFleetFromObject({
+          repoRoot,
+          inventoryPath: OPS_REGISTRY_PATH,
+          mode: { defaults: { cable: defaults } },
+          piIds: piIds.length ? piIds : undefined,
+          concurrency,
+          timeoutMs,
+          dryRun,
+        });
+      }
+      return await applyKioskStateToFleetFromObject({
+        repoRoot,
+        inventoryPath: OPS_REGISTRY_PATH,
+        mode: { defaults: { cable: defaults } },
+        piIds: piIds.length ? piIds : undefined,
+        concurrency,
+        timeoutMs,
+        dryRun,
+      });
+    })();
+    res.json({ ok: true, channelId, results: results.map(simplifyApplyResult) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'ops_set_channel_failed', message: (err as Error).message });
+  }
+});
+
+app.post('/api/ops/open-program', async (req, res) => {
+  const channelIdRaw = (req.body as any)?.channelId ?? (req.body as any)?.channel;
+  const channelId = typeof channelIdRaw === 'string' ? channelIdRaw.trim() : '';
+  if (!channelId) {
+    res.status(400).json({ ok: false, error: 'missing_channelId', message: 'Provide { channelId: \"weatherstar\" }' });
+    return;
+  }
+  const indexRaw = (req.body as any)?.index ?? (req.body as any)?.i;
+  const index =
+    typeof indexRaw === 'number'
+      ? Math.floor(indexRaw)
+      : typeof indexRaw === 'string'
+        ? Math.floor(Number(indexRaw))
+        : NaN;
+  if (!Number.isFinite(index) || index < 0) {
+    res.status(400).json({ ok: false, error: 'missing_index', message: 'Provide { index: 0 } (0-based)' });
+    return;
+  }
+
+  const timeoutMs =
+    clampInt((req.body as any)?.timeoutMs, 150, 8000) ??
+    clampInt(req.query.timeoutMs, 150, 8000) ??
+    2500;
+  const concurrency =
+    clampInt((req.body as any)?.concurrency, 1, 64) ??
+    clampInt((req.body as any)?.parallel, 1, 64) ??
+    clampInt(req.query.concurrency ?? req.query.parallel, 1, 64) ??
+    8;
+  const dryRun = parseBooleanQuery((req.body as any)?.dryRun) || parseBooleanQuery(req.query.dryRun);
+  const piIds = parseStringArray((req.body as any)?.piIds ?? (req.body as any)?.pis);
+
+  try {
+    // Prefer: send a live WS broadcast (via the Pi cable server) to navigate to art view
+    // without restarting Chromium. Fallback: you can force legacy restart behavior by
+    // passing `method=kiosk-url`.
+    const methodRaw = (req.body as any)?.method ?? req.query.method;
+    const method = methodRaw === 'kiosk-url' ? 'kiosk-url' : 'state';
+
+    const results = await (async () => {
+      if (method === 'kiosk-url') {
+        return await applyKioskUrlToFleet({
+          repoRoot,
+          inventoryPath: OPS_REGISTRY_PATH,
+          piIds: piIds.length ? piIds : undefined,
+          concurrency,
+          timeoutMs,
+          dryRun,
+          buildUrl: (pi) => {
+            const base = new URL(`http://localhost:${pi.guidePort}/channel/${encodeURIComponent(channelId)}`);
+            base.searchParams.set('i', String(index));
+            base.searchParams.set('screenId', pi.nodeName);
+            base.searchParams.set('nosplash', '1');
+            base.searchParams.set('qr', '0');
+            return base.toString();
+          },
+        });
+      }
+      return await openArtOnFleet({
+        repoRoot,
+        inventoryPath: OPS_REGISTRY_PATH,
+        channelId,
+        index,
+        piIds: piIds.length ? piIds : undefined,
+        concurrency,
+        timeoutMs,
+        dryRun,
+      });
+    })();
+    res.json({ ok: true, channelId, index, results: results.map(simplifyApplyResult) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'ops_open_program_failed', message: (err as Error).message });
   }
 });
 
@@ -2074,6 +2515,236 @@ app.get('/village', (_req, res) => {
 </html>`);
 });
 
+function sendPolledImageJpg(
+  res: express.Response,
+  poller: { getFrame: () => { buffer: Buffer; contentType: string } | null }
+) {
+  const frame = poller.getFrame();
+  if (!frame) {
+    res.status(503).send('capture_not_ready');
+    return;
+  }
+  res.setHeader('Content-Type', frame.contentType || 'image/jpeg');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(frame.buffer);
+}
+
+function sendPolledImagePage(opts: {
+  res: express.Response;
+  title: string;
+  imgPath: string;
+  intervalMs: number;
+  background?: string;
+  fit?: 'cover' | 'contain';
+}) {
+  const { res, title, imgPath, intervalMs, background, fit } = opts;
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <style>
+      html, body { height: 100%; margin: 0; background: ${background ?? '#05060a'}; }
+      body { position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+      #frame { width: 100vw; height: 100vh; object-fit: ${fit ?? 'cover'}; object-position: center; display: block; background: ${background ?? '#05060a'}; }
+      #status {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-family: "Alegreya Sans", "Segoe UI", sans-serif;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(230, 240, 255, 0.8);
+        background: rgba(6, 12, 24, 0.55);
+        border: 1px solid rgba(120, 200, 255, 0.35);
+      }
+    </style>
+  </head>
+  <body>
+    <img id="frame" alt="${title}" />
+    <div id="status">Loading...</div>
+    <script>
+      const img = document.getElementById('frame');
+      const status = document.getElementById('status');
+      const refreshMs = ${Math.max(500, Math.floor(intervalMs))};
+      const tick = () => {
+        const ts = Date.now();
+        img.src = '${imgPath}?ts=' + ts;
+      };
+      img.addEventListener('load', () => { status.textContent = 'Live'; });
+      img.addEventListener('error', () => { status.textContent = 'Connecting'; });
+      tick();
+      setInterval(tick, refreshMs);
+    </script>
+  </body>
+</html>`);
+}
+
+app.get('/swpc/aurora-north.jpg', (_req, res) => {
+  sendPolledImageJpg(res, swpcAuroraNorth);
+});
+app.get('/swpc/aurora-north', (_req, res) => {
+  sendPolledImagePage({
+    res,
+    title: 'Aurora Forecast (North)',
+    imgPath: '/swpc/aurora-north.jpg',
+    intervalMs: swpcAuroraNorth.options.intervalMs,
+    background: '#05060a',
+  });
+});
+
+app.get('/swpc/aurora-south.jpg', (_req, res) => {
+  sendPolledImageJpg(res, swpcAuroraSouth);
+});
+app.get('/swpc/aurora-south', (_req, res) => {
+  sendPolledImagePage({
+    res,
+    title: 'Aurora Forecast (South)',
+    imgPath: '/swpc/aurora-south.jpg',
+    intervalMs: swpcAuroraSouth.options.intervalMs,
+    background: '#05060a',
+  });
+});
+
+app.get('/swpc/swepam-24h.gif', (_req, res) => {
+  sendPolledImageJpg(res, swpcSwepam24h);
+});
+app.get('/swpc/swepam-24h', (_req, res) => {
+  sendPolledImagePage({
+    res,
+    title: 'Solar Wind (ACE SWEPAM, 24h)',
+    imgPath: '/swpc/swepam-24h.gif',
+    intervalMs: swpcSwepam24h.options.intervalMs,
+    background: '#05060a',
+    fit: 'contain',
+  });
+});
+
+app.get('/ambient/gradient', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ambient Gradient</title>
+    <style>
+      :root {
+        --a: #0a1020;
+        --b: #101a4a;
+        --c: #1d5b6a;
+        --d: #b56b3b;
+      }
+      html, body { height: 100%; margin: 0; background: #05060a; overflow: hidden; }
+      .bg {
+        position: absolute;
+        inset: -20%;
+        background:
+          radial-gradient(1200px 800px at 20% 25%, rgba(125, 220, 255, 0.25), transparent 60%),
+          radial-gradient(900px 700px at 75% 65%, rgba(255, 190, 120, 0.22), transparent 55%),
+          radial-gradient(1000px 900px at 50% 95%, rgba(190, 120, 255, 0.18), transparent 55%),
+          linear-gradient(135deg, var(--a), var(--b) 35%, var(--c) 70%, var(--d));
+        filter: saturate(115%) contrast(110%);
+        transform: translate3d(0,0,0);
+        animation: drift 28s ease-in-out infinite alternate;
+      }
+      .grain {
+        position: absolute;
+        inset: -10%;
+        background-image:
+          url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E");
+        mix-blend-mode: overlay;
+        opacity: 0.25;
+        transform: translate3d(0,0,0);
+        animation: grain 4.2s steps(2) infinite;
+        pointer-events: none;
+      }
+      @keyframes drift {
+        0% { transform: translate3d(-4%, -2%, 0) scale(1.05) rotate(-0.2deg); }
+        100% { transform: translate3d(4%, 2%, 0) scale(1.08) rotate(0.2deg); }
+      }
+      @keyframes grain {
+        0% { transform: translate3d(0,0,0); }
+        25% { transform: translate3d(-2%, 1%, 0); }
+        50% { transform: translate3d(1%, -2%, 0); }
+        75% { transform: translate3d(2%, 2%, 0); }
+        100% { transform: translate3d(-1%, -1%, 0); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bg" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+  </body>
+</html>`);
+});
+
+app.get('/ambient/stars', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ambient Stars</title>
+    <style>
+      html, body { height: 100%; margin: 0; background: #02030a; overflow: hidden; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <script>
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d');
+      const stars = [];
+      const rand = (a,b)=>a+Math.random()*(b-a);
+      const resize = () => {
+        const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+        canvas.width = Math.floor(window.innerWidth * dpr);
+        canvas.height = Math.floor(window.innerHeight * dpr);
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+      };
+      const init = () => {
+        stars.length = 0;
+        const n = Math.floor(Math.max(180, (window.innerWidth * window.innerHeight) / 9000));
+        for (let i=0;i<n;i++) {
+          stars.push({ x: Math.random(), y: Math.random(), r: rand(0.4, 1.8), a: rand(0.2, 0.95), z: rand(0.2, 1.0) });
+        }
+      };
+      const draw = (t) => {
+        const w = window.innerWidth, h = window.innerHeight;
+        ctx.clearRect(0,0,w,h);
+        const g = ctx.createRadialGradient(w*0.55,h*0.45,0,w*0.55,h*0.45,Math.max(w,h)*0.85);
+        g.addColorStop(0, 'rgba(28, 62, 120, 0.25)');
+        g.addColorStop(0.6, 'rgba(4, 10, 22, 0.7)');
+        g.addColorStop(1, 'rgba(2, 3, 10, 1)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0,0,w,h);
+        for (const s of stars) {
+          const tw = 0.45 + 0.55*Math.sin((t/1000)*0.7 + s.x*12.0 + s.y*7.0);
+          const alpha = s.a * (0.55 + 0.45*tw);
+          ctx.fillStyle = 'rgba(230, 245, 255,' + alpha.toFixed(3) + ')';
+          const x = s.x * w + Math.sin(t/16000 + s.y*10)*10*s.z;
+          const y = s.y * h + Math.cos(t/18000 + s.x*10)*8*s.z;
+          ctx.beginPath();
+          ctx.arc(x, y, s.r, 0, Math.PI*2);
+          ctx.fill();
+        }
+        requestAnimationFrame(draw);
+      };
+      window.addEventListener('resize', () => { resize(); init(); });
+      resize(); init(); requestAnimationFrame(draw);
+    </script>
+  </body>
+</html>`);
+});
+
 app.all('/embed/:id/proxy/*', async (req, res) => {
   const embed = getEmbedConfig(req.params.id);
   if (!embed?.url) {
@@ -2630,6 +3301,13 @@ app.get('/weatherstar', (_req, res) => {
         display: block;
         background: #05060a;
       }
+      /* Portrait kiosks rotate the display, but the WeatherStar capture is landscape.
+         Letterbox instead of cropping when the viewport is portrait. */
+      @media (orientation: portrait) {
+        #frame {
+          object-fit: contain;
+        }
+      }
       #status {
         position: absolute;
         top: 16px;
@@ -2933,6 +3611,9 @@ server.listen(PORT, () => {
   console.log(`Guide server running on http://localhost:${PORT}`);
   void villageCapture.start();
   void weatherstarCapture.start();
+  void swpcAuroraNorth.start();
+  void swpcAuroraSouth.start();
+  void swpcSwepam24h.start();
 });
 
 server.on('close', () => {

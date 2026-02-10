@@ -173,9 +173,23 @@ def get_nested_node(section, key, default=""):
     return node.get(section, {}).get(key, get_nested_default(section, key, default))
 
 orientation = (node.get("orientation") or "").strip().lower() if isinstance(node.get("orientation"), str) else ""
-rotation = "0"
-if orientation == "portrait":
-    rotation = "90"
+
+rotation = ""
+raw_rotate = node.get("display_rotate", get_default("display_rotate", ""))
+try:
+    if isinstance(raw_rotate, (int, float)):
+        r = int(raw_rotate)
+    else:
+        r = int(str(raw_rotate).strip() or "0")
+    if r in (0, 90, 180, 270):
+        rotation = str(r)
+except Exception:
+    rotation = ""
+
+if rotation == "":
+    rotation = "0"
+    if orientation == "portrait":
+        rotation = "90"
 
 out = {
     "PI_NAME": name,
@@ -349,6 +363,9 @@ After=network.target
 Type=simple
 User=$PI_USER
 WorkingDirectory=$REMOTE_DIR
+# Load node/cable shared env (API_KEY, controller URL, etc). This lets the cable ops
+# backend authenticate to the local node API when applying kiosk URLs.
+EnvironmentFile=$REMOTE_DIR/.env
 Environment=CHIBA_CONFIG=$REMOTE_DIR/cable/config/chiba.toml
 Environment=PORT=$SERVER_PORT
 ExecStart=/usr/bin/env pnpm -C $REMOTE_DIR/cable/apps/server dev
@@ -417,13 +434,18 @@ if [ ! -d "$HOME/.cache/ms-playwright" ]; then
   pnpm -C "$REMOTE_DIR/cable/apps/server" exec playwright install --with-deps || true
 fi
 
-# Set kiosk URL to cable guide (via API + file fallback)
+# Set kiosk URL to cable guide (via API + file sync fallback).
+# Important: the node API can require an API key; bootstrap must include it.
+AUTH_HEADER=()
+if [ -n "$API_KEY" ]; then
+  AUTH_HEADER=(-H "Authorization: Bearer $API_KEY")
+fi
 curl -sS -X POST http://localhost:8080/kiosk-url \
   -H "Content-Type: application/json" \
+  "${AUTH_HEADER[@]}" \
   -d "{\"url\":\"$KIOSK_URL\"}" >/dev/null || true
-if [ ! -f "$REMOTE_DIR/.kiosk-url" ]; then
-  echo "$KIOSK_URL" > "$REMOTE_DIR/.kiosk-url"
-fi
+# Always keep the launcher file aligned with the intended URL (run-kiosk.sh reads this).
+echo "$KIOSK_URL" > "$REMOTE_DIR/.kiosk-url" 2>/dev/null || true
 
 # Best-effort: rotate display for portrait screens (persists on the Pi).
 case "${DISPLAY_ROTATE:-}" in

@@ -134,6 +134,7 @@ eval_pi() {
 import sys
 import shlex
 import os
+import datetime
 try:
     import tomllib as toml_parser
 except Exception:
@@ -219,6 +220,43 @@ def cable_get(key: str, default=None):
     v = cable_mode.get(key, default)
     return v
 
+# Ambient mode helper:
+# If `ambient_channels` is provided and `channel` is unset/blank, pick a
+# deterministic channel per Pi (seeded by date + pi id).
+def normalize_str_list(v):
+    if not isinstance(v, list):
+        return []
+    out = []
+    for x in v:
+        if isinstance(x, str):
+            s = x.strip()
+            if s:
+                out.append(s)
+    # stable uniq
+    seen = set()
+    uniq = []
+    for s in out:
+        if s in seen:
+            continue
+        seen.add(s)
+        uniq.append(s)
+    return uniq
+
+def fnv1a32(s: str) -> int:
+    h = 0x811c9dc5
+    for ch in s:
+        h ^= ord(ch)
+        h = (h * 0x01000193) & 0xffffffff
+    return h
+
+ambient_seed = (os.environ.get("CHIBA_AMBIENT_SEED") or "").strip() or datetime.date.today().isoformat()
+ambient_pool = normalize_str_list(cable_get("ambient_channels"))
+channel_raw = cable_get("channel", "")
+channel = channel_raw.strip() if isinstance(channel_raw, str) else ""
+if (not channel) and ambient_pool:
+    idx = fnv1a32(f"{ambient_seed}:{name}") % max(1, len(ambient_pool))
+    cable_mode["channel"] = ambient_pool[idx]
+
 orientation = (
     (node.get("orientation") if isinstance(node.get("orientation"), str) else "")
     or (node.get("cable", {}).get("orientation") if isinstance((node.get("cable", {}) or {}).get("orientation"), str) else "")
@@ -227,10 +265,22 @@ orientation = (
 orientation = (orientation or "").strip().lower()
 
 rotation = ""
-if orientation == "portrait":
-    rotation = "90"
-elif orientation == "landscape" or orientation == "":
-    rotation = "0"
+raw_rotate = node.get("display_rotate", inv_defaults.get("display_rotate", ""))
+try:
+    if isinstance(raw_rotate, (int, float)):
+        r = int(raw_rotate)
+    else:
+        r = int(str(raw_rotate).strip() or "0")
+    if r in (0, 90, 180, 270):
+        rotation = str(r)
+except Exception:
+    rotation = ""
+
+if rotation == "":
+    if orientation == "portrait":
+        rotation = "90"
+    elif orientation == "landscape" or orientation == "":
+        rotation = "0"
 
 out = {
     "PI_NAME": name,
@@ -300,9 +350,13 @@ build_kiosk_url() {
   fi
   if [ "$lock" = "1" ]; then
     url="${url}&lock=1"
+  elif [ "$mode" = "gallery" ] && [ "$lock" = "0" ]; then
+    url="${url}&lock=0"
   fi
   if [ "$qr" = "0" ]; then
     url="${url}&qr=0"
+  elif [ "$qr" = "1" ]; then
+    url="${url}&qr=1"
   fi
   if [ -n "$channel" ]; then
     url="${url}&channel=${channel}"

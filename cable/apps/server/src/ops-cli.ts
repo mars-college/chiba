@@ -3,13 +3,40 @@ import path from 'node:path';
 import fs from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { applyModeToFleet } from './ops-apply-mode.js';
+import { applyKioskStateToFleetFromObject, applyModeToFleet, loadModeFromFile } from './ops-apply-mode.js';
+
+function loadEnvFileIfPresent(p: string) {
+  try {
+    if (!fs.existsSync(p)) return;
+    const raw = fs.readFileSync(p, 'utf-8');
+    for (const line of raw.split('\n')) {
+      const s = line.trim();
+      if (!s || s.startsWith('#')) continue;
+      const m = s.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (!m) continue;
+      const key = m[1];
+      let val = (m[2] ?? '').trim();
+      // Strip surrounding quotes if present.
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      // Don't clobber explicitly provided env vars.
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+  } catch {
+    // ignore; env file is best-effort
+  }
+}
 
 function usage(exitCode = 1) {
   // Keep this dependency-free: parse args manually.
   console.log(`
 Usage:
   node dist/ops-cli.js apply-mode [options]
+  node dist/ops-cli.js apply-state [options]
   pnpm -C cable/apps/server ops:apply-mode -- [options]
 
 Options:
@@ -24,6 +51,10 @@ Options:
 Secrets:
   Set per-node API keys in env, e.g.:
     CHIBA_API_KEY_UPPER_EAST_2=... (pi id: upper-east-2)
+
+Notes:
+  - apply-mode uses the node API (8080) and can require API keys.
+  - apply-state uses the cable server API (8787) and does not restart Chromium.
 `);
   process.exit(exitCode);
 }
@@ -48,11 +79,16 @@ async function main() {
 
   const repoRoot = findRepoRoot();
 
+  // Best-effort load local secrets so you don't have to `source` manually.
+  // Scripts already use these paths; keep behavior aligned.
+  loadEnvFileIfPresent(path.join(repoRoot, '.env.pis.local'));
+  loadEnvFileIfPresent(path.join(repoRoot, 'scripts', 'pis', '.env.pis.local'));
+
   const argv = process.argv.slice(2);
   if (argv.length === 0) usage(1);
 
   const cmd = argv.shift();
-  if (cmd !== 'apply-mode') {
+  if (cmd !== 'apply-mode' && cmd !== 'apply-state') {
     console.error(`Unknown command: ${cmd ?? ''}`);
     usage(1);
   }
@@ -66,6 +102,9 @@ async function main() {
 
   while (argv.length > 0) {
     const a = argv.shift() as string;
+    // pnpm sometimes forwards a literal "--" into argv when using `pnpm <script> -- ...`.
+    // Treat it as a no-op separator.
+    if (a === '--') continue;
     if (a.startsWith('--inventory=')) {
       inventoryPath = a.slice('--inventory='.length);
       continue;
@@ -124,15 +163,29 @@ async function main() {
     usage(1);
   }
 
-  const results = await applyModeToFleet({
-    repoRoot,
-    inventoryPath,
-    modePath,
-    piIds: piIds.length > 0 ? piIds : undefined,
-    concurrency: Number.isFinite(concurrency) ? concurrency : 8,
-    timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 2500,
-    dryRun,
-  });
+  const results = await (async () => {
+    if (cmd === 'apply-mode') {
+      return await applyModeToFleet({
+        repoRoot,
+        inventoryPath,
+        modePath,
+        piIds: piIds.length > 0 ? piIds : undefined,
+        concurrency: Number.isFinite(concurrency) ? concurrency : 8,
+        timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 2500,
+        dryRun,
+      });
+    }
+    const mode = await loadModeFromFile(repoRoot, modePath);
+    return await applyKioskStateToFleetFromObject({
+      repoRoot,
+      inventoryPath,
+      mode,
+      piIds: piIds.length > 0 ? piIds : undefined,
+      concurrency: Number.isFinite(concurrency) ? concurrency : 8,
+      timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 2500,
+      dryRun,
+    });
+  })();
 
   const failed = results.filter((r) => !r.ok);
   for (const r of results) {

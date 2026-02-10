@@ -52,6 +52,8 @@ Apply a "mode/profile" (kiosk URL parameters, channel pinning, QR hide/lock) fro
 This uses each Pi's Node API on port 8080 (`POST /kiosk-url`), so it requires per-node API keys in env:
 `CHIBA_API_KEY_<PI_ID_SUFFIX>` (see `pis-secrets.env.example`).
 
+Profiles live in `cable/config/profiles/` (see `cable/config/profiles/README.md`).
+
 ```sh
 pnpm -C cable/apps/server ops:apply-mode -- \
   --inventory scripts/pis/registry.toml \
@@ -71,6 +73,14 @@ If you want to apply a local (ssh-based) launch profile that merges inventory + 
 Portrait screens:
 - Mark `orientation = "portrait"` in `registry.toml` for that Pi.
 - `apply-cable-launch.sh` will best-effort call the node rotate endpoint so Chromium runs in portrait.
+
+If you don't care about auth for this project, you can disable node API auth across the fleet:
+
+```sh
+PI_PASSWORD=interact ./scripts/pis/disable-node-auth.sh \
+  --registry ./scripts/pis/registry.toml \
+  --all --jobs 6
+```
 
 ## Stash Prefetch (NAS -> Pi Cache)
 

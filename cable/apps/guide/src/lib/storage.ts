@@ -54,3 +54,14 @@ export function loadScreenId(): string {
     return "";
   }
 }
+
+export function saveScreenId(screenId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const s = (screenId ?? "").trim();
+    if (!s) return;
+    window.localStorage.setItem("chiba:screen", s);
+  } catch {
+    // ignore storage errors
+  }
+}

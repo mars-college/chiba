@@ -79,6 +79,7 @@ import {
   loadDisplaySettings,
   loadScreenId,
   saveAudioSettings,
+  saveScreenId,
 } from "./lib/storage";
 import {
   DisplayTuningPanel,
@@ -102,6 +103,8 @@ import type {
   RemoteMessage,
   RemoteRegistration,
   ViewMode,
+  KioskState,
+  KioskStateRecord,
 } from "./types/guide";
 
 const log = createLogger("guide-app");
@@ -143,11 +146,53 @@ function App() {
   const hudSecParam = getFirstParam(params, PARAM_HUD_SEC_KEYS);
   const galleryEnabled = parseBooleanParam(galleryParam) === true;
   const playlistEnabled = parseBooleanParam(params.get(PARAM_PLAYLIST)) === true;
+
+  const [screenId, setScreenId] = useState(() =>
+    screenParam ? screenParam : loadScreenId()
+  );
+  const [kioskRecord, setKioskRecord] = useState<KioskStateRecord | null>(null);
+  const kioskState: KioskState | null = kioskRecord?.state ?? null;
+
+  // Keep screenId stable even if future navigations drop URL params.
+  useEffect(() => {
+    const s = (screenParam ?? "").trim();
+    if (s && s !== screenId) setScreenId(s);
+  }, [screenParam, screenId]);
+  useEffect(() => {
+    if (screenId) saveScreenId(screenId);
+  }, [screenId]);
+  useEffect(() => {
+    const sid = (screenId ?? "").trim();
+    if (!sid) return;
+    const ac = new AbortController();
+    void fetch(`/api/kiosk/state?screenId=${encodeURIComponent(sid)}`, { signal: ac.signal })
+      .then(async (r) => (r.ok ? ((await r.json()) as any) : null))
+      .then((json) => {
+        if (json?.ok) {
+          setKioskRecord((json.record ?? null) as KioskStateRecord | null);
+        }
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [screenId]);
+
+  const galleryEnabledEffective =
+    kioskState?.mode === "gallery"
+      ? true
+      : kioskState?.mode === "guide"
+        ? false
+        : galleryEnabled;
+  const playlistEnabledEffective =
+    typeof kioskState?.playlist === "boolean" ? kioskState.playlist : playlistEnabled;
+  const pinnedChannelKey = kioskState?.channel ?? pinnedChannelParam;
   const channelLocked =
-    parseBooleanParam(lockParam) ?? (galleryEnabled ? true : false);
-  const qrForced = parseBooleanParam(qrParam);
+    typeof kioskState?.lock === "boolean"
+      ? kioskState.lock
+      : parseBooleanParam(lockParam) ?? (galleryEnabledEffective ? true : false);
+  const qrForced =
+    typeof kioskState?.qr === "boolean" ? kioskState.qr : parseBooleanParam(qrParam);
   // Default to hiding the Remote QR in gallery/kiosk installs unless explicitly enabled.
-  const qrAllowed = qrForced === null ? (galleryEnabled ? false : true) : qrForced;
+  const qrAllowed = qrForced === null ? (galleryEnabledEffective ? false : true) : qrForced;
   const qrLockedOff = qrAllowed === false;
 
   const hudModeOverride = useMemo(() => {
@@ -161,9 +206,6 @@ function App() {
     if (!Number.isFinite(n) || n < 0) return null;
     return n;
   }, [hudSecParam]);
-  const [, setScreenId] = useState(() =>
-    screenParam ? screenParam : loadScreenId()
-  );
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(() =>
     loadDisplaySettings()
   );
@@ -173,7 +215,7 @@ function App() {
     if (forcedMuted !== null) return { ...base, muted: forcedMuted };
     // Default to muted in gallery/kiosk mode so autoplay works reliably
     // across Chromium builds and without user gestures.
-    if (galleryEnabled) return { ...base, muted: true };
+    if (galleryEnabledEffective) return { ...base, muted: true };
     return base;
   });
   const splashOverride = parseBooleanParam(splashParam);
@@ -188,29 +230,35 @@ function App() {
     !skipSplash &&
     (isBaseGuide || splashOverride === true);
   const activeThemeId = useMemo(() => {
-    const fromParam = themeParam ? themeParam.trim() : "";
+    const fromParam = kioskState?.theme ? kioskState.theme.trim() : themeParam ? themeParam.trim() : "";
     const fromSettings = displaySettings.theme ?? "";
     const candidate = fromParam || fromSettings || DEFAULT_THEME_ID;
     return THEME_MAP[candidate] ? candidate : DEFAULT_THEME_ID;
-  }, [themeParam, displaySettings.theme]);
+  }, [kioskState?.theme, themeParam, displaySettings.theme]);
   const themeVars = useMemo(
     () => THEME_MAP[activeThemeId]?.vars ?? {},
     [activeThemeId]
   );
   const uiScale = useMemo(() => {
-    const raw = scaleParam
-      ? Number(scaleParam)
-      : displaySettings.scale ?? UI_SCALE_DEFAULT;
+    const raw =
+      typeof kioskState?.scale === "number"
+        ? kioskState.scale
+        : scaleParam
+          ? Number(scaleParam)
+          : displaySettings.scale ?? UI_SCALE_DEFAULT;
     if (!Number.isFinite(raw)) return UI_SCALE_DEFAULT;
     return clamp(raw, UI_SCALE_MIN, UI_SCALE_MAX);
-  }, [scaleParam, displaySettings.scale]);
+  }, [kioskState?.scale, scaleParam, displaySettings.scale]);
   const textScale = useMemo(() => {
-    const raw = textScaleParam
-      ? Number(textScaleParam)
-      : displaySettings.textScale ?? TEXT_SCALE_DEFAULT;
+    const raw =
+      typeof kioskState?.textScale === "number"
+        ? kioskState.textScale
+        : textScaleParam
+          ? Number(textScaleParam)
+          : displaySettings.textScale ?? TEXT_SCALE_DEFAULT;
     if (!Number.isFinite(raw)) return TEXT_SCALE_DEFAULT;
     return clamp(raw, TEXT_SCALE_MIN, TEXT_SCALE_MAX);
-  }, [textScaleParam, displaySettings.textScale]);
+  }, [kioskState?.textScale, textScaleParam, displaySettings.textScale]);
   const masterVolume = useMemo(() => {
     const raw = audioSettings.volume;
     if (!Number.isFinite(raw)) return AUDIO_VOLUME_DEFAULT;
@@ -272,10 +320,15 @@ function App() {
   const slotCount = indexData.timeSlots.length;
   const isPortrait = viewportSize.height >= viewportSize.width;
   const visibleHours = useMemo(() => {
-    const raw = hoursParam ? Number(hoursParam) : displaySettings.hours ?? NaN;
+    const raw =
+      typeof kioskState?.hours === "number"
+        ? kioskState.hours
+        : hoursParam
+          ? Number(hoursParam)
+          : displaySettings.hours ?? NaN;
     if (Number.isFinite(raw) && raw > 0) return raw;
     return isPortrait ? PORTRAIT_VISIBLE_HOURS : LANDSCAPE_VISIBLE_HOURS;
-  }, [hoursParam, displaySettings.hours, isPortrait]);
+  }, [kioskState?.hours, hoursParam, displaySettings.hours, isPortrait]);
   const visibleSlotCount = useMemo(() => {
     const minutes = Math.max(1, indexData.slotMinutes);
     return Math.max(1, Math.round((visibleHours * 60) / minutes));
@@ -286,7 +339,7 @@ function App() {
     [allChannels]
   );
   const pinnedChannel = useMemo(() => {
-    const raw = (pinnedChannelParam ?? "").trim();
+    const raw = (pinnedChannelKey ?? "").trim();
     if (!raw) return null;
     const maybeNumber = normalizeChannelNumber(raw);
     if (maybeNumber !== null) {
@@ -297,7 +350,7 @@ function App() {
       );
     }
     return allChannels.find((channel) => channel.id === raw) ?? null;
-  }, [allChannels, pinnedChannelParam]);
+  }, [allChannels, pinnedChannelKey]);
   const currentSlotIndex = useMemo(
     () =>
       getCurrentSlotIndex(
@@ -384,6 +437,16 @@ function App() {
   const pinWaitUntilRef = useRef<number | null>(null);
   const autoHoldUntilRef = useRef(0);
   const autoResetPendingRef = useRef(false);
+
+  // When kiosk state changes (from fetch or WS), allow gallery to re-tune and
+  // apply forced QR visibility immediately.
+  useEffect(() => {
+    if (!kioskRecord) return;
+    galleryAutoplayTargetRef.current = null;
+    if (typeof kioskState?.qr === "boolean") {
+      setShowQr(kioskState.qr);
+    }
+  }, [kioskRecord?.updatedAt, kioskState?.qr]);
   const lastFrameRef = useRef<number | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const rowsRef = useRef<HTMLDivElement | null>(null);
@@ -422,12 +485,12 @@ function App() {
   useEffect(() => {
     // If a pinned channel was requested, wait briefly for the real index to load
     // instead of autoplaying fallback content (common in dev).
-    const raw = (pinnedChannelParam ?? "").trim();
+    const raw = (pinnedChannelKey ?? "").trim();
     const pinRequested = raw.length > 0;
-    if (!galleryEnabled || !pinRequested) return;
+    if (!galleryEnabledEffective || !pinRequested) return;
     if (pinWaitUntilRef.current !== null) return;
     pinWaitUntilRef.current = Date.now() + 4000;
-  }, [galleryEnabled, pinnedChannelParam]);
+  }, [galleryEnabledEffective, pinnedChannelKey]);
 
   const getViewportMetrics = useCallback(() => {
     const viewport = viewportRef.current;
@@ -523,7 +586,7 @@ function App() {
     check();
     const interval = window.setInterval(check, 100);
     return () => window.clearInterval(interval);
-  }, [channelLocked, galleryEnabled]);
+  }, [channelLocked, galleryEnabledEffective]);
   const activeRow = selectedRow;
 
   const selectedChannel = channels[activeRow];
@@ -535,7 +598,7 @@ function App() {
     null;
 
   const galleryPlaylist = useMemo(() => {
-    if (!galleryEnabled || !playlistEnabled) return [];
+    if (!galleryEnabledEffective || !playlistEnabledEffective) return [];
     const targetChannel = pinnedChannel ?? selectedChannel ?? channels[0] ?? null;
     if (!targetChannel) return [];
     const items = targetChannel.schedule.filter((slot) => Boolean(slot.url));
@@ -548,7 +611,13 @@ function App() {
       uniq.push(item);
     }
     return uniq;
-  }, [galleryEnabled, playlistEnabled, pinnedChannel, selectedChannel, channels]);
+  }, [
+    galleryEnabledEffective,
+    playlistEnabledEffective,
+    pinnedChannel,
+    selectedChannel,
+    channels,
+  ]);
 
   const [galleryPlaylistIndex, setGalleryPlaylistIndex] = useState(0);
   const stashPrefetchRef = useRef<{ at: number; forUrl: string; nextUrl: string } | null>(null);
@@ -912,7 +981,7 @@ function App() {
   const galleryAdvanceCooldownRef = useRef(0);
   const advanceGalleryPlaylist = useCallback(
     (reason: string) => {
-      if (!galleryEnabled || !playlistEnabled) return;
+      if (!galleryEnabledEffective || !playlistEnabledEffective) return;
       if (viewMode !== "guide") return;
       // Avoid tight error loops if the stash cache is cold or the NAS is down.
       // (Video elements can emit multiple errors very quickly for the same URL.)
@@ -934,8 +1003,8 @@ function App() {
       });
     },
     [
-      galleryEnabled,
-      playlistEnabled,
+      galleryEnabledEffective,
+      playlistEnabledEffective,
       viewMode,
       pinnedChannel,
       selectedChannel,
@@ -946,11 +1015,11 @@ function App() {
   );
 
   useEffect(() => {
-    if (!galleryEnabled) return;
+    if (!galleryEnabledEffective) return;
     if (viewMode !== "guide") return;
     if (!channels.length) return;
 
-    const pinRequested = (pinnedChannelParam ?? "").trim().length > 0;
+    const pinRequested = (pinnedChannelKey ?? "").trim().length > 0;
     if (pinRequested && !pinnedChannel) {
       const waitUntil = pinWaitUntilRef.current;
       if (typeof waitUntil === "number" && Date.now() < waitUntil) {
@@ -978,7 +1047,7 @@ function App() {
     pauseUntilRef.current = Date.now() + USER_PAUSE_MS;
 
     const program =
-      playlistEnabled && galleryPlaylist.length
+      playlistEnabledEffective && galleryPlaylist.length
         ? galleryPlaylist[Math.max(0, galleryPlaylistIndex) % galleryPlaylist.length]
         : getProgramForChannel(targetChannel);
     if (program?.url) {
@@ -987,14 +1056,14 @@ function App() {
   }, [
     channels,
     currentSlotIndex,
-    galleryEnabled,
+    galleryEnabledEffective,
     getProgramForChannel,
     openProgram,
     pinnedChannel,
-    pinnedChannelParam,
+    pinnedChannelKey,
     selectedChannel,
     viewMode,
-    playlistEnabled,
+    playlistEnabledEffective,
     galleryPlaylist,
     galleryPlaylistIndex,
   ]);
@@ -1004,7 +1073,7 @@ function App() {
 
   const handleGalleryPlaylistError = useCallback(
     (_kind: string, url: string) => {
-      if (!galleryEnabled || !playlistEnabled) {
+      if (!galleryEnabledEffective || !playlistEnabledEffective) {
         advanceGalleryPlaylist("error");
         return;
       }
@@ -1054,8 +1123,8 @@ function App() {
       advanceGalleryPlaylist("error");
     },
     [
-      galleryEnabled,
-      playlistEnabled,
+      galleryEnabledEffective,
+      playlistEnabledEffective,
       viewMode,
       advanceGalleryPlaylist,
       setPlayerReady,
@@ -1065,7 +1134,7 @@ function App() {
   useEffect(() => {
     // Playlist lookahead: while one item is playing, warm the next stash item
     // so we don't stall/skip on cache misses.
-    if (!galleryEnabled || !playlistEnabled) return;
+    if (!galleryEnabledEffective || !playlistEnabledEffective) return;
     if (!playerOpen || !playerUrl) return;
     if (viewMode !== "guide") return;
     if (!galleryPlaylist.length) return;
@@ -1092,8 +1161,8 @@ function App() {
     // Fire-and-forget. Ignore errors; /stash may return 404 while warming.
     void fetch(prefetchUrl, { method: "GET" }).catch(() => {});
   }, [
-    galleryEnabled,
-    playlistEnabled,
+    galleryEnabledEffective,
+    playlistEnabledEffective,
     playerOpen,
     playerUrl,
     viewMode,
@@ -1821,6 +1890,30 @@ function App() {
     (msg) => {
       const tuningLocked = channelLocked && viewMode === "guide";
 
+      if (msg.type === "kiosk_state") {
+        if (msg.screenId !== screenId) return;
+        setKioskRecord(msg.record);
+        // Allow immediate re-tune on the next gallery effect pass.
+        galleryAutoplayTargetRef.current = null;
+        // If we're currently in art view (or any non-guide route), return to the guide.
+        if (viewMode !== "guide") {
+          const sp = new URLSearchParams(window.location.search);
+          const qs = sp.toString();
+          window.location.assign(`/${qs ? `?${qs}` : ""}`);
+        }
+        return;
+      }
+
+      if (msg.type === "open_art") {
+        if (msg.screenId !== screenId) return;
+        const sp = new URLSearchParams(window.location.search);
+        sp.set(PARAM_ART_INDEX, String(Math.max(0, Math.floor(msg.index))));
+        const qs = sp.toString();
+        const ch = encodeURIComponent(msg.channelId);
+        window.location.assign(`/channel/${ch}${qs ? `?${qs}` : ""}`);
+        return;
+      }
+
       if (msg.type === "mic") {
         if (msg.from === "remote" && viewMode !== "remote") {
           void handleGuideMicMessage(msg);
@@ -1904,8 +1997,17 @@ function App() {
           const returnRow = Number.isFinite(returnRowParam)
             ? Math.floor(returnRowParam)
             : null;
-          const target = returnRow === null ? "/" : `/?r=${returnRow}`;
-          window.location.assign(target);
+          // Preserve kiosk/launch params when returning to the guide.
+          // Otherwise a remote "Guide" action drops `gallery=1`, `nosplash=1`,
+          // pinned channel, QR/lock, etc and the kiosk "snaps back" to defaults.
+          const sp = new URLSearchParams(window.location.search);
+          if (returnRow === null) {
+            sp.delete(PARAM_RETURN_ROW);
+          } else {
+            sp.set(PARAM_RETURN_ROW, String(returnRow));
+          }
+          const qs = sp.toString();
+          window.location.assign(`/${qs ? `?${qs}` : ""}`);
         }
         return;
       }
@@ -2160,13 +2262,10 @@ function App() {
   }, [displaySettings]);
 
   useEffect(() => {
-    if (!screenParam) return;
-    setScreenId(screenParam);
-    try {
-      window.localStorage.setItem("chiba:screen", screenParam);
-    } catch {
-      // ignore
-    }
+    const s = (screenParam ?? "").trim();
+    if (!s) return;
+    setScreenId(s);
+    saveScreenId(s);
   }, [screenParam]);
 
   useEffect(() => {
@@ -2698,7 +2797,7 @@ function App() {
         }
       }
       let remoteUrl = (data.remoteUrl as string) ?? "";
-      if (galleryEnabled) {
+      if (galleryEnabledEffective) {
         remoteUrl = appendQueryParam(remoteUrl, PARAM_GALLERY, "1");
       }
       if (channelLocked) {
@@ -2748,7 +2847,7 @@ function App() {
     metaRemote: remoteOverride?.baseUrl ?? metaRemote,
   });
   let fallbackRemoteUrl = fallbackRemote.remoteUrl;
-  if (galleryEnabled) {
+  if (galleryEnabledEffective) {
     fallbackRemoteUrl = appendQueryParam(fallbackRemoteUrl, PARAM_GALLERY, "1");
   }
   if (channelLocked) {
@@ -2901,7 +3000,7 @@ function App() {
     setGuideViewState({
       gridStyle,
       now,
-      galleryMode: galleryEnabled,
+      galleryMode: galleryEnabledEffective,
       channelLocked,
       selectedChannel,
       selectedProgram,
@@ -2930,7 +3029,7 @@ function App() {
       playerKind,
       playerMeta,
       showPlayerHud,
-      loopVideo: !(galleryEnabled && playlistEnabled),
+      loopVideo: !(galleryEnabledEffective && playlistEnabledEffective),
       ambientAudio,
       masterVolume,
       masterMuted,
@@ -2943,7 +3042,7 @@ function App() {
   }, [
     gridStyle,
     now,
-    galleryEnabled,
+    galleryEnabledEffective,
     channelLocked,
     selectedChannel,
     selectedProgram,
@@ -2971,8 +3070,7 @@ function App() {
     playerKind,
     playerMeta,
     showPlayerHud,
-    galleryEnabled,
-    playlistEnabled,
+    playlistEnabledEffective,
     ambientAudio,
     masterVolume,
     masterMuted,
