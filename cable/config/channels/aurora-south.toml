@@ -4,11 +4,14 @@ name = "Aurora Forecast (South)"
 call_sign = "AURS"
 accent = "#9fd6a6"
 description = "NOAA SWPC aurora forecast map (southern hemisphere)."
+blocks = [ "blk-aurora-south" ]
 
 [[program]]
 title = "Aurora Forecast"
 subtitle = "Southern Hemisphere"
 tag = "LIVE"
 duration_slots = 2
-source = { type = "url", value = "/swpc/aurora-south" }
 
+  [program.source]
+  type = "url"
+  value = "/swpc/aurora-south"

@@ -1,0 +1,8 @@
+id = "pl-ambient-gradient"
+name = "Ambient Gradient playlist"
+
+[[item]]
+media = "m-gradient-field-b772580634"
+duration_slots = 2
+title = "Gradient Field"
+tag = "LIVE"

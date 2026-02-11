@@ -4,11 +4,14 @@ name = "Aurora Forecast (North)"
 call_sign = "AURN"
 accent = "#9fd6a6"
 description = "NOAA SWPC aurora forecast map (northern hemisphere)."
+blocks = [ "blk-aurora-north" ]
 
 [[program]]
 title = "Aurora Forecast"
 subtitle = "Northern Hemisphere"
 tag = "LIVE"
 duration_slots = 2
-source = { type = "url", value = "/swpc/aurora-north" }
 
+  [program.source]
+  type = "url"
+  value = "/swpc/aurora-north"

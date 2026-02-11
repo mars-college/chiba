@@ -234,6 +234,7 @@ body {
 .table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .table th, .table td {
@@ -241,6 +242,7 @@ body {
   border-bottom: 1px solid rgba(255,255,255,0.07);
   vertical-align: top;
   font-size: 13px;
+  overflow: hidden;
 }
 
 .table th {
@@ -337,6 +339,14 @@ body {
   white-space: nowrap;
 }
 
+.col-sel { width: 44px; }
+.col-node { width: 240px; }
+.col-host { width: 190px; }
+.col-mini { width: 72px; }
+.col-vers { width: 380px; }
+.col-last { width: 92px; }
+.col-act { width: 96px; }
+
 .control-card {
   margin-bottom: 16px;
 }
@@ -413,6 +423,100 @@ body {
   white-space: nowrap;
 }
 
+.wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.twirl {
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-secondary);
+  margin-right: 8px;
+  cursor: pointer;
+  font-family: var(--mono);
+  line-height: 1;
+}
+
+.row-detail td {
+  padding-top: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+
+.detail-panel {
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.18);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 8px 0 10px;
+}
+
+.detail-title {
+  font-weight: 650;
+  margin-bottom: 10px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.kv {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.kv td {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  vertical-align: top;
+}
+
+.kv td.k {
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 12px;
+  color: var(--text-secondary);
+}
+
+.catalog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.catalog-item {
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.catalog-item summary {
+  cursor: pointer;
+}
+
+.catalog-pre {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.btn.active {
+  border-color: rgba(104, 228, 255, 0.35);
+  background: rgba(104, 228, 255, 0.10);
+  color: rgba(210, 250, 255, 0.95);
+}
+
 .sel-col {
   width: 1%;
   white-space: nowrap;
@@ -426,6 +530,9 @@ body {
     padding: 14px;
   }
   .control-grid {
+    grid-template-columns: 1fr;
+  }
+  .detail-grid {
     grid-template-columns: 1fr;
   }
 }

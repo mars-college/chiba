@@ -78,6 +78,20 @@ Notes:
 - The canonical list of query params lives in `cable/apps/guide/src/constants/params.ts`.
 - Rotation/orientation are not part of profiles; they are hardware properties in `scripts/pis/registry.toml`.
 
+## Prefetch (Caching Strategy)
+
+Profiles can optionally include a launcher-only hint:
+
+- `prefetch_channels = ["earl", ...]`
+
+When present:
+- `pnpm -C cable/apps/server ops:apply-mode` will ask each Pi's Cable server (port `8787`) to prefetch media for those channels:
+  - NAS-backed `source.type="path" + cache=true` via `POST /api/stash/prefetch`
+  - Remote `source.type="url" + cache=true` via `POST /api/cache/prefetch`
+- `scripts/pis/prefetch-stash.sh` also consumes `prefetch_channels` to warm `/stash` items before gallery playlists.
+
+If you only care about the NAS stash cache (the common case for gallery installs), leave the config as-is.
+
 ## Generated Reference
 
 To print a generated Markdown reference (from source-of-truth code), run:

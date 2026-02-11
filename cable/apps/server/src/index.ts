@@ -143,6 +143,18 @@ function broadcastWs(payload: unknown) {
     }
   });
 }
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const s = entry.trim();
+    if (!s) continue;
+    out.push(s);
+  }
+  return Array.from(new Set(out));
+}
 type RemoteControl =
   | {
       id: string;
@@ -1392,6 +1404,13 @@ type OpsApplyResult = {
   status: number | null;
   ms: number | null;
   error: string | null;
+  // Optional extra diagnostics (present for kiosk-url applies).
+  state?: { ok: boolean; status: number | null; ms: number | null; error?: string } | null;
+  prefetch?: {
+    channelIds: string[];
+    stash?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string };
+    cache?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string };
+  } | null;
 };
 
 function simplifyApplyResult(r: ApplyModeResult): OpsApplyResult {
@@ -1406,6 +1425,8 @@ function simplifyApplyResult(r: ApplyModeResult): OpsApplyResult {
     status: r.status,
     ms: r.ms,
     error: r.error ?? null,
+    state: (r as any).state ?? null,
+    prefetch: (r as any).prefetch ?? null,
   };
 }
 
@@ -1452,6 +1473,35 @@ app.get('/api/ops/profiles', async (_req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: 'ops_profiles_failed', message: (err as Error).message });
   }
+});
+
+app.get('/api/ops/catalog', async (_req, res) => {
+  // Expose the composable config model (media/playlists/blocks/channels) to the ops UI.
+  if (!loadedConfig) {
+    res.status(503).json({ ok: false, error: 'config_not_ready' });
+    return;
+  }
+
+  const media = Object.values(loadedConfig.mediaById ?? {});
+  const playlists = Object.values(loadedConfig.playlistsById ?? {});
+  const blocks = Object.values(loadedConfig.blocksById ?? {});
+
+  res.json({
+    ok: true,
+    configPath: loadedConfig.configPath,
+    manifestDir: loadedConfig.manifestDir,
+    libraryRoots: loadedConfig.libraryRoots,
+    counts: {
+      channels: loadedConfig.channels.length,
+      blocks: blocks.length,
+      playlists: playlists.length,
+      media: media.length,
+    },
+    channels: loadedConfig.channels,
+    blocks,
+    playlists,
+    media,
+  });
 });
 
 app.post('/api/ops/apply-profile', async (req, res) => {
@@ -2135,17 +2185,58 @@ app.post('/api/stash/prefetch', async (req, res) => {
   const body = (req.body ?? {}) as any;
   const rawPaths = Array.isArray(body.paths) ? body.paths : null;
   const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
+  const channelIds = normalizeStringArray(body.channelIds ?? body.channels);
+  const config = loadedConfig;
 
   let paths: string[] = [];
   if (rawPaths) {
     paths = rawPaths.filter((p: any) => typeof p === 'string' && p.trim()).map((p: string) => p.trim());
-  } else if (channelId && loadedConfig?.channels?.length) {
-    const channel = loadedConfig.channels.find((c) => c.id === channelId);
-    if (channel) {
-      paths = channel.programs
-        .map((p) => (p.source?.type === 'path' && p.source.cache ? p.source.value : null))
-        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
-    }
+  } else if ((channelId || channelIds.length) && config?.channels?.length) {
+    const keys = Array.from(new Set([channelId, ...channelIds].map((s) => s.trim()).filter(Boolean)));
+    const findChannel = (key: string) => {
+      const k = key.trim();
+      if (!k) return null;
+      const byId = config.channels.find((c) => c.id === k);
+      if (byId) return byId;
+      // allow numeric channel strings
+      const byNum = config.channels.find((c) => String(c.number ?? '').trim() === k);
+      return byNum ?? null;
+    };
+
+    const resolveProgramsForChannel = (channel: any): any[] => {
+      const blocks = Array.isArray(channel.blocks) ? channel.blocks : [];
+      if (!blocks.length) return Array.isArray(channel.programs) ? channel.programs : [];
+      const out: any[] = [];
+      for (const blockId of blocks) {
+        const block = (config as any).blocksById?.[blockId];
+        if (!block) continue;
+        if (Array.isArray(block.programs) && block.programs.length) {
+          out.push(...block.programs);
+          continue;
+        }
+        const playlistId = String(block.playlist ?? '').trim();
+        if (!playlistId) continue;
+        const playlist = (config as any).playlistsById?.[playlistId];
+        if (!playlist) continue;
+        for (const item of playlist.items ?? []) {
+          const mediaId = String(item.media ?? '').trim();
+          const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
+          const source = item.source ?? media?.source ?? null;
+          if (!source) continue;
+          out.push({ ...item, source });
+        }
+      }
+      return out.length ? out : (Array.isArray(channel.programs) ? channel.programs : []);
+    };
+
+    paths = keys
+      .map(findChannel)
+      .filter(Boolean)
+      .flatMap((channel: any) =>
+        resolveProgramsForChannel(channel)
+          .map((p: any) => (p.source?.type === 'path' && p.source.cache ? p.source.value : null))
+          .filter((p: any) => typeof p === 'string' && p.trim().length > 0)
+      );
   }
 
   const filtered = Array.from(new Set(paths))
@@ -2164,6 +2255,7 @@ app.post('/api/stash/prefetch', async (req, res) => {
     ok: true,
     queued: filtered.length,
     channelId: channelId || null,
+    channelIds: channelIds.length ? channelIds : null,
   });
 });
 
@@ -2174,21 +2266,63 @@ app.get('/api/stash/status', async (req, res) => {
   // - ?path=...        (single path)
   // - ?paths=...       (repeatable)
   const channelId = typeof req.query.channelId === 'string' ? req.query.channelId.trim() : '';
+  const channelIds = Array.isArray(req.query.channelIds)
+    ? req.query.channelIds
+    : typeof req.query.channelIds === 'string'
+    ? [req.query.channelIds]
+    : [];
   const pathParam = typeof req.query.path === 'string' ? req.query.path : '';
   const pathsParam = Array.isArray(req.query.paths)
     ? req.query.paths
     : typeof req.query.paths === 'string'
     ? [req.query.paths]
     : [];
+  const config = loadedConfig;
 
   let paths: string[] = [];
-  if (channelId && loadedConfig?.channels?.length) {
-    const channel = loadedConfig.channels.find((c) => c.id === channelId);
-    if (channel) {
-      paths = channel.programs
-        .map((p) => (p.source?.type === 'path' && p.source.cache ? p.source.value : null))
-        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
-    }
+  if ((channelId || channelIds.length) && config?.channels?.length) {
+    const keys = Array.from(new Set([channelId, ...channelIds].map((s) => String(s ?? '').trim()).filter(Boolean)));
+    const findChannel = (key: string) => {
+      const k = key.trim();
+      if (!k) return null;
+      const byId = config.channels.find((c) => c.id === k);
+      if (byId) return byId;
+      const byNum = config.channels.find((c) => String(c.number ?? '').trim() === k);
+      return byNum ?? null;
+    };
+    const resolveProgramsForChannel = (channel: any): any[] => {
+      const blocks = Array.isArray(channel.blocks) ? channel.blocks : [];
+      if (!blocks.length) return Array.isArray(channel.programs) ? channel.programs : [];
+      const out: any[] = [];
+      for (const blockId of blocks) {
+        const block = (config as any).blocksById?.[blockId];
+        if (!block) continue;
+        if (Array.isArray(block.programs) && block.programs.length) {
+          out.push(...block.programs);
+          continue;
+        }
+        const playlistId = String(block.playlist ?? '').trim();
+        if (!playlistId) continue;
+        const playlist = (config as any).playlistsById?.[playlistId];
+        if (!playlist) continue;
+        for (const item of playlist.items ?? []) {
+          const mediaId = String(item.media ?? '').trim();
+          const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
+          const source = item.source ?? media?.source ?? null;
+          if (!source) continue;
+          out.push({ ...item, source });
+        }
+      }
+      return out.length ? out : (Array.isArray(channel.programs) ? channel.programs : []);
+    };
+    paths = keys
+      .map(findChannel)
+      .filter(Boolean)
+      .flatMap((channel: any) =>
+        resolveProgramsForChannel(channel)
+          .map((p: any) => (p.source?.type === 'path' && p.source.cache ? p.source.value : null))
+          .filter((p: any) => typeof p === 'string' && p.trim().length > 0)
+      );
   } else if (pathParam) {
     paths = [pathParam];
   } else if (pathsParam.length) {
@@ -2211,10 +2345,208 @@ app.get('/api/stash/status', async (req, res) => {
   res.json({
     ok: true,
     channelId: channelId || null,
+    channelIds: channelIds.length ? channelIds : null,
     items,
     cached: items.filter((i) => i.cached).length,
     total: items.length,
   });
+});
+
+app.post('/api/cache/prefetch', async (req, res) => {
+  // Best-effort prefetch of cached remote URLs (internet -> local cache).
+  const body = (req.body ?? {}) as any;
+  const rawUrls = Array.isArray(body.urls) ? body.urls : null;
+  const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
+  const channelIds = normalizeStringArray(body.channelIds ?? body.channels);
+  const config = loadedConfig;
+
+  let urls: string[] = [];
+  if (rawUrls) {
+    urls = rawUrls.filter((u: any) => typeof u === 'string' && u.trim()).map((u: string) => u.trim());
+  } else if ((channelId || channelIds.length) && config?.channels?.length) {
+    const keys = Array.from(new Set([channelId, ...channelIds].map((s) => s.trim()).filter(Boolean)));
+    const findChannel = (key: string) => {
+      const k = key.trim();
+      if (!k) return null;
+      const byId = config.channels.find((c) => c.id === k);
+      if (byId) return byId;
+      const byNum = config.channels.find((c) => String(c.number ?? '').trim() === k);
+      return byNum ?? null;
+    };
+    const resolveProgramsForChannel = (channel: any): any[] => {
+      const blocks = Array.isArray(channel.blocks) ? channel.blocks : [];
+      if (!blocks.length) return Array.isArray(channel.programs) ? channel.programs : [];
+      const out: any[] = [];
+      for (const blockId of blocks) {
+        const block = (config as any).blocksById?.[blockId];
+        if (!block) continue;
+        if (Array.isArray(block.programs) && block.programs.length) {
+          out.push(...block.programs);
+          continue;
+        }
+        const playlistId = String(block.playlist ?? '').trim();
+        if (!playlistId) continue;
+        const playlist = (config as any).playlistsById?.[playlistId];
+        if (!playlist) continue;
+        for (const item of playlist.items ?? []) {
+          const mediaId = String(item.media ?? '').trim();
+          const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
+          const source = item.source ?? media?.source ?? null;
+          if (!source) continue;
+          out.push({ ...item, source });
+        }
+      }
+      return out.length ? out : (Array.isArray(channel.programs) ? channel.programs : []);
+    };
+    urls = keys
+      .map(findChannel)
+      .filter(Boolean)
+      .flatMap((channel: any) =>
+        resolveProgramsForChannel(channel)
+          .map((p: any) => (p.source?.type === 'url' && p.source.cache ? p.source.value : null))
+          .filter((u: any) => typeof u === 'string' && u.trim().length > 0)
+      );
+  }
+
+  // Only prefetch http(s) URLs. Relative URLs won't work with ensureCached.
+  const filtered = Array.from(new Set(urls))
+    .map((u) => u.trim())
+    .filter((u) => u.length > 0)
+    .filter((u) => /^https?:\/\//i.test(u));
+
+  filtered.forEach((u) => {
+    void ensureCached(u).catch((err) => {
+      console.warn('[cache] prefetch failed', u, (err as Error).message);
+    });
+  });
+
+  res.json({
+    ok: true,
+    queued: filtered.length,
+    channelId: channelId || null,
+    channelIds: channelIds.length ? channelIds : null,
+  });
+});
+
+app.get('/api/cache/status', async (req, res) => {
+  // Report remote cache status without touching the network.
+  const channelId = typeof req.query.channelId === 'string' ? req.query.channelId.trim() : '';
+  const channelIds = Array.isArray(req.query.channelIds)
+    ? req.query.channelIds
+    : typeof req.query.channelIds === 'string'
+    ? [req.query.channelIds]
+    : [];
+  const urlParam = typeof req.query.url === 'string' ? req.query.url : '';
+  const urlsParam = Array.isArray(req.query.urls)
+    ? req.query.urls
+    : typeof req.query.urls === 'string'
+    ? [req.query.urls]
+    : [];
+  const config = loadedConfig;
+
+  let urls: string[] = [];
+  if ((channelId || channelIds.length) && config?.channels?.length) {
+    const keys = Array.from(new Set([channelId, ...channelIds].map((s) => String(s ?? '').trim()).filter(Boolean)));
+    const findChannel = (key: string) => {
+      const k = key.trim();
+      if (!k) return null;
+      const byId = config.channels.find((c) => c.id === k);
+      if (byId) return byId;
+      const byNum = config.channels.find((c) => String(c.number ?? '').trim() === k);
+      return byNum ?? null;
+    };
+    const resolveProgramsForChannel = (channel: any): any[] => {
+      const blocks = Array.isArray(channel.blocks) ? channel.blocks : [];
+      if (!blocks.length) return Array.isArray(channel.programs) ? channel.programs : [];
+      const out: any[] = [];
+      for (const blockId of blocks) {
+        const block = (config as any).blocksById?.[blockId];
+        if (!block) continue;
+        if (Array.isArray(block.programs) && block.programs.length) {
+          out.push(...block.programs);
+          continue;
+        }
+        const playlistId = String(block.playlist ?? '').trim();
+        if (!playlistId) continue;
+        const playlist = (config as any).playlistsById?.[playlistId];
+        if (!playlist) continue;
+        for (const item of playlist.items ?? []) {
+          const mediaId = String(item.media ?? '').trim();
+          const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
+          const source = item.source ?? media?.source ?? null;
+          if (!source) continue;
+          out.push({ ...item, source });
+        }
+      }
+      return out.length ? out : (Array.isArray(channel.programs) ? channel.programs : []);
+    };
+    urls = keys
+      .map(findChannel)
+      .filter(Boolean)
+      .flatMap((channel: any) =>
+        resolveProgramsForChannel(channel)
+          .map((p: any) => (p.source?.type === 'url' && p.source.cache ? p.source.value : null))
+          .filter((u: any) => typeof u === 'string' && u.trim().length > 0)
+      );
+  } else if (urlParam) {
+    urls = [urlParam];
+  } else if (urlsParam.length) {
+    urls = urlsParam.filter((u): u is string => typeof u === 'string');
+  }
+
+  const uniq = Array.from(new Set(urls.map((u) => u.trim()).filter(Boolean)))
+    .filter((u) => /^https?:\/\//i.test(u));
+
+  const items = uniq.map((u) => {
+    const name = cachedMediaFilenameForUrl(u);
+    const cachedPath = path.join(mediaCacheDir, name);
+    return { url: u, name, cached: fs.existsSync(cachedPath) };
+  });
+
+  res.json({
+    ok: true,
+    channelId: channelId || null,
+    channelIds: channelIds.length ? channelIds : null,
+    items,
+    cached: items.filter((i) => i.cached).length,
+    total: items.length,
+  });
+});
+
+app.post('/api/cache/clear', async (req, res) => {
+  const body = (req.body ?? {}) as any;
+  const clearStash = typeof body.stash === 'boolean' ? body.stash : true;
+  const clearCache = typeof body.cache === 'boolean' ? body.cache : true;
+
+  try {
+    if (clearStash && clearCache) {
+      await fsp.rm(mediaCacheDir, { recursive: true, force: true }).catch(() => {});
+      await fsp.mkdir(stashCacheDir, { recursive: true }).catch(() => {});
+      res.json({ ok: true, cleared: ['stash', 'cache'] });
+      return;
+    }
+    if (clearStash) {
+      await fsp.rm(stashCacheDir, { recursive: true, force: true }).catch(() => {});
+      await fsp.mkdir(stashCacheDir, { recursive: true }).catch(() => {});
+    }
+    if (clearCache) {
+      try {
+        const entries = await fsp.readdir(mediaCacheDir, { withFileTypes: true });
+        await Promise.all(
+          entries.map(async (e) => {
+            if (e.name === 'stash') return;
+            const p = path.join(mediaCacheDir, e.name);
+            await fsp.rm(p, { recursive: true, force: true }).catch(() => {});
+          })
+        );
+      } catch {
+        // ignore
+      }
+    }
+    res.json({ ok: true, cleared: [clearStash ? 'stash' : null, clearCache ? 'cache' : null].filter(Boolean) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'cache_clear_failed', message: (err as Error).message });
+  }
 });
 
 app.get('/media/:id', async (req, res) => {

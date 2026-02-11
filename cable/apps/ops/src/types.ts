@@ -80,6 +80,9 @@ export type OpsProfile = {
     qr?: boolean
     channel?: string
     playlist?: boolean
+    prefetch_channels?: string[]
+    prefetch_stash?: boolean
+    prefetch_cache?: boolean
     scale?: number
     text_scale?: number
     hours?: number
@@ -103,6 +106,12 @@ export type OpsApplyResult = {
   status: number | null
   ms: number | null
   error: string | null
+  state?: { ok: boolean; status: number | null; ms: number | null; error?: string } | null
+  prefetch?: {
+    channelIds: string[]
+    stash?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string }
+    cache?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string }
+  } | null
 }
 
 export type OpsApplyResponse = {
@@ -111,6 +120,19 @@ export type OpsApplyResponse = {
   modePath?: string
   channelId?: string
   index?: number
+}
+
+export type OpsCatalogResponse = {
+  ok: boolean
+  configPath?: string
+  manifestDir?: string
+  libraryRoots?: string[]
+  counts?: { channels: number; blocks: number; playlists: number; media: number }
+  channels?: any[]
+  blocks?: any[]
+  playlists?: any[]
+  media?: any[]
+  error?: string
 }
 
 export type GuideIndex = {

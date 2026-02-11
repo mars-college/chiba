@@ -1,0 +1,26 @@
+id = "pl-roadmap"
+name = "Roadmap Channel playlist"
+
+[[item]]
+media = "m-roadmap-channel-15d0ec0e07"
+duration_slots = 2
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+remote_controls = [ "app" ]
+
+[[item]]
+media = "m-roadmap-channel-15d0ec0e07"
+duration_slots = 2
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+remote_controls = [ "app" ]
+
+[[item]]
+media = "m-roadmap-channel-15d0ec0e07"
+duration_slots = 2
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+remote_controls = [ "app" ]

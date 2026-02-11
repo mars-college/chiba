@@ -1,0 +1,14 @@
+# Media object example.
+#
+# Media objects are reusable, referenceable assets used by playlists/blocks.
+# The guide runtime still ultimately consumes a URL; the server builds those URLs
+# from `source` and cache settings.
+#
+# This is optional today; channels can still inline `[[program]]`.
+
+id = "weatherstar-live"
+kind = "web"
+title = "WeatherStar 4000+"
+tag = "LIVE"
+source = { type = "url", value = "/weatherstar" }
+

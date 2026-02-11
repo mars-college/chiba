@@ -1,0 +1,10 @@
+id = "pl-code-lab"
+name = "Code Lab playlist"
+
+[[item]]
+media = "m-nebula-relay-1791dff0bc"
+duration_slots = 2
+title = "Nebula Relay"
+subtitle = "Generative Visualizer"
+tag = "LAB"
+remote_controls = [ "app" ]

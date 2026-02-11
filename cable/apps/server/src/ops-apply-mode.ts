@@ -23,6 +23,12 @@ export type CableModeDefaults = {
   channel?: string;
   ambient_channels?: string[];
   playlist?: boolean;
+  // Best-effort caching hints used by ops apply-mode.
+  // If present, apply-mode will ask the node cable server (8787) to prefetch
+  // dependencies for these channels after the kiosk URL is applied.
+  prefetch_channels?: string[];
+  prefetch_stash?: boolean; // default true
+  prefetch_cache?: boolean; // default true
   scale?: number;
   text_scale?: number;
   hours?: number;
@@ -40,6 +46,12 @@ export type ApplyModeResult = {
   status: number | null;
   ms: number | null;
   error?: string;
+  state?: { ok: boolean; status: number | null; ms: number | null; error?: string };
+  prefetch?: {
+    channelIds: string[];
+    stash?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string };
+    cache?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string };
+  };
 };
 
 type LimitFn = <T>(fn: () => Promise<T>) => Promise<T>;
@@ -209,6 +221,49 @@ function normalizeStringArray(value: unknown): string[] {
     out.push(s);
   }
   return Array.from(new Set(out));
+}
+
+async function postJson(opts: {
+  url: string;
+  body: unknown;
+  timeoutMs: number;
+}): Promise<{ ok: boolean; status: number | null; ms: number | null; json?: any; error?: string }> {
+  const started = Date.now();
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), opts.timeoutMs);
+  try {
+    const res = await fetch(opts.url, {
+      method: 'POST',
+      signal: ac.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(opts.body),
+    });
+    const ok = res.ok;
+    let json: any = undefined;
+    try {
+      json = await res.json();
+    } catch {
+      // ignore parse errors
+    }
+    return {
+      ok,
+      status: res.status,
+      ms: Date.now() - started,
+      json,
+      error: ok ? undefined : `http_${res.status}`,
+    };
+  } catch (err) {
+    return { ok: false, status: null, ms: null, error: (err as Error).message };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function resolvePrefetchChannels(pi: InventoryPi, cable: CableModeDefaults): string[] {
+  const explicit = normalizeStringArray((cable as any).prefetch_channels);
+  if (!explicit.length) return [];
+  const chosen = resolveChosenChannel(pi, cable);
+  return Array.from(new Set([...explicit, chosen].map((s) => s.trim()).filter(Boolean)));
 }
 
 function fnv1a32(input: string): number {
@@ -422,6 +477,7 @@ export async function applyKioskUrlToFleet(opts: {
   timeoutMs?: number;
   dryRun?: boolean;
   buildUrl: (pi: InventoryPi) => string;
+  afterOk?: (pi: InventoryPi) => Promise<{ prefetch?: ApplyModeResult['prefetch'] } | void>;
 }): Promise<ApplyModeResult[]> {
   const timeoutMs = opts.timeoutMs ?? 2500;
   const concurrency = Math.max(1, opts.concurrency ?? 8);
@@ -455,6 +511,8 @@ export async function applyKioskUrlToFleet(opts: {
         // doesn't require per-Pi manual intervention.
         //
         // We treat missing orientation as landscape-by-default (rotation 0).
+        let prefetch: ApplyModeResult['prefetch'] | undefined = undefined;
+        let state: ApplyModeResult['state'] | undefined = undefined;
         if (res.ok) {
           const o = String(pi.orientation ?? '')
             .trim()
@@ -463,6 +521,21 @@ export async function applyKioskUrlToFleet(opts: {
             pi.displayRotate ?? (o === 'portrait' ? 90 : 0);
           // Ignore failures; kiosk URL is the primary contract.
           await postRotate({ host: addr, apiKey, rotation, timeoutMs }).catch(() => {});
+
+          if (opts.afterOk) {
+            try {
+              const out = await opts.afterOk(pi);
+              if (out && typeof out === 'object' && 'prefetch' in out) {
+                prefetch = (out as any).prefetch ?? undefined;
+              }
+            } catch (err) {
+              // Best-effort; don't fail apply-mode.
+              prefetch = {
+                channelIds: [],
+                stash: { ok: false, status: null, ms: null, queued: null, error: (err as Error).message },
+              };
+            }
+          }
         }
 
         return {
@@ -472,6 +545,8 @@ export async function applyKioskUrlToFleet(opts: {
           status: res.status,
           ms: res.ms,
           error: res.error,
+          state,
+          prefetch,
         } satisfies ApplyModeResult;
       })
     )
@@ -496,6 +571,85 @@ export async function applyModeToFleet(opts: {
     timeoutMs: opts.timeoutMs,
     dryRun: opts.dryRun,
     buildUrl: (pi) => buildKioskUrl(pi, mergeCableMode(mode, pi.id)),
+    afterOk: async (pi) => {
+      const addr = pi.ip || pi.host;
+      if (!addr) return;
+
+      const cable = mergeCableMode(mode, pi.id);
+
+      // IMPORTANT:
+      // The guide treats `/api/kiosk/state` as higher-precedence than query params.
+      // That means a stale kiosk-state record can "override" a freshly applied kiosk URL.
+      // After applying the node kiosk URL (which restarts Chromium), also persist the
+      // equivalent kiosk state to the local cable server so the Pi lands in the expected
+      // channel/mode reliably.
+      const statePayload = buildKioskState(pi, cable);
+      const stateRes = await postJson({
+        url: `http://${addr}:${pi.serverPort}/api/kiosk/state`,
+        body: { screenId: pi.nodeName, state: statePayload, replace: true },
+        timeoutMs: opts.timeoutMs ?? 2500,
+      }).catch(() => null);
+
+      const channelIds = resolvePrefetchChannels(pi, cable);
+      if (!channelIds.length) return;
+
+      const wantStash = (cable as any).prefetch_stash === false ? false : true;
+      // Default false because older Pis may not have /api/cache/prefetch yet.
+      const wantCache = (cable as any).prefetch_cache === true;
+      const timeoutMs = opts.timeoutMs ?? 2500;
+
+      const firstChannelId = channelIds.length === 1 ? channelIds[0] : '';
+      const [stashRes, cacheRes] = await Promise.all([
+        wantStash
+          ? postJson({
+              url: `http://${addr}:${pi.serverPort}/api/stash/prefetch`,
+              // Back-compat: older servers only accept channelId.
+              body: { channelId: firstChannelId || undefined, channelIds },
+              timeoutMs,
+            })
+          : Promise.resolve(null),
+        wantCache
+          ? postJson({
+              url: `http://${addr}:${pi.serverPort}/api/cache/prefetch`,
+              body: { channelId: firstChannelId || undefined, channelIds },
+              timeoutMs,
+            })
+          : Promise.resolve(null),
+      ]);
+
+      const stash =
+        stashRes === null
+          ? undefined
+          : {
+              ok: stashRes.ok,
+              status: stashRes.status,
+              ms: stashRes.ms,
+              queued: typeof stashRes.json?.queued === 'number' ? stashRes.json.queued : null,
+              error: stashRes.error,
+            };
+      const cache =
+        cacheRes === null
+          ? undefined
+          : {
+              ok: cacheRes.ok,
+              status: cacheRes.status,
+              ms: cacheRes.ms,
+              queued: typeof cacheRes.json?.queued === 'number' ? cacheRes.json.queued : null,
+              error: cacheRes.error,
+            };
+
+      return {
+        prefetch: { channelIds, stash, cache },
+        state: stateRes
+          ? {
+              ok: stateRes.ok,
+              status: stateRes.status,
+              ms: stateRes.ms,
+              error: stateRes.error,
+            }
+          : { ok: false, status: null, ms: null, error: 'state_post_failed' },
+      } as any;
+    },
   });
 }
 

@@ -198,6 +198,24 @@ async function main() {
         : `${r.error ?? 'error'}`;
     console.log(`[${prefix}] ${r.pi.id} (${r.pi.host || 'no-host'}) -> ${detail}`);
     console.log(`      ${r.url}`);
+    if (r.state) {
+      const s = r.state.ok ? `state ok` : `state ${r.state.error ?? `http_${r.state.status ?? ''}`}`;
+      console.log(`      ${s}`);
+    }
+    if (r.prefetch && Array.isArray(r.prefetch.channelIds) && r.prefetch.channelIds.length > 0) {
+      const stash = r.prefetch.stash
+        ? r.prefetch.stash.ok
+          ? `stash queued=${r.prefetch.stash.queued ?? '?'}`
+          : `stash ${r.prefetch.stash.error ?? `http_${r.prefetch.stash.status ?? ''}`}`
+        : null;
+      const cache = r.prefetch.cache
+        ? r.prefetch.cache.ok
+          ? `cache queued=${r.prefetch.cache.queued ?? '?'}`
+          : `cache ${r.prefetch.cache.error ?? `http_${r.prefetch.cache.status ?? ''}`}`
+        : null;
+      const parts = [stash, cache].filter(Boolean).join(', ');
+      console.log(`      prefetch [${r.prefetch.channelIds.join(', ')}] ${parts ? `(${parts})` : ''}`.trimEnd());
+    }
   }
 
   if (failed.length > 0) {

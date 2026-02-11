@@ -4,6 +4,7 @@ name = "Earl"
 call_sign = "EARL"
 accent = "#d2ff73"
 description = "Midterms gallery: Earl (NAS-backed with local stash caching)."
+blocks = [ "blk-earl" ]
 
 [info]
 artist = "Earl Scioneaux, III"
@@ -12,56 +13,82 @@ description = "Various tool test results for music video."
 mode = "always"
 show_sec = 8
 
-# NOTE:
-# - These programs reference the NAS mount path.
-# - `cache = true` causes the server to serve via `/stash/...` which is a local
-#   cache on each Pi. If not cached yet, `/stash` returns a fast 404 so playlist
-#   mode can skip until media is warmed.
-
 [[program]]
 title = "Ayane Screen Test"
 tag = "EARL"
 duration_slots = 1
-source = { type = "path", value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Ayane Screen Test.mov", cache = true }
+
+  [program.source]
+  type = "path"
+  value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Ayane Screen Test.mov"
+  cache = true
 
 [[program]]
 title = "Bourbon Screen Test"
 tag = "EARL"
 duration_slots = 1
-source = { type = "path", value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Bourbon Screen Test.mov", cache = true }
+
+  [program.source]
+  type = "path"
+  value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Bourbon Screen Test.mov"
+  cache = true
 
 [[program]]
 title = "CompositesTest"
 tag = "EARL"
 duration_slots = 1
-source = { type = "path", value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/CompositesTest.mov", cache = true }
+
+  [program.source]
+  type = "path"
+  value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/CompositesTest.mov"
+  cache = true
 
 [[program]]
 title = "Drumdrops Screen Test"
 tag = "EARL"
 duration_slots = 1
-source = { type = "path", value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Drumdrops Screen Test.mov", cache = true }
+
+  [program.source]
+  type = "path"
+  value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Drumdrops Screen Test.mov"
+  cache = true
 
 [[program]]
 title = "Full Band Screen Test"
 tag = "EARL"
 duration_slots = 1
-source = { type = "path", value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Full Band Screen Test.mov", cache = true }
+
+  [program.source]
+  type = "path"
+  value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Full Band Screen Test.mov"
+  cache = true
 
 [[program]]
 title = "Star Motion Graphics B-Roll Test"
 tag = "EARL"
 duration_slots = 1
-source = { type = "path", value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Star motion graphics b-roll test.mov", cache = true }
+
+  [program.source]
+  type = "path"
+  value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Star motion graphics b-roll test.mov"
+  cache = true
 
 [[program]]
 title = "T Mort Screen Test"
 tag = "EARL"
 duration_slots = 1
-source = { type = "path", value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/T Mort Screen Test.mov", cache = true }
+
+  [program.source]
+  type = "path"
+  value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/T Mort Screen Test.mov"
+  cache = true
 
 [[program]]
 title = "Wik Screen Test"
 tag = "EARL"
 duration_slots = 1
-source = { type = "path", value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Wik Screen Test.mov", cache = true }
+
+  [program.source]
+  type = "path"
+  value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/Wik Screen Test.mov"
+  cache = true

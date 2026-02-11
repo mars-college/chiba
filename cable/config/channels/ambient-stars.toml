@@ -4,10 +4,13 @@ name = "Ambient Stars"
 call_sign = "STAR"
 accent = "#8fa7ff"
 description = "Low-data starfield background."
+blocks = [ "blk-ambient-stars" ]
 
 [[program]]
 title = "Starfield"
 tag = "LIVE"
 duration_slots = 2
-source = { type = "url", value = "/ambient/stars" }
 
+  [program.source]
+  type = "url"
+  value = "/ambient/stars"

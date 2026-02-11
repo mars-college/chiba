@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { applyProfile, fetchFleet, fetchGuideIndex, fetchPiHealth, fetchProfiles, openFleetStream, openProgram, setChannel, type FleetStreamMeta } from './lib/api'
+import { applyProfile, fetchCatalog, fetchFleet, fetchGuideIndex, fetchPiHealth, fetchProfiles, openFleetStream, openProgram, setChannel, type FleetStreamMeta } from './lib/api'
 import type { FleetPi, FleetPiHealth, GuideIndex, OpsProfile } from './types'
 
 function fmtAge(ms: number): string {
@@ -30,6 +30,7 @@ function rowKind(pi: FleetPi | FleetPiHealth | null): 'ok' | 'warn' | 'bad' | 'm
 }
 
 export default function App() {
+  const [view, setView] = useState<'fleet' | 'catalog'>('fleet')
   const [meta, setMeta] = useState<FleetStreamMeta | null>(null)
   const [healthById, setHealthById] = useState<Record<string, FleetPiHealth>>({})
   const [error, setError] = useState<string | null>(null)
@@ -50,8 +51,17 @@ export default function App() {
   const [controlBusy, setControlBusy] = useState(false)
   const [controlMsg, setControlMsg] = useState<string | null>(null)
   const [controlErr, setControlErr] = useState<string | null>(null)
+  const [expandedById, setExpandedById] = useState<Record<string, boolean>>({})
+  const [catalog, setCatalog] = useState<any | null>(null)
+  const [catalogErr, setCatalogErr] = useState<string | null>(null)
+  const [catalogTab, setCatalogTab] = useState<'channels' | 'blocks' | 'playlists' | 'media'>('channels')
+  const [catalogFilter, setCatalogFilter] = useState<string>('')
   const abortRef = useRef<AbortController | null>(null)
   const streamRef = useRef<{ close: () => void } | null>(null)
+
+  const toggleExpanded = (id: string) => {
+    setExpandedById((prev) => ({ ...prev, [id]: !prev[id] }))
+  }
 
   const closeStream = () => {
     streamRef.current?.close()
@@ -119,12 +129,53 @@ export default function App() {
     }
   }
 
+  const loadCatalog = async () => {
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
+    setCatalogErr(null)
+    try {
+      const res = await fetchCatalog(ac.signal)
+      if (!(res as any)?.ok) {
+        setCatalogErr((res as any)?.error ?? 'catalog_failed')
+        return
+      }
+      setCatalog(res)
+    } catch (e) {
+      setCatalogErr((e as Error).message)
+    }
+  }
+
   useEffect(() => {
     startStream({ reset: true })
     return () => {
       closeStream()
       abortRef.current?.abort()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (view !== 'catalog') return
+    if (catalog) return
+    void loadCatalog()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view])
+
+  // Load catalog opportunistically so the Fleet row details can resolve
+  // channel -> blocks -> playlists -> media without switching views.
+  useEffect(() => {
+    if (catalog || catalogErr) return
+    const ac = new AbortController()
+    ;(async () => {
+      try {
+        const res = await fetchCatalog(ac.signal)
+        if ((res as any)?.ok) setCatalog(res)
+      } catch {
+        // ignore
+      }
+    })()
+    return () => ac.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -258,17 +309,20 @@ export default function App() {
         </div>
 
         <nav className="sidebar-nav">
-          <button className={`nav-btn ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
+          <button className={`nav-btn ${view === 'fleet' && filter === 'all' ? 'active' : ''}`} onClick={() => { setView('fleet'); setFilter('all') }}>
             Fleet
           </button>
-          <button className={`nav-btn ${filter === 'bad' ? 'active' : ''}`} onClick={() => setFilter('bad')}>
+          <button className={`nav-btn ${view === 'fleet' && filter === 'bad' ? 'active' : ''}`} onClick={() => { setView('fleet'); setFilter('bad') }}>
             Offline
           </button>
-          <button className={`nav-btn ${filter === 'warn' ? 'active' : ''}`} onClick={() => setFilter('warn')}>
+          <button className={`nav-btn ${view === 'fleet' && filter === 'warn' ? 'active' : ''}`} onClick={() => { setView('fleet'); setFilter('warn') }}>
             Needs Update
           </button>
-          <button className={`nav-btn ${filter === 'ok' ? 'active' : ''}`} onClick={() => setFilter('ok')}>
+          <button className={`nav-btn ${view === 'fleet' && filter === 'ok' ? 'active' : ''}`} onClick={() => { setView('fleet'); setFilter('ok') }}>
             Healthy
+          </button>
+          <button className={`nav-btn ${view === 'catalog' ? 'active' : ''}`} onClick={() => setView('catalog')}>
+            Catalog
           </button>
         </nav>
 
@@ -279,6 +333,76 @@ export default function App() {
       </aside>
 
       <main className="main-content">
+        {view === 'catalog' ? (
+          <>
+            <div className="page-header">
+              <div className="page-header-row">
+                <div>
+                  <h1 className="page-title">Config Catalog</h1>
+                  <div className="page-subtitle">media, playlists, blocks, channels (from the cable server)</div>
+                </div>
+                <div className="actions">
+                  <button className="btn" onClick={() => { setCatalog(null); void loadCatalog() }}>
+                    Refresh
+                  </button>
+                </div>
+              </div>
+              {catalogErr ? <div className="alert alert-error">Catalog: {catalogErr}</div> : null}
+            </div>
+
+            <div className="card control-card">
+              <div className="card-header">
+                <div className="card-title">Browse</div>
+                <div className="card-meta">
+                  {catalog?.counts ? (
+                    <span className="mono">
+                      ch {catalog.counts.channels} | blk {catalog.counts.blocks} | pl {catalog.counts.playlists} | media {catalog.counts.media}
+                    </span>
+                  ) : (
+                    <span className="muted">loading…</span>
+                  )}
+                </div>
+              </div>
+              <div className="control-body">
+                <div className="control-row">
+                  <button className={`btn btn-small ${catalogTab === 'channels' ? 'active' : ''}`} onClick={() => setCatalogTab('channels')}>Channels</button>
+                  <button className={`btn btn-small ${catalogTab === 'blocks' ? 'active' : ''}`} onClick={() => setCatalogTab('blocks')}>Blocks</button>
+                  <button className={`btn btn-small ${catalogTab === 'playlists' ? 'active' : ''}`} onClick={() => setCatalogTab('playlists')}>Playlists</button>
+                  <button className={`btn btn-small ${catalogTab === 'media' ? 'active' : ''}`} onClick={() => setCatalogTab('media')}>Media</button>
+                  <input className="input" placeholder="filter by id/title…" value={catalogFilter} onChange={(e) => setCatalogFilter(e.target.value)} />
+                </div>
+
+                {(() => {
+                  const items: any[] = Array.isArray((catalog as any)?.[catalogTab]) ? (catalog as any)[catalogTab] : []
+                  const q = catalogFilter.trim().toLowerCase()
+                  const filtered = q
+                    ? items.filter((it) => {
+                        const id = String(it?.id ?? '').toLowerCase()
+                        const title = String(it?.title ?? it?.name ?? '').toLowerCase()
+                        return id.includes(q) || title.includes(q)
+                      })
+                    : items
+
+                  return (
+                    <div className="catalog-list">
+                      {filtered.map((it) => (
+                        <details key={String(it?.id ?? Math.random())} className="catalog-item">
+                          <summary>
+                            <span className="mono">{String(it?.id ?? '(no id)')}</span>
+                            {it?.title || it?.name ? <span className="muted"> {String(it.title ?? it.name)}</span> : null}
+                          </summary>
+                          <pre className="catalog-pre">{JSON.stringify(it, null, 2)}</pre>
+                        </details>
+                      ))}
+                      {!filtered.length ? <div className="muted">No items.</div> : null}
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+          </>
+        ) : (
+        <>
         <div className="page-header">
           <div className="page-header-row">
             <div>
@@ -509,9 +633,69 @@ export default function App() {
                     kind === 'warn' ? <Pill kind="warn" label="UPDATE" /> :
                     <Pill kind="ok" label="OK" />
 
-                  return (
+                  const expanded = Boolean(expandedById[pi.id])
+                  const kioskUrl = health?.chibaNode?.kioskUrl ?? ''
+                  const kioskParams: Array<[string, string]> | null = (() => {
+                    if (!kioskUrl) return null
+                    try {
+                      const u = new URL(kioskUrl)
+                      return Array.from(u.searchParams.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+                    } catch {
+                      return null
+                    }
+                  })()
+
+                  const kioskSummary = (() => {
+                    if (!kioskUrl) return null
+                    const entries = kioskParams ?? []
+                    const get = (k: string) => entries.find(([kk]) => kk === k)?.[1] ?? ''
+                    const channel = get('channel')
+                    const gallery = get('gallery')
+                    const playlist = get('playlist')
+                    const nosplash = get('nosplash')
+                    const bits = [
+                      channel ? `ch=${channel}` : '',
+                      gallery ? `g=${gallery}` : '',
+                      playlist ? `pl=${playlist}` : '',
+                      nosplash ? `ns=${nosplash}` : '',
+                    ].filter(Boolean)
+                    return bits.length ? `kiosk: ${bits.join(' ')}` : 'kiosk: (set)'
+                  })()
+
+                  const catalogChannel = (() => {
+                    const chId = kioskParams?.find(([k]) => k === 'channel')?.[1] ?? ''
+                    if (!chId) return null
+                    const channels: any[] = Array.isArray((catalog as any)?.channels) ? (catalog as any).channels : []
+                    return channels.find((c) => c?.id === chId) ?? null
+                  })()
+                  const channelDeps = (() => {
+                    if (!catalogChannel) return null
+                    const blocksById = new Map<string, any>()
+                    const playlistsById = new Map<string, any>()
+                    const mediaById = new Map<string, any>()
+                    for (const b of (Array.isArray((catalog as any)?.blocks) ? (catalog as any).blocks : [])) blocksById.set(String(b?.id ?? ''), b)
+                    for (const p of (Array.isArray((catalog as any)?.playlists) ? (catalog as any).playlists : [])) playlistsById.set(String(p?.id ?? ''), p)
+                    for (const m of (Array.isArray((catalog as any)?.media) ? (catalog as any).media : [])) mediaById.set(String(m?.id ?? ''), m)
+
+                    const blockIds: string[] = Array.isArray(catalogChannel?.blocks) ? catalogChannel.blocks : []
+                    const blocks = blockIds.map((id: string) => blocksById.get(String(id)) ?? null).filter(Boolean)
+                    const playlistIds = Array.from(new Set(blocks.map((b: any) => String(b?.playlist ?? '')).filter(Boolean)))
+                    const playlists = playlistIds.map((id) => playlistsById.get(id) ?? null).filter(Boolean)
+                    const mediaIds = Array.from(
+                      new Set(
+                        playlists
+                          .flatMap((pl: any) => Array.isArray(pl?.items) ? pl.items : [])
+                          .map((it: any) => String(it?.media ?? ''))
+                          .filter(Boolean)
+                      )
+                    )
+                    const media = mediaIds.map((id) => mediaById.get(id) ?? null).filter(Boolean)
+                    return { blockIds, playlistIds, mediaIds, blocks, playlists, media }
+                  })()
+
+                  return [
                     <tr key={pi.id} className={`row-${kind}`}>
-                      <td className="sel-col">
+                      <td className="sel-col col-sel">
                         <input
                           type="checkbox"
                           checked={Boolean(selectedById[pi.id])}
@@ -520,9 +704,19 @@ export default function App() {
                           title={`Select ${pi.id}`}
                         />
                       </td>
-                      <td>
+                      <td className="col-node">
                         <div className="node-cell">
-                          <div className="node-name">{pi.nodeName || pi.id}</div>
+                          <div className="node-name">
+                            <button
+                              type="button"
+                              className="twirl"
+                              onClick={() => toggleExpanded(pi.id)}
+                              title={expanded ? 'Collapse details' : 'Expand details'}
+                            >
+                              {expanded ? 'v' : '>'}
+                            </button>
+                            <span>{pi.nodeName || pi.id}</span>
+                          </div>
                           <div className="node-meta">
                             {statusPill}
                             {pi.cable?.orientation ? <span className="muted">{pi.cable.orientation}</span> : null}
@@ -530,11 +724,11 @@ export default function App() {
                           </div>
                         </div>
                       </td>
-                      <td>
+                      <td className="col-host">
                         <div className="mono">{pi.host || '-'}</div>
                         <div className="muted mono">{pi.ip ?? health?.resolvedIp ?? ''}</div>
                       </td>
-                      <td>
+                      <td className="col-mini">
                         {kind === 'muted'
                           ? <Pill kind="muted" label="-" />
                           : health
@@ -542,22 +736,18 @@ export default function App() {
                             : <Pill kind="muted" label="..." />
                         }
                       </td>
-                      <td>{health?.ping?.ok ? <Pill kind="ok" label={`${health.ping.ms ?? 0}ms`} /> : <Pill kind="muted" label={health ? '-' : '...'} />}</td>
-                      <td>{health?.tcp?.ssh22?.ok ? <Pill kind="ok" label="22" /> : <Pill kind="muted" label={health ? '-' : '...'} />}</td>
-                      <td>{health?.http?.nodeStatus?.ok ? <Pill kind="ok" label="status" /> : <Pill kind="muted" label={health ? '-' : '...'} />}</td>
-                      <td>{health?.http?.cableVersion?.ok ? <Pill kind="ok" label="version" /> : <Pill kind="muted" label={health ? '-' : '...'} />}</td>
-                      <td>
+                      <td className="col-mini">{health?.ping?.ok ? <Pill kind="ok" label={`${health.ping.ms ?? 0}ms`} /> : <Pill kind="muted" label={health ? '-' : '...'} />}</td>
+                      <td className="col-mini">{health?.tcp?.ssh22?.ok ? <Pill kind="ok" label="22" /> : <Pill kind="muted" label={health ? '-' : '...'} />}</td>
+                      <td className="col-mini">{health?.http?.nodeStatus?.ok ? <Pill kind="ok" label="status" /> : <Pill kind="muted" label={health ? '-' : '...'} />}</td>
+                      <td className="col-mini">{health?.http?.cableVersion?.ok ? <Pill kind="ok" label="version" /> : <Pill kind="muted" label={health ? '-' : '...'} />}</td>
+                      <td className="col-vers">
                         <div className="muted mono">node: {health?.chibaNode?.version ?? '?'}</div>
                         <div className="muted mono">cable: {health?.cableServer?.version ?? '?'}</div>
                         <div className="muted mono">sha: {health?.cableServer?.gitSha ?? '-'}</div>
-                        {health?.chibaNode?.kioskUrl ? (
-                          <div className="muted mono truncate" title={health.chibaNode.kioskUrl}>
-                            kiosk: {health.chibaNode.kioskUrl}
-                          </div>
-                        ) : null}
+                        {kioskSummary ? <div className="muted mono truncate" title={kioskUrl}>{kioskSummary}</div> : null}
                       </td>
-                      <td className="muted">{health ? `${fmtAge(Date.now() - health.lastCheckedAt)} ago` : '...'}</td>
-                      <td className="actions-cell">
+                      <td className="muted col-last">{health ? `${fmtAge(Date.now() - health.lastCheckedAt)} ago` : '...'}</td>
+                      <td className="actions-cell col-act">
                         {(pi.ip || pi.host) ? (
                           <button
                             className="btn btn-small"
@@ -571,8 +761,66 @@ export default function App() {
                           <span className="muted">-</span>
                         )}
                       </td>
-                    </tr>
-                  )
+                    </tr>,
+                    expanded ? (
+                      <tr key={`${pi.id}:detail`} className={`row-detail row-${kind}`}>
+                        <td colSpan={11}>
+                          <div className="detail-panel">
+                            <div className="detail-title">Kiosk URL</div>
+                            <div className="detail-grid">
+                              <div>
+                                <div className="muted small">raw</div>
+                                <div className="mono wrap">{kioskUrl || '-'}</div>
+                              </div>
+                              <div>
+                                <div className="muted small">params</div>
+                                {kioskParams && kioskParams.length ? (
+                                  <table className="kv">
+                                    <tbody>
+                                      {kioskParams.map(([k, v], idx) => (
+                                        <tr key={`${k}:${idx}`}>
+                                          <td className="mono k">{k}</td>
+                                          <td className="mono v">{v}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                ) : (
+                                  <div className="muted small">{kioskUrl ? '(none or unparseable)' : '(no kiosk url)'}</div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div style={{ marginTop: 14 }}>
+                              <div className="detail-title">Resolved Content (New Model)</div>
+                              {channelDeps ? (
+                                <div className="detail-grid">
+                                  <div>
+                                    <div className="muted small">channel</div>
+                                    <div className="mono">{String(catalogChannel?.id ?? '-')}</div>
+                                    <div className="muted small">blocks</div>
+                                    <div className="mono wrap">{channelDeps.blockIds.length ? channelDeps.blockIds.join(', ') : '(none)'}</div>
+                                    <div className="muted small">playlists</div>
+                                    <div className="mono wrap">{channelDeps.playlistIds.length ? channelDeps.playlistIds.join(', ') : '(none)'}</div>
+                                  </div>
+                                  <div>
+                                    <div className="muted small">media deps</div>
+                                    <div className="mono">{channelDeps.mediaIds.length} items</div>
+                                    <div className="muted small">first few</div>
+                                    <div className="mono wrap">{channelDeps.mediaIds.slice(0, 6).join(', ') || '(none)'}</div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="muted small">
+                                  {catalog ? 'No channel catalog match (or channel not set).' : 'Catalog not loaded yet.'}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null,
+                  ]
                 })}
                 {!rows.length ? (
                   <tr>
@@ -585,6 +833,8 @@ export default function App() {
             </table>
           </div>
         </div>
+        </>
+        )}
       </main>
     </div>
   )

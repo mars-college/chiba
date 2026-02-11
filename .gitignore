@@ -37,8 +37,8 @@ Thumbs.db
 *.tsbuildinfo
 
 # Media files (cached content, too large for git)
-media/
-media-cache/
+/media/
+/media-cache/
 *.mp4
 *.webm
 *.mov
@@ -55,3 +55,6 @@ media-cache/
 # Explicitly ignore the media assets folder
 config/assets
 .tmp
+
+# Local safety backups
+cable/config/channels.legacy/

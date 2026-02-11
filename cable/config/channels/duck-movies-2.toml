@@ -4,10 +4,14 @@ name = "Duck Movies Encore"
 call_sign = "DUCK"
 accent = "#ffcc6a"
 description = "Short-form duck cinema, on loop."
+blocks = [ "blk-duck-movies-2" ]
 
 [[program]]
 title = "6 Million Dollar Duck"
 subtitle = "Loop"
 tag = "FILM"
 duration_slots = 2
-source = { type = "path", value = "/Volumes/share/mars_films/2025/6_MILLION_DOLLAR_DUCK/EXPORTS/6_MILLION_DOLLAR_DUCK_1x1.mp4" }
+
+  [program.source]
+  type = "path"
+  value = "/Volumes/share/mars_films/2025/6_MILLION_DOLLAR_DUCK/EXPORTS/6_MILLION_DOLLAR_DUCK_1x1.mp4"

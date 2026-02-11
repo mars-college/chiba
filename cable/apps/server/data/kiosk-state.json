@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "updatedAt": 1770698359090,
+  "byScreenId": {
+    "commander": {
+      "updatedAt": 1770698359090,
+      "state": {
+        "mode": "gallery",
+        "channel": "code-lab",
+        "lock": false,
+        "qr": false,
+        "playlist": false,
+        "nosplash": true
+      }
+    }
+  }
+}

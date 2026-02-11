@@ -4,10 +4,13 @@ name = "Ambient Gradient"
 call_sign = "GRAD"
 accent = "#7ed7ff"
 description = "Low-data generative gradient background."
+blocks = [ "blk-ambient-gradient" ]
 
 [[program]]
 title = "Gradient Field"
 tag = "LIVE"
 duration_slots = 2
-source = { type = "url", value = "/ambient/gradient" }
 
+  [program.source]
+  type = "url"
+  value = "/ambient/gradient"

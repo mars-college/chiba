@@ -213,6 +213,54 @@ function normalizeAccent(accent?: string): string {
   return accent ?? "#7ed7ff";
 }
 
+function resolveProgramsForChannel(channel: ChannelManifest, loaded: LoadedConfig): ChannelManifest["programs"] {
+  const blocks = channel.blocks ?? [];
+  if (!blocks.length) return channel.programs ?? [];
+
+  const out: ChannelManifest["programs"] = [];
+  for (const blockId of blocks) {
+    const block = loaded.blocksById?.[blockId];
+    if (!block) continue;
+
+    // 1) Inline legacy programs on the block itself.
+    if (Array.isArray(block.programs) && block.programs.length) {
+      out.push(...block.programs);
+      continue;
+    }
+
+    // 2) Playlist reference.
+    const playlistId = (block.playlist ?? "").trim();
+    if (!playlistId) continue;
+    const playlist = loaded.playlistsById?.[playlistId];
+    if (!playlist) continue;
+
+    for (const item of playlist.items ?? []) {
+      const mediaId = (item.media ?? "").trim();
+      const media = mediaId ? loaded.mediaById?.[mediaId] ?? null : null;
+      const source = item.source ?? media?.source ?? undefined;
+      if (!source) continue;
+      out.push({
+        title: item.title ?? media?.title ?? "Untitled",
+        subtitle: item.subtitle ?? media?.subtitle,
+        tag: item.tag ?? media?.tag,
+        artist: item.artist ?? media?.artist,
+        info_title: item.info_title ?? undefined,
+        description: item.description ?? media?.description,
+        // Per-program HUD settings.
+        info_mode: item.info_mode ?? undefined,
+        show_sec: item.show_sec ?? undefined,
+        duration_slots: item.duration_slots ?? 1,
+        remote_controls: item.remote_controls,
+        source,
+      });
+    }
+  }
+
+  // Merge fallback: if blocks exist but don't resolve, keep legacy programs.
+  if (!out.length) return channel.programs ?? [];
+  return out;
+}
+
 export function buildIndexFromConfig(loaded: LoadedConfig): GuideIndex {
   const { config, channels } = loaded;
   const slotMinutes = config.channels.slot_minutes;
@@ -251,7 +299,7 @@ export function buildIndexFromConfig(loaded: LoadedConfig): GuideIndex {
     description: channel.description,
     accent: normalizeAccent(channel.accent),
     previewUrl: undefined,
-    schedule: buildSchedule(channel.programs, slotCount, slotMinutes, channel.info),
+    schedule: buildSchedule(resolveProgramsForChannel(channel, loaded), slotCount, slotMinutes, channel.info),
   }));
 
   return {

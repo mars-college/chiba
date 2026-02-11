@@ -1,0 +1,9 @@
+id = "pl-aurora-north"
+name = "Aurora Forecast (North) playlist"
+
+[[item]]
+media = "m-aurora-forecast-2492b0f15b"
+duration_slots = 2
+title = "Aurora Forecast"
+subtitle = "Northern Hemisphere"
+tag = "LIVE"

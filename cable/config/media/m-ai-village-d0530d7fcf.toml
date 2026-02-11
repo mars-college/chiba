@@ -1,0 +1,7 @@
+id = "m-ai-village-d0530d7fcf"
+title = "AI Village"
+tag = "LIVE"
+
+[source]
+type = "url"
+value = "/embed/ai-village"

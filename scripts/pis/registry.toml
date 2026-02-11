@@ -106,3 +106,10 @@ host = "mars27.local"
 ip = "100.128.0.126"
 node_name = "lower-west-4"
 orientation = "portrait"
+
+# Local dev / commander machine. Useful for testing ops flows against a local
+# cable server instance (port 8787) without targeting a Pi.
+[pis.commander]
+host = "192.168.0.117"
+ip = "192.168.0.117"
+node_name = "commander"

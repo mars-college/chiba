@@ -1,4 +1,4 @@
-import type { FleetPi, FleetPiHealth, FleetResponse, GuideIndex, OpsApplyResponse, OpsProfilesResponse } from '../types'
+import type { FleetPi, FleetPiHealth, FleetResponse, GuideIndex, OpsApplyResponse, OpsCatalogResponse, OpsProfilesResponse } from '../types'
 
 export async function fetchFleet(signal?: AbortSignal): Promise<FleetResponse> {
   const res = await fetch('/api/ops/fleet', { signal })
@@ -35,6 +35,15 @@ export async function fetchGuideIndex(signal?: AbortSignal): Promise<GuideIndex>
     throw new Error(`index_fetch_failed:${res.status}:${text.slice(0, 120)}`)
   }
   return (await res.json()) as GuideIndex
+}
+
+export async function fetchCatalog(signal?: AbortSignal): Promise<OpsCatalogResponse> {
+  const res = await fetch('/api/ops/catalog', { signal })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`catalog_fetch_failed:${res.status}:${text.slice(0, 240)}`)
+  }
+  return (await res.json()) as OpsCatalogResponse
 }
 
 export async function applyProfile(opts: { profileId: string; piIds: string[]; dryRun?: boolean }): Promise<OpsApplyResponse> {

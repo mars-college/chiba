@@ -1,0 +1,8 @@
+id = "m-nebula-relay-1791dff0bc"
+title = "Nebula Relay"
+subtitle = "Generative Visualizer"
+tag = "LAB"
+
+[source]
+type = "url"
+value = "http://localhost:8790/?ws=ws://localhost:8787/ws&appId=gen-art"

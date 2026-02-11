@@ -1,0 +1,8 @@
+id = "pl-ambient-stars"
+name = "Ambient Stars playlist"
+
+[[item]]
+media = "m-starfield-98bd79eb79"
+duration_slots = 2
+title = "Starfield"
+tag = "LIVE"

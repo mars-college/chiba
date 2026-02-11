@@ -1,0 +1,9 @@
+id = "pl-duck-movies-2"
+name = "Duck Movies Encore playlist"
+
+[[item]]
+media = "m-6-million-dollar-duck-e89a6005d8"
+duration_slots = 2
+title = "6 Million Dollar Duck"
+subtitle = "Loop"
+tag = "FILM"
