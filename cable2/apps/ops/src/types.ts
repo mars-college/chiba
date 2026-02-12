@@ -74,8 +74,12 @@ export type OpsProfile = {
   modePath: string
   defaults: {
     mode?: string
+    target_kind?: 'media' | 'playlist' | 'block' | 'channel'
+    target_id?: string
     theme?: string
     nosplash?: boolean
+    hud?: 'always' | 'start' | 'never'
+    hud_sec?: number
     lock?: boolean
     qr?: boolean
     channel?: string
@@ -86,6 +90,7 @@ export type OpsProfile = {
     scale?: number
     text_scale?: number
     hours?: number
+    prefetch_targets?: string[]
   }
   overridePis: string[]
 }
@@ -120,6 +125,33 @@ export type OpsApplyResponse = {
   modePath?: string
   channelId?: string
   index?: number
+  target?: 'profile' | 'channel' | 'block' | 'playlist' | 'media'
+  id?: string
+  resolvedChannelId?: string | null
+  warning?: string
+}
+
+export type OpsApplyTarget = 'profile' | 'channel' | 'block' | 'playlist' | 'media'
+
+export type OpsApplyTargetRequest = {
+  target: OpsApplyTarget
+  id: string
+  piIds: string[]
+  dryRun?: boolean
+  mode?: 'guide' | 'gallery'
+  targetKind?: 'media' | 'playlist' | 'block' | 'channel'
+  targetId?: string
+  channel?: string
+  lock?: boolean
+  showQr?: boolean
+  playlist?: boolean
+  nosplash?: boolean
+  hudMode?: 'always' | 'start' | 'never'
+  hudShowSec?: number
+  theme?: string
+  scale?: number
+  textScale?: number
+  hours?: number
 }
 
 export type OpsCatalogResponse = {

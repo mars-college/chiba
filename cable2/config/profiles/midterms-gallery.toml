@@ -20,9 +20,61 @@ nosplash = true
 lock = true
 qr = false
 
-# Current midterms content: Earl on upper-west-4 only.
-[pis.upper-west-4.cable]
-channel = "earl"
-playlist = true
-prefetch_channels = ["earl"]
+# Midterms content assignments:
+# - upper-west-1 -> Scanalyzer Daily Digest playlist (manual playlist apply)
+# - upper-west-2 -> Mars College Logo remixes v4 playlist (manual playlist apply)
+# - upper-west-4 -> Earl
+# - upper-east-4 -> Co-Lab
 
+[pis.upper-east-4.cable]
+target_kind = "playlist"
+target_id = "pl-co-lab"
+playlist = true
+prefetch_targets = ["playlist:pl-co-lab"]
+
+[pis.upper-west-4.cable]
+target_kind = "playlist"
+target_id = "pl-earl"
+playlist = true
+prefetch_targets = ["playlist:pl-earl"]
+
+# ---------------------------------------------------------------------------
+# Preparation steps
+# ---------------------------------------------------------------------------
+# Run:
+#   node cable2/packages/cli/dist/index.js prepare profile midterms-gallery --write --json
+#
+# This generates/updates media + playlists (and optional channel wrappers where configured)
+# needed by this profile so apply/prefetch stays data-driven.
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/co-lab"
+playlist_id = "pl-co-lab"
+playlist_title = "Co-Lab playlist"
+tag = "CO-LAB"
+cache = true
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl"
+playlist_id = "pl-earl"
+playlist_title = "Earl playlist"
+tag = "EARL"
+cache = true
+
+[[prepare.eden_collection]]
+source = "https://app.eden.art/collections/6980dc94fec7de4f6abca3a9"
+db = "PROD"
+playlist_id = "pl-scanalyzer-daily-digest"
+playlist_title = "Scanalyzer Daily Digest"
+tag = "MARZIPAN"
+artist = "Marzipan"
+cache = true
+
+[[prepare.eden_collection]]
+source = "https://app.eden.art/collections/698739a2eb7e84c5958045d3"
+db = "PROD"
+playlist_id = "pl-mars-college-logo-remixes-v4"
+playlist_title = "Mars College Logo remixes (volume 4)"
+tag = "MARZIPAN"
+artist = "Marzipan"
+cache = true

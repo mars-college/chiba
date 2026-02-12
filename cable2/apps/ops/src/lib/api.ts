@@ -1,4 +1,13 @@
-import type { FleetPi, FleetPiHealth, FleetResponse, GuideIndex, OpsApplyResponse, OpsCatalogResponse, OpsProfilesResponse } from '../types'
+import type {
+  FleetPi,
+  FleetPiHealth,
+  FleetResponse,
+  GuideIndex,
+  OpsApplyResponse,
+  OpsApplyTargetRequest,
+  OpsCatalogResponse,
+  OpsProfilesResponse,
+} from '../types'
 
 export async function fetchFleet(signal?: AbortSignal): Promise<FleetResponse> {
   const res = await fetch('/api/ops/fleet', { signal })
@@ -115,15 +124,48 @@ export async function openGuide(opts: {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       piIds: opts.piIds,
-      lock: opts.lock === true,
-      showQr: opts.showQr === true,
-      nosplash: opts.nosplash !== false,
+      lock: opts.lock,
+      showQr: opts.showQr,
+      nosplash: opts.nosplash,
       dryRun: opts.dryRun === true,
     }),
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`open_guide_failed:${res.status}:${text.slice(0, 240)}`)
+  }
+  return (await res.json()) as OpsApplyResponse
+}
+
+export async function applyTarget(opts: OpsApplyTargetRequest): Promise<OpsApplyResponse> {
+  const res = await fetch('/api/ops/apply-target', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      target: opts.target,
+      id: opts.id,
+      method: 'state',
+      piIds: opts.piIds,
+      dryRun: opts.dryRun === true,
+      mode: opts.mode,
+      targetKind: opts.targetKind,
+      targetId: opts.targetId,
+      channel: opts.channel,
+      lock: opts.lock,
+      showQr: opts.showQr,
+      playlist: opts.playlist,
+      nosplash: opts.nosplash,
+      hudMode: opts.hudMode,
+      hudShowSec: opts.hudShowSec,
+      theme: opts.theme,
+      scale: opts.scale,
+      textScale: opts.textScale,
+      hours: opts.hours,
+    }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`apply_target_failed:${res.status}:${text.slice(0, 240)}`)
   }
   return (await res.json()) as OpsApplyResponse
 }

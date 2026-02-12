@@ -16,8 +16,12 @@ export type InventoryPi = {
 
 export type CableModeDefaults = {
   mode?: string;
+  target_kind?: "media" | "playlist" | "block" | "channel";
+  target_id?: string;
   theme?: string;
   nosplash?: boolean;
+  hud?: "always" | "start" | "never";
+  hud_sec?: number;
   lock?: boolean;
   qr?: boolean;
   channel?: string;
@@ -27,6 +31,7 @@ export type CableModeDefaults = {
   // If present, apply-mode will ask the node cable server (8787) to prefetch
   // dependencies for these channels after the kiosk URL is applied.
   prefetch_channels?: string[];
+  prefetch_targets?: string[];
   prefetch_stash?: boolean; // default true
   prefetch_cache?: boolean; // default true
   scale?: number;
@@ -49,6 +54,7 @@ export type ApplyModeResult = {
   state?: { ok: boolean; status: number | null; ms: number | null; error?: string };
   prefetch?: {
     channelIds: string[];
+    targets?: string[];
     stash?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string };
     cache?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string };
   };
@@ -79,6 +85,38 @@ function createLimit(concurrency: number): LimitFn {
       });
       next();
     });
+}
+
+function fallbackPi(id: string): InventoryPi {
+  return {
+    id,
+    host: '',
+    ip: undefined,
+    nodeName: id,
+    guidePort: 5173,
+    serverPort: 8787,
+  };
+}
+
+function selectInventoryTargets(inventory: InventoryPi[], requestedIds?: string[]): {
+  targets: InventoryPi[];
+  missingIds: string[];
+} {
+  const trimmed = (requestedIds ?? [])
+    .map((id) => (typeof id === 'string' ? id.trim() : ''))
+    .filter((id) => id.length > 0);
+  const allow = new Set(trimmed);
+  if (allow.size === 0) return { targets: inventory, missingIds: [] };
+
+  const byId = new Map(inventory.map((pi) => [pi.id, pi]));
+  const targets: InventoryPi[] = [];
+  const missingIds: string[] = [];
+  for (const id of allow) {
+    const pi = byId.get(id);
+    if (pi) targets.push(pi);
+    else missingIds.push(id);
+  }
+  return { targets, missingIds };
 }
 
 export function toEnvSuffix(piId: string): string {
@@ -263,9 +301,46 @@ async function postJson(opts: {
 
 function resolvePrefetchChannels(pi: InventoryPi, cable: CableModeDefaults): string[] {
   const explicit = normalizeStringArray((cable as any).prefetch_channels);
-  if (!explicit.length) return [];
   const chosen = resolveChosenChannel(pi, cable);
   return Array.from(new Set([...explicit, chosen].map((s) => s.trim()).filter(Boolean)));
+}
+
+function parseTargetKind(value: unknown): "media" | "playlist" | "block" | "channel" | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "media") return "media";
+  if (normalized === "playlist") return "playlist";
+  if (normalized === "block") return "block";
+  if (normalized === "channel") return "channel";
+  return undefined;
+}
+
+function resolveModeTarget(
+  pi: InventoryPi,
+  cable: CableModeDefaults
+): { kind?: "media" | "playlist" | "block" | "channel"; id?: string; channelId?: string } {
+  const chosenChannel = resolveChosenChannel(pi, cable);
+  let kind = parseTargetKind((cable as any).target_kind);
+  let id = typeof cable.target_id === "string" ? cable.target_id.trim() : "";
+
+  if (kind === "channel" && !id) id = chosenChannel;
+  if (!kind && chosenChannel) {
+    kind = "channel";
+    id = chosenChannel;
+  }
+  const channelId = kind === "channel" ? id : undefined;
+  return {
+    kind,
+    id: id || undefined,
+    channelId,
+  };
+}
+
+function resolvePrefetchTargets(pi: InventoryPi, cable: CableModeDefaults): string[] {
+  const explicit = normalizeStringArray((cable as any).prefetch_targets);
+  const target = resolveModeTarget(pi, cable);
+  const implicit = target.kind && target.id ? [`${target.kind}:${target.id}`] : [];
+  return Array.from(new Set([...explicit, ...implicit]));
 }
 
 function fnv1a32(input: string): number {
@@ -300,14 +375,24 @@ function resolveChosenChannel(pi: InventoryPi, cable: CableModeDefaults): string
 }
 
 export function buildKioskState(pi: InventoryPi, cable: CableModeDefaults): KioskState {
-  const chosenChannel = resolveChosenChannel(pi, cable);
+  const target = resolveModeTarget(pi, cable);
   return {
     mode: cable.mode === 'gallery' ? 'gallery' : cable.mode === 'guide' ? 'guide' : undefined,
-    channel: chosenChannel || undefined,
+    targetKind: target.kind,
+    targetId: target.id,
+    channel: target.channelId,
     lock: typeof cable.lock === 'boolean' ? cable.lock : undefined,
     qr: typeof cable.qr === 'boolean' ? cable.qr : undefined,
     playlist: typeof cable.playlist === 'boolean' ? cable.playlist : undefined,
     nosplash: typeof cable.nosplash === 'boolean' ? cable.nosplash : undefined,
+    hudMode:
+      cable.hud === 'always' || cable.hud === 'start' || cable.hud === 'never'
+        ? cable.hud
+        : undefined,
+    hudShowSec:
+      typeof cable.hud_sec === 'number' && Number.isFinite(cable.hud_sec)
+        ? cable.hud_sec
+        : undefined,
     theme: typeof cable.theme === 'string' ? cable.theme : undefined,
     scale: typeof cable.scale === 'number' && Number.isFinite(cable.scale) ? cable.scale : undefined,
     textScale:
@@ -323,7 +408,7 @@ export function buildKioskUrl(pi: InventoryPi, cable: CableModeDefaults): string
   base.searchParams.set('screenId', pi.nodeName);
   if (cable.nosplash !== false) base.searchParams.set('nosplash', '1');
 
-  const chosenChannel = resolveChosenChannel(pi, cable);
+  const target = resolveModeTarget(pi, cable);
 
   if (typeof cable.theme === 'string' && cable.theme.trim().length > 0) {
     base.searchParams.set('theme', cable.theme.trim());
@@ -336,9 +421,15 @@ export function buildKioskUrl(pi: InventoryPi, cable: CableModeDefaults): string
   if (cable.mode === 'gallery' && cable.lock === false) base.searchParams.set('lock', '0');
   if (cable.qr === false) base.searchParams.set('qr', '0');
   if (cable.qr === true) base.searchParams.set('qr', '1');
-  if (chosenChannel) {
-    base.searchParams.set('channel', chosenChannel);
+  if (cable.hud === 'always' || cable.hud === 'start' || cable.hud === 'never') {
+    base.searchParams.set('hud', cable.hud);
   }
+  if (typeof cable.hud_sec === 'number' && Number.isFinite(cable.hud_sec)) {
+    base.searchParams.set('hudSec', String(cable.hud_sec));
+  }
+  if (target.channelId) base.searchParams.set('channel', target.channelId);
+  if (target.kind) base.searchParams.set('targetKind', target.kind);
+  if (target.id) base.searchParams.set('targetId', target.id);
   if (cable.playlist === true) base.searchParams.set('playlist', '1');
   if (typeof cable.scale === 'number' && Number.isFinite(cable.scale)) {
     base.searchParams.set('scale', String(cable.scale));
@@ -357,6 +448,7 @@ async function postKioskUrl(opts: {
   host: string;
   apiKey?: string | null;
   url: string;
+  restart?: boolean;
   timeoutMs: number;
 }): Promise<{ ok: boolean; status: number | null; ms: number | null; error?: string }> {
   const started = Date.now();
@@ -373,7 +465,7 @@ async function postKioskUrl(opts: {
       headers: {
         ...headers,
       },
-      body: JSON.stringify({ url: opts.url }),
+      body: JSON.stringify({ url: opts.url, restart: opts.restart ?? true }),
     });
     const ok = res.ok;
     return { ok, status: res.status, ms: Date.now() - started, error: ok ? undefined : `http_${res.status}` };
@@ -430,7 +522,7 @@ async function postKioskState(opts: {
       method: 'POST',
       signal: ac.signal,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ screenId: opts.screenId, state: opts.state }),
+      body: JSON.stringify({ screenId: opts.screenId, state: opts.state, replace: true }),
     });
     const ok = res.ok;
     return { ok, status: res.status, ms: Date.now() - started, error: ok ? undefined : `http_${res.status}` };
@@ -488,10 +580,8 @@ export async function applyKioskUrlToFleet(opts: {
 
   const inventory = await loadInventoryFromRegistry(opts.repoRoot, opts.inventoryPath);
 
-  const allow = new Set((opts.piIds ?? []).filter((s) => s.trim().length > 0));
-  const targets = allow.size > 0 ? inventory.filter((p) => allow.has(p.id)) : inventory;
-
-  return await Promise.all(
+  const { targets, missingIds } = selectInventoryTargets(inventory, opts.piIds);
+  const targetResults = await Promise.all(
     targets.map((pi) =>
       limit(async () => {
         const url = opts.buildUrl(pi);
@@ -528,8 +618,13 @@ export async function applyKioskUrlToFleet(opts: {
           if (opts.afterOk) {
             try {
               const out = await opts.afterOk(pi);
-              if (out && typeof out === 'object' && 'prefetch' in out) {
-                prefetch = (out as any).prefetch ?? undefined;
+              if (out && typeof out === 'object') {
+                if ('prefetch' in out) {
+                  prefetch = (out as any).prefetch ?? undefined;
+                }
+                if ('state' in out) {
+                  state = (out as any).state ?? undefined;
+                }
               }
             } catch (err) {
               // Best-effort; don't fail apply-mode.
@@ -554,6 +649,15 @@ export async function applyKioskUrlToFleet(opts: {
       })
     )
   );
+  const missingResults = missingIds.map((id) => ({
+    pi: fallbackPi(id),
+    url: '',
+    ok: false,
+    status: null,
+    ms: null,
+    error: 'unknown_pi_id',
+  }) satisfies ApplyModeResult);
+  return [...targetResults, ...missingResults];
 }
 
 export async function applyModeToFleet(opts: {
@@ -594,7 +698,8 @@ export async function applyModeToFleet(opts: {
       }).catch(() => null);
 
       const channelIds = resolvePrefetchChannels(pi, cable);
-      if (!channelIds.length) return;
+      const targets = resolvePrefetchTargets(pi, cable);
+      if (!channelIds.length && !targets.length) return;
 
       const wantStash = (cable as any).prefetch_stash === false ? false : true;
       // Default false because older Pis may not have /api/cache/prefetch yet.
@@ -602,19 +707,30 @@ export async function applyModeToFleet(opts: {
       const timeoutMs = opts.timeoutMs ?? 2500;
 
       const firstChannelId = channelIds.length === 1 ? channelIds[0] : '';
+      const firstTarget = targets.length === 1 ? targets[0] : '';
       const [stashRes, cacheRes] = await Promise.all([
         wantStash
           ? postJson({
               url: `http://${addr}:${pi.serverPort}/api/stash/prefetch`,
               // Back-compat: older servers only accept channelId.
-              body: { channelId: firstChannelId || undefined, channelIds },
+              body: {
+                channelId: firstChannelId || undefined,
+                channelIds,
+                target: firstTarget || undefined,
+                targets,
+              },
               timeoutMs,
             })
           : Promise.resolve(null),
         wantCache
           ? postJson({
               url: `http://${addr}:${pi.serverPort}/api/cache/prefetch`,
-              body: { channelId: firstChannelId || undefined, channelIds },
+              body: {
+                channelId: firstChannelId || undefined,
+                channelIds,
+                target: firstTarget || undefined,
+                targets,
+              },
               timeoutMs,
             })
           : Promise.resolve(null),
@@ -642,7 +758,7 @@ export async function applyModeToFleet(opts: {
             };
 
       return {
-        prefetch: { channelIds, stash, cache },
+        prefetch: { channelIds, targets, stash, cache },
         state: stateRes
           ? {
               ok: stateRes.ok,
@@ -673,6 +789,102 @@ export async function applyModeToFleetFromObject(opts: {
     timeoutMs: opts.timeoutMs,
     dryRun: opts.dryRun,
     buildUrl: (pi) => buildKioskUrl(pi, mergeCableMode(opts.mode, pi.id)),
+    afterOk: async (pi) => {
+      const addr = pi.ip || pi.host;
+      if (!addr) return;
+
+      const cable = mergeCableMode(opts.mode, pi.id);
+
+      // Keep kiosk state aligned with the applied URL so stale state records
+      // cannot override explicit runtime targets on next guide refresh.
+      const statePayload = buildKioskState(pi, cable);
+      const stateRes = await postJson({
+        url: `http://${addr}:${pi.serverPort}/api/kiosk/state`,
+        body: { screenId: pi.nodeName, state: statePayload, replace: true },
+        timeoutMs: opts.timeoutMs ?? 2500,
+      }).catch(() => null);
+
+      const channelIds = resolvePrefetchChannels(pi, cable);
+      const targets = resolvePrefetchTargets(pi, cable);
+      if (!channelIds.length && !targets.length) {
+        return {
+          state: stateRes
+            ? {
+                ok: stateRes.ok,
+                status: stateRes.status,
+                ms: stateRes.ms,
+                error: stateRes.error,
+              }
+            : { ok: false, status: null, ms: null, error: 'state_post_failed' },
+        } as any;
+      }
+
+      const wantStash = (cable as any).prefetch_stash === false ? false : true;
+      const wantCache = (cable as any).prefetch_cache === true;
+      const timeoutMs = opts.timeoutMs ?? 2500;
+      const firstChannelId = channelIds.length === 1 ? channelIds[0] : '';
+      const firstTarget = targets.length === 1 ? targets[0] : '';
+
+      const [stashRes, cacheRes] = await Promise.all([
+        wantStash
+          ? postJson({
+              url: `http://${addr}:${pi.serverPort}/api/stash/prefetch`,
+              body: {
+                channelId: firstChannelId || undefined,
+                channelIds,
+                target: firstTarget || undefined,
+                targets,
+              },
+              timeoutMs,
+            })
+          : Promise.resolve(null),
+        wantCache
+          ? postJson({
+              url: `http://${addr}:${pi.serverPort}/api/cache/prefetch`,
+              body: {
+                channelId: firstChannelId || undefined,
+                channelIds,
+                target: firstTarget || undefined,
+                targets,
+              },
+              timeoutMs,
+            })
+          : Promise.resolve(null),
+      ]);
+
+      const stash =
+        stashRes === null
+          ? undefined
+          : {
+              ok: stashRes.ok,
+              status: stashRes.status,
+              ms: stashRes.ms,
+              queued: typeof stashRes.json?.queued === 'number' ? stashRes.json.queued : null,
+              error: stashRes.error,
+            };
+      const cache =
+        cacheRes === null
+          ? undefined
+          : {
+              ok: cacheRes.ok,
+              status: cacheRes.status,
+              ms: cacheRes.ms,
+              queued: typeof cacheRes.json?.queued === 'number' ? cacheRes.json.queued : null,
+              error: cacheRes.error,
+            };
+
+      return {
+        prefetch: { channelIds, targets, stash, cache },
+        state: stateRes
+          ? {
+              ok: stateRes.ok,
+              status: stateRes.status,
+              ms: stateRes.ms,
+              error: stateRes.error,
+            }
+          : { ok: false, status: null, ms: null, error: 'state_post_failed' },
+      } as any;
+    },
   });
 }
 
@@ -690,10 +902,8 @@ export async function applyKioskStateToFleetFromObject(opts: {
   const limit = createLimit(concurrency);
   const inventory = await loadInventoryFromRegistry(opts.repoRoot, opts.inventoryPath);
 
-  const allow = new Set((opts.piIds ?? []).filter((s) => s.trim().length > 0));
-  const targets = allow.size > 0 ? inventory.filter((p) => allow.has(p.id)) : inventory;
-
-  return await Promise.all(
+  const { targets, missingIds } = selectInventoryTargets(inventory, opts.piIds);
+  const targetResults = await Promise.all(
     targets.map((pi) =>
       limit(async () => {
         const cable = mergeCableMode(opts.mode, pi.id);
@@ -717,17 +927,55 @@ export async function applyKioskStateToFleetFromObject(opts: {
           timeoutMs,
         });
 
+        // Keep persisted launcher URL aligned with state applies without forcing a restart.
+        // This prevents reboot/startup drift while avoiding visible flicker mid-session.
+        let urlSync:
+          | { ok: boolean; status: number | null; ms: number | null; error?: string }
+          | undefined = undefined;
+        if (res.ok) {
+          const apiKey = getApiKeyForPi(pi.id);
+          urlSync = await postKioskUrl({
+            host: addr,
+            apiKey,
+            url,
+            restart: false,
+            timeoutMs,
+          }).catch((err) => ({
+            ok: false,
+            status: null,
+            ms: null,
+            error: (err as Error).message,
+          }));
+        }
+
         return {
           pi,
           url,
-          ok: res.ok,
+          ok: res.ok && (urlSync ? urlSync.ok : true),
           status: res.status,
           ms: res.ms,
-          error: res.error,
+          error: res.error ?? (urlSync && !urlSync.ok ? `kiosk_url_sync_failed:${urlSync.error ?? 'unknown'}` : undefined),
+          state: urlSync
+            ? {
+                ok: urlSync.ok,
+                status: urlSync.status,
+                ms: urlSync.ms,
+                error: urlSync.error,
+              }
+            : undefined,
         } satisfies ApplyModeResult;
       })
     )
   );
+  const missingResults = missingIds.map((id) => ({
+    pi: fallbackPi(id),
+    url: '',
+    ok: false,
+    status: null,
+    ms: null,
+    error: 'unknown_pi_id',
+  }) satisfies ApplyModeResult);
+  return [...targetResults, ...missingResults];
 }
 
 export async function openArtOnFleet(opts: {
@@ -745,10 +993,8 @@ export async function openArtOnFleet(opts: {
   const limit = createLimit(concurrency);
   const inventory = await loadInventoryFromRegistry(opts.repoRoot, opts.inventoryPath);
 
-  const allow = new Set((opts.piIds ?? []).filter((s) => s.trim().length > 0));
-  const targets = allow.size > 0 ? inventory.filter((p) => allow.has(p.id)) : inventory;
-
-  return await Promise.all(
+  const { targets, missingIds } = selectInventoryTargets(inventory, opts.piIds);
+  const targetResults = await Promise.all(
     targets.map((pi) =>
       limit(async () => {
         const url = new URL(`http://localhost:${pi.guidePort}/channel/${encodeURIComponent(opts.channelId)}`);
@@ -786,4 +1032,13 @@ export async function openArtOnFleet(opts: {
       })
     )
   );
+  const missingResults = missingIds.map((id) => ({
+    pi: fallbackPi(id),
+    url: '',
+    ok: false,
+    status: null,
+    ms: null,
+    error: 'unknown_pi_id',
+  }) satisfies ApplyModeResult);
+  return [...targetResults, ...missingResults];
 }

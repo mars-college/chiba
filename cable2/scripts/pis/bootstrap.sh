@@ -3,8 +3,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ENV_FILE_OVERRIDE=""
 
 load_env() {
+  if [ -n "$ENV_FILE_OVERRIDE" ]; then
+    if [ ! -f "$ENV_FILE_OVERRIDE" ]; then
+      echo "Missing env file: $ENV_FILE_OVERRIDE"
+      exit 1
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE_OVERRIDE"
+    set +a
+    return
+  fi
   local f
   for f in "$REPO_ROOT/../.env.pis.local" "$REPO_ROOT/.env.pis.local"; do
     if [ -f "$f" ]; then
@@ -15,7 +27,6 @@ load_env() {
     fi
   done
 }
-load_env
 
 REGISTRY_PATH="$REPO_ROOT/../scripts/pis/registry.toml"
 if [ ! -f "$REGISTRY_PATH" ]; then
@@ -39,7 +50,7 @@ RSYNC_PROGRESS=0
 RSYNC_TIMEOUT_SEC=""
 
 usage() {
-  echo "Usage: $0 <pi-name> [--registry path] [--host host-or-ip] [--control-plane-url URL] [--enable-auto-reboot] [--no-reboot] [--rsync-progress] [--rsync-timeout-sec N]"
+  echo "Usage: $0 <pi-name> [--env-file path] [--registry path] [--host host-or-ip] [--control-plane-url URL] [--enable-auto-reboot] [--no-reboot] [--rsync-progress] [--rsync-timeout-sec N]"
   exit 1
 }
 
@@ -55,6 +66,14 @@ while [ $# -gt 0 ]; do
       ;;
     --help|-h)
       usage
+      ;;
+    --env-file)
+      ENV_FILE_OVERRIDE="$2"
+      shift 2
+      ;;
+    --env-file=*)
+      ENV_FILE_OVERRIDE="${1#*=}"
+      shift
       ;;
     --host)
       HOST_OVERRIDE="$2"
@@ -113,6 +132,8 @@ done
 if [ -z "$PI_NAME" ]; then
   usage
 fi
+
+load_env
 
 if [ ! -f "$REGISTRY_PATH" ]; then
   echo "Missing registry: $REGISTRY_PATH"
@@ -241,7 +262,7 @@ out = {
     "EDEN_KEY": (
         (node.get("eden_key") or "").strip()
         or (get_default("eden_key", "") or "").strip()
-        or env_first("CHIBA_EDEN_KEY", "EDEN_KEY")
+        or env_first("CHIBA_EDEN_KEY", "CHIBA_EDEN_API_KEY", "EDEN_API_KEY", "EDEN_KEY")
     ),
     "WIFI_SSID": (
         (node.get("wifi_ssid") or "").strip()
@@ -256,9 +277,18 @@ out = {
     "GUIDE_PORT": str(get_node("guide_port", get_default("guide_port", 5173))),
     "NODE_PORT": str(get_node("node_port", get_default("node_port", 8080))),
     "SERVER_PORT": str(get_node("server_port", get_default("server_port", 8787))),
-    "NAS_HOST": get_nested_node("nas", "host", get_nested_default("nas", "host")),
-    "NAS_SHARE": get_nested_node("nas", "share", get_nested_default("nas", "share", "share")),
-    "NAS_MOUNT": get_nested_node("nas", "mount", get_nested_default("nas", "mount", "/Volumes/share")),
+    "NAS_HOST": (
+        get_nested_node("nas", "host", get_nested_default("nas", "host"))
+        or env_first("CHIBA_NAS_HOST", "NAS_HOST")
+    ),
+    "NAS_SHARE": (
+        get_nested_node("nas", "share", get_nested_default("nas", "share", "share"))
+        or env_first("CHIBA_NAS_SHARE", "NAS_SHARE")
+    ),
+    "NAS_MOUNT": (
+        get_nested_node("nas", "mount", get_nested_default("nas", "mount", "/Volumes/share"))
+        or env_first("CHIBA_NAS_MOUNT", "NAS_MOUNT")
+    ),
     "NAS_USER": (
         (get_nested_node("nas", "user", "") or "").strip()
         or (get_nested_default("nas", "user", "") or "").strip()
@@ -447,7 +477,7 @@ if apt-cache policy chromium 2>/dev/null | grep -q "Candidate:"; then
 elif apt-cache policy chromium-browser 2>/dev/null | grep -q "Candidate:"; then
   sudo apt-get install -y chromium-browser
 fi
-sudo apt-get install -y xinit x11-xserver-utils xserver-xorg >/dev/null 2>&1 || true
+sudo apt-get install -y xinit x11-xserver-utils xserver-xorg xdotool unclutter >/dev/null 2>&1 || true
 sudo apt-get install -y cage wlr-randr seatd >/dev/null 2>&1 || true
 sudo systemctl enable --now seatd >/dev/null 2>&1 || true
 sudo usermod -aG video,audio,input,render "$PI_USER" >/dev/null 2>&1 || true
@@ -629,10 +659,9 @@ XDG_RUNTIME_DIR="/tmp/chiba-xdg-runtime"
 CHROMIUM_FLAGS=(
   --kiosk
   --start-fullscreen
-  --start-maximized
+  --ash-hide-cursor
   --force-device-scale-factor=1
   --high-dpi-support=1
-  --window-position=0,0
   --noerrdialogs
   --disable-infobars
   --disable-session-crashed-bubble
@@ -733,6 +762,45 @@ kill_browser_stack() {
   pkill -f "cage.*chromium-browser" 2>/dev/null || true
   pkill -f "cage" 2>/dev/null || true
   pkill -f "Xorg :0" 2>/dev/null || true
+  pkill -f "unclutter.*-root" 2>/dev/null || true
+  rm -f /tmp/chiba-unclutter.pid >/dev/null 2>&1 || true
+}
+
+start_cursor_tools_x11() {
+  (
+    local tries=0
+    while [ "\$tries" -lt 80 ]; do
+      if DISPLAY=:0 xset q >/dev/null 2>&1; then
+        # Disable X11 DPMS/screensaver so kiosk displays never sleep.
+        DISPLAY=:0 xset s off -dpms s noblank >/dev/null 2>&1 || true
+        if command -v xrandr >/dev/null 2>&1; then
+          local output
+          output="\$(DISPLAY=:0 xrandr --query 2>/dev/null | awk '/ connected / { print \$1; exit }')"
+          if [ -n "\$output" ]; then
+            DISPLAY=:0 xrandr --output "\$output" --auto >/dev/null 2>&1 || true
+          fi
+        fi
+        if command -v xdotool >/dev/null 2>&1; then
+          DISPLAY=:0 xdotool mousemove 1 1 >/dev/null 2>&1 || true
+        fi
+        if command -v unclutter >/dev/null 2>&1; then
+          DISPLAY=:0 unclutter -idle 0.25 -root >/dev/null 2>&1 &
+          echo "\$!" > /tmp/chiba-unclutter.pid 2>/dev/null || true
+        fi
+        exit 0
+      fi
+      tries=\$((tries + 1))
+      sleep 0.25
+    done
+  ) &
+}
+
+stop_cursor_tools_x11() {
+  if [ -f /tmp/chiba-unclutter.pid ]; then
+    kill "\$(cat /tmp/chiba-unclutter.pid 2>/dev/null || true)" >/dev/null 2>&1 || true
+    rm -f /tmp/chiba-unclutter.pid >/dev/null 2>&1 || true
+  fi
+  pkill -f "unclutter.*-root" 2>/dev/null || true
 }
 
 launch_with_cage() {
@@ -752,8 +820,40 @@ launch_with_xinit() {
   chromium_bin="\$2"
 
   command -v xinit >/dev/null 2>&1 || return 1
-  xinit "\$chromium_bin" "\${CHROMIUM_FLAGS[@]}" "\$kiosk_url" -- :0 vt1 -keeptty -nolisten tcp
-  return \$?
+  xinit /bin/bash -lc '
+    chromium_bin="\$1"
+    kiosk_url="\$2"
+    shift 2
+    chromium_args=("\$@")
+    window_size=""
+    if command -v xset >/dev/null 2>&1; then
+      xset s off -dpms s noblank >/dev/null 2>&1 || true
+    fi
+    if command -v xrandr >/dev/null 2>&1; then
+      output="\$(xrandr --query 2>/dev/null | grep " connected " | head -n 1 | cut -d " " -f1)"
+      if [ -n "\$output" ]; then
+        xrandr --output "\$output" --auto >/dev/null 2>&1 || true
+        mode_line="\$(xrandr --query 2>/dev/null | grep -E "^\$output[[:space:]]+connected" | head -n 1)"
+        mode="\$(printf "%s\n" "\$mode_line" | sed -n "s/^[^[:space:]]\\+[[:space:]]\\+connected[[:space:]]\\+\\([0-9]\\+x[0-9]\\+\\).*/\\1/p")"
+        if [[ "\$mode" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+          window_size="\${BASH_REMATCH[1]},\${BASH_REMATCH[2]}"
+        fi
+      fi
+    fi
+    if command -v xdotool >/dev/null 2>&1; then
+      xdotool mousemove 1 1 >/dev/null 2>&1 || true
+    fi
+    if command -v unclutter >/dev/null 2>&1; then
+      unclutter -idle 0.25 -root >/dev/null 2>&1 &
+    fi
+    echo "[kiosk] launch backend=x11 mode=\${mode:-unknown} size=\${window_size:-auto}" >&2
+    if [ -n "\$window_size" ]; then
+      exec "\$chromium_bin" "\${chromium_args[@]}" --window-size="\$window_size" --window-position=0,0 "\$kiosk_url"
+    fi
+    exec "\$chromium_bin" "\${chromium_args[@]}" --window-position=0,0 "\$kiosk_url"
+  ' _ "\$chromium_bin" "\$kiosk_url" "\${CHROMIUM_FLAGS[@]}" -- :0 vt1 -keeptty -nolisten tcp
+  local rc="\$?"
+  return "\$rc"
 }
 
 launch_once() {
@@ -950,6 +1050,14 @@ CREDS
   else
     echo "NAS already mounted at $NAS_MOUNT"
   fi
+
+  # Keep macOS-style source paths working on Linux nodes.
+  if [ "$NAS_MOUNT" != "/Volumes/share" ]; then
+    sudo mkdir -p /Volumes
+    if [ ! -e /Volumes/share ] || [ -L /Volumes/share ]; then
+      sudo ln -sfn "$NAS_MOUNT" /Volumes/share
+    fi
+  fi
 fi
 
 # Install Playwright browsers (needed for weatherstar)
@@ -971,6 +1079,10 @@ else
 fi
 # Always keep the launcher file aligned with the intended URL (run-kiosk.sh reads this).
 echo "$KIOSK_URL" > "$REMOTE_DIR/.kiosk-url" 2>/dev/null || true
+# Keep server-side kiosk-state in sync with fresh bootstrap default (guide URL).
+curl -sS -X POST "http://localhost:$SERVER_PORT/api/kiosk/clear" \
+  -H "Content-Type: application/json" \
+  -d "{\"screenId\":\"$NODE_NAME\"}" >/dev/null 2>&1 || true
 
 # Best-effort: rotate display for portrait screens (persists on the Pi).
 case "${DISPLAY_ROTATE:-}" in

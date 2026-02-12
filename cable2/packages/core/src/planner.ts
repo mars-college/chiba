@@ -8,6 +8,9 @@ import {
 } from "@chiba-cable2/contracts";
 import { type ResourceStore, type ProfileModeDef } from "./resources.js";
 
+type RuntimeTargetKind = "media" | "playlist" | "block" | "channel";
+type RuntimeTarget = { kind: RuntimeTargetKind; id: string };
+
 type DependencyAccumulator = {
   media: Set<string>;
   playlists: Set<string>;
@@ -40,6 +43,10 @@ function mergeProfileMode(base: ProfileModeDef, override: ProfileModeDef | undef
   return {
     ...base,
     ...(override ?? {}),
+    prefetch_targets:
+      (override?.prefetch_targets && override.prefetch_targets.length > 0)
+        ? override.prefetch_targets
+        : (base.prefetch_targets ?? []),
     prefetch_channels:
       (override?.prefetch_channels && override.prefetch_channels.length > 0)
         ? override.prefetch_channels
@@ -47,32 +54,52 @@ function mergeProfileMode(base: ProfileModeDef, override: ProfileModeDef | undef
   };
 }
 
-function resolvePlaylist(
-  playlistId: string,
+function resolveMedia(
+  mediaId: string,
   store: ResourceStore,
   deps: DependencyAccumulator,
   warnings: string[]
 ): void {
+  if (!store.mediaById[mediaId]) {
+    warnings.push(`missing_media:${mediaId}`);
+    return;
+  }
+  deps.media.add(mediaId);
+}
+
+function resolvePlaylist(
+  playlistId: string,
+  store: ResourceStore,
+  deps: DependencyAccumulator,
+  warnings: string[],
+  visiting: Set<string> = new Set<string>()
+): void {
+  if (visiting.has(playlistId)) {
+    warnings.push(`playlist_cycle:${playlistId}`);
+    return;
+  }
   const playlist = store.playlistsById[playlistId];
   if (!playlist) {
     warnings.push(`missing_playlist:${playlistId}`);
     return;
   }
+  visiting.add(playlistId);
   deps.playlists.add(playlistId);
 
   for (const item of playlist.items) {
     if (item.media) {
-      if (store.mediaById[item.media]) {
-        deps.media.add(item.media);
-      } else {
-        warnings.push(`missing_media:${item.media}`);
-      }
+      resolveMedia(item.media, store, deps, warnings);
+      continue;
+    }
+    if (item.playlist) {
+      resolvePlaylist(item.playlist, store, deps, warnings, visiting);
       continue;
     }
     if (item.source) {
       warnings.push(`inline_playlist_source:${playlistId}`);
     }
   }
+  visiting.delete(playlistId);
 }
 
 function resolveBlock(
@@ -92,8 +119,14 @@ function resolveBlock(
     resolvePlaylist(block.playlist, store, deps, warnings);
   }
 
+  for (const item of block.items ?? []) {
+    if (item.media) resolveMedia(item.media, store, deps, warnings);
+    if (item.playlist) resolvePlaylist(item.playlist, store, deps, warnings);
+    if (item.source) warnings.push(`inline_block_source:${blockId}`);
+  }
+
   if (block.programs.length > 0) {
-    warnings.push(`inline_block_programs:${blockId}`);
+    warnings.push(`legacy_block_programs:${blockId}`);
   }
 }
 
@@ -136,6 +169,7 @@ function buildNodeIntentForTarget(args: {
         nodeId,
         target: { kind: "media", id: request.id },
         mediaId: request.id,
+        mode: "gallery",
         cacheMediaIds,
         notes: [],
       };
@@ -144,6 +178,7 @@ function buildNodeIntentForTarget(args: {
         nodeId,
         target: { kind: "playlist", id: request.id },
         playlistId: request.id,
+        mode: "gallery",
         cacheMediaIds,
         notes: [],
       };
@@ -152,6 +187,7 @@ function buildNodeIntentForTarget(args: {
         nodeId,
         target: { kind: "block", id: request.id },
         blockId: request.id,
+        mode: "gallery",
         cacheMediaIds,
         notes: [],
       };
@@ -160,6 +196,7 @@ function buildNodeIntentForTarget(args: {
         nodeId,
         target: { kind: "channel", id: request.id },
         channelId: request.id,
+        mode: "gallery",
         cacheMediaIds,
         notes: [],
       };
@@ -171,6 +208,57 @@ function buildNodeIntentForTarget(args: {
         notes: [],
       };
   }
+}
+
+function parseRuntimeTarget(input: string): RuntimeTarget | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const idx = trimmed.indexOf(":");
+  if (idx <= 0 || idx >= trimmed.length - 1) return null;
+  const kindRaw = trimmed.slice(0, idx).trim();
+  const id = trimmed.slice(idx + 1).trim();
+  if (!id) return null;
+  if (
+    kindRaw === "media" ||
+    kindRaw === "playlist" ||
+    kindRaw === "block" ||
+    kindRaw === "channel"
+  ) {
+    return { kind: kindRaw, id };
+  }
+  return null;
+}
+
+function resolveRuntimeTargetDependencies(args: {
+  target: RuntimeTarget;
+  store: ResourceStore;
+  deps: DependencyAccumulator;
+  warnings: string[];
+}): void {
+  const { target, store, deps, warnings } = args;
+  if (target.kind === "media") {
+    resolveMedia(target.id, store, deps, warnings);
+    return;
+  }
+  if (target.kind === "playlist") {
+    resolvePlaylist(target.id, store, deps, warnings);
+    return;
+  }
+  if (target.kind === "block") {
+    resolveBlock(target.id, store, deps, warnings);
+    return;
+  }
+  resolveChannel(target.id, store, deps, warnings);
+}
+
+function resolveProfileTarget(mode: ProfileModeDef): RuntimeTarget | null {
+  if (mode.target_kind && mode.target_id) {
+    return { kind: mode.target_kind, id: mode.target_id };
+  }
+  if (mode.channel) {
+    return { kind: "channel", id: mode.channel };
+  }
+  return null;
 }
 
 function resolveTargetDependencies(args: {
@@ -186,7 +274,7 @@ function resolveTargetDependencies(args: {
       if (!store.mediaById[request.id]) {
         throw new Error(`Unknown media id: ${request.id}`);
       }
-      deps.media.add(request.id);
+      resolveMedia(request.id, store, deps, warnings);
       return;
     }
     case "playlist": {
@@ -271,24 +359,56 @@ export function buildApplyComputation(args: {
     for (const nodeId of selectedNodeIds) {
       const nodeDeps = createDeps();
       const merged = mergeProfileMode(profile.defaults, profile.pis[nodeId]);
+      const resolvedTarget = resolveProfileTarget(merged);
 
-      if (merged.channel) {
-        resolveChannel(merged.channel, args.store, nodeDeps, warnings);
-        resolveChannel(merged.channel, args.store, globalDeps, warnings);
+      if (resolvedTarget) {
+        resolveRuntimeTargetDependencies({
+          target: resolvedTarget,
+          store: args.store,
+          deps: nodeDeps,
+          warnings,
+        });
+        resolveRuntimeTargetDependencies({
+          target: resolvedTarget,
+          store: args.store,
+          deps: globalDeps,
+          warnings,
+        });
       }
 
       for (const prefetchChannelId of merged.prefetch_channels ?? []) {
         resolveChannel(prefetchChannelId, args.store, nodeDeps, warnings);
         resolveChannel(prefetchChannelId, args.store, globalDeps, warnings);
       }
+      for (const token of merged.prefetch_targets ?? []) {
+        const target = parseRuntimeTarget(token);
+        if (!target) {
+          warnings.push(`invalid_prefetch_target:${profile.id}:${nodeId}:${token}`);
+          continue;
+        }
+        resolveRuntimeTargetDependencies({
+          target,
+          store: args.store,
+          deps: nodeDeps,
+          warnings,
+        });
+        resolveRuntimeTargetDependencies({
+          target,
+          store: args.store,
+          deps: globalDeps,
+          warnings,
+        });
+      }
 
       nodeIntents.push({
         nodeId,
         mode: merged.mode,
-        target: merged.channel
-          ? { kind: "channel", id: merged.channel }
-          : { kind: "profile", id: profile.id },
-        channelId: merged.channel,
+        target: resolvedTarget ?? { kind: "profile", id: profile.id },
+        channelId:
+          resolvedTarget?.kind === "channel" ? resolvedTarget.id : merged.channel,
+        blockId: resolvedTarget?.kind === "block" ? resolvedTarget.id : undefined,
+        playlistId: resolvedTarget?.kind === "playlist" ? resolvedTarget.id : undefined,
+        mediaId: resolvedTarget?.kind === "media" ? resolvedTarget.id : undefined,
         profileParams: merged as unknown as Record<string, unknown>,
         cacheMediaIds: Array.from(nodeDeps.media).sort(),
         notes: [],

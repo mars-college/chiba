@@ -53,6 +53,10 @@ const stateFilePath =
 const cacheDirPath =
   process.env.CHIBA_NODE_CACHE_DIR ??
   path.resolve(process.cwd(), `cable2/data/cache/${nodeId}`);
+const prefetchOnApply =
+  !["0", "false", "no", "off"].includes(
+    (process.env.CHIBA_NODE_PREFETCH_ON_APPLY ?? "1").trim().toLowerCase()
+  );
 
 const capabilities = {
   supportsWindowManager: platform === "darwin" || platform === "linux",
@@ -333,34 +337,56 @@ function chooseFirst(values: string[] | undefined): string | null {
   return values[0] ?? null;
 }
 
-function resolveProfileChannel(intent: ApplyNodeIntent): string | null {
+type RuntimeTargetKind = "media" | "playlist" | "block" | "channel";
+type RuntimeTarget = { kind: RuntimeTargetKind; id: string };
+
+function parseRuntimeTargetKind(value: unknown): RuntimeTargetKind | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim().toLowerCase();
+  if (raw === "media") return "media";
+  if (raw === "playlist") return "playlist";
+  if (raw === "block") return "block";
+  if (raw === "channel") return "channel";
+  return null;
+}
+
+function resolveProfileTarget(intent: ApplyNodeIntent): RuntimeTarget | null {
   const params = intent.profileParams;
   if (!isRecord(params)) return null;
+  const targetKind =
+    parseRuntimeTargetKind(params.targetKind) ??
+    parseRuntimeTargetKind(params.target_kind) ??
+    parseRuntimeTargetKind((params.target as Record<string, unknown> | undefined)?.kind);
+  const targetId = (() => {
+    const byCamel = params.targetId;
+    if (typeof byCamel === "string" && byCamel.trim().length > 0) return byCamel.trim();
+    const bySnake = params.target_id;
+    if (typeof bySnake === "string" && bySnake.trim().length > 0) return bySnake.trim();
+    const nested = (params.target as Record<string, unknown> | undefined)?.id;
+    if (typeof nested === "string" && nested.trim().length > 0) return nested.trim();
+    return "";
+  })();
+  if (targetKind && targetId) {
+    return { kind: targetKind, id: targetId };
+  }
   const channel = params.channel;
   if (typeof channel === "string" && channel.trim().length > 0) {
-    return channel.trim();
+    return { kind: "channel", id: channel.trim() };
   }
   return null;
 }
 
-async function resolveChannelForIntent(intent: ApplyNodeIntent): Promise<string | null> {
-  if (intent.channelId) return intent.channelId;
-  if (intent.target.kind === "channel") return intent.target.id;
-
+function resolveTargetForIntent(intent: ApplyNodeIntent): RuntimeTarget | null {
   if (intent.target.kind === "profile") {
-    return resolveProfileChannel(intent);
+    return resolveProfileTarget(intent);
   }
-
-  const lookups = await getResourceLookups();
-
-  if (intent.target.kind === "block") {
-    return chooseFirst(lookups.byBlock.get(intent.blockId ?? intent.target.id));
-  }
-  if (intent.target.kind === "playlist") {
-    return chooseFirst(lookups.byPlaylist.get(intent.playlistId ?? intent.target.id));
-  }
-  if (intent.target.kind === "media") {
-    return chooseFirst(lookups.byMedia.get(intent.mediaId ?? intent.target.id));
+  if (
+    intent.target.kind === "media" ||
+    intent.target.kind === "playlist" ||
+    intent.target.kind === "block" ||
+    intent.target.kind === "channel"
+  ) {
+    return { kind: intent.target.kind, id: intent.target.id };
   }
   return null;
 }
@@ -371,16 +397,8 @@ async function buildKioskUrlForIntent(intent: ApplyNodeIntent): Promise<{
 }> {
   const base = new URL(defaultGuideUrl());
   base.searchParams.set("nosplash", "1");
-  let resolvedChannel = await resolveChannelForIntent(intent);
-  let warning: string | undefined;
+  let resolvedTarget = resolveTargetForIntent(intent);
   const profileParams = isRecord(intent.profileParams) ? intent.profileParams : null;
-
-  if (
-    ["media", "playlist", "block"].includes(intent.target.kind) &&
-    !resolvedChannel
-  ) {
-    warning = `no_channel_mapping_for_${intent.target.kind}:${intent.target.id}`;
-  }
 
   if (intent.target.kind === "profile" && profileParams) {
     const modeRaw = profileParams.mode;
@@ -389,6 +407,7 @@ async function buildKioskUrlForIntent(intent: ApplyNodeIntent): Promise<{
         ? modeRaw
         : null;
     if (mode === "gallery") base.searchParams.set("gallery", "1");
+    if (mode === "guide") base.searchParams.delete("gallery");
 
     const lockValue = truthyBoolean(profileParams.lock);
     if (lockValue === true) base.searchParams.set("lock", "1");
@@ -419,6 +438,28 @@ async function buildKioskUrlForIntent(intent: ApplyNodeIntent): Promise<{
     if (textScale !== null) base.searchParams.set("textScale", String(textScale));
     const hours = coerceFiniteNumber(profileParams.hours);
     if (hours !== null) base.searchParams.set("hours", String(hours));
+
+    const targetKind =
+      parseRuntimeTargetKind(profileParams.targetKind) ??
+      parseRuntimeTargetKind(profileParams.target_kind) ??
+      parseRuntimeTargetKind((profileParams.target as Record<string, unknown> | undefined)?.kind);
+    const targetId = (() => {
+      const byCamel = profileParams.targetId;
+      if (typeof byCamel === "string" && byCamel.trim().length > 0) return byCamel.trim();
+      const bySnake = profileParams.target_id;
+      if (typeof bySnake === "string" && bySnake.trim().length > 0) return bySnake.trim();
+      const nested = (profileParams.target as Record<string, unknown> | undefined)?.id;
+      if (typeof nested === "string" && nested.trim().length > 0) return nested.trim();
+      return "";
+    })();
+    if (targetKind && targetId) {
+      resolvedTarget = { kind: targetKind, id: targetId };
+    } else {
+      const channel = profileParams.channel;
+      if (typeof channel === "string" && channel.trim().length > 0) {
+        resolvedTarget = { kind: "channel", id: channel.trim() };
+      }
+    }
   } else if (
     intent.target.kind === "channel" ||
     intent.target.kind === "block" ||
@@ -432,13 +473,14 @@ async function buildKioskUrlForIntent(intent: ApplyNodeIntent): Promise<{
     }
   }
 
-  if (resolvedChannel) {
-    base.searchParams.set("channel", resolvedChannel);
+  if (resolvedTarget) {
+    base.searchParams.set("targetKind", resolvedTarget.kind);
+    base.searchParams.set("targetId", resolvedTarget.id);
+    if (resolvedTarget.kind === "channel") {
+      base.searchParams.set("channel", resolvedTarget.id);
+    }
   }
 
-  if (warning) {
-    return { url: base.toString(), warning };
-  }
   return { url: base.toString() };
 }
 
@@ -449,6 +491,38 @@ async function applyIntentToDisplay(intent: ApplyNodeIntent): Promise<{
   const resolved = await buildKioskUrlForIntent(intent);
   await writeKioskUrl(resolved.url);
   await restartKioskRuntime();
+  if (prefetchOnApply) {
+    const target = resolveTargetForIntent(intent);
+    if (target) {
+      const token = `${target.kind}:${target.id}`;
+      const postPrefetch = async (pathname: string) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 1800);
+        try {
+          await fetch(`http://127.0.0.1:${localCablePort}${pathname}`, {
+            method: "POST",
+            signal: controller.signal,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ target: token, targets: [token] }),
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      try {
+        await Promise.all([
+          postPrefetch("/api/stash/prefetch"),
+          postPrefetch("/api/cache/prefetch"),
+        ]);
+      } catch (error) {
+        const prefetchWarning = `prefetch_failed:${(error as Error).message}`;
+        return {
+          ...resolved,
+          warning: resolved.warning ? `${resolved.warning};${prefetchWarning}` : prefetchWarning,
+        };
+      }
+    }
+  }
   return resolved;
 }
 
@@ -847,11 +921,20 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 400, { ok: false, error: "missing_url" });
       return;
     }
+    const restartRaw = body?.restart;
+    const shouldRestart =
+      typeof restartRaw === "boolean"
+        ? restartRaw
+        : typeof restartRaw === "string"
+          ? !["0", "false", "no", "off"].includes(restartRaw.trim().toLowerCase())
+          : true;
     try {
       await writeKioskUrl(kioskUrl);
-      await restartKioskRuntime();
+      if (shouldRestart) {
+        await restartKioskRuntime();
+      }
       void sendHeartbeat();
-      sendJson(res, 200, { ok: true, nodeId, kioskUrl });
+      sendJson(res, 200, { ok: true, nodeId, kioskUrl, restarted: shouldRestart });
     } catch (error) {
       sendJson(res, 500, { ok: false, error: (error as Error).message });
     }

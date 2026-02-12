@@ -29,6 +29,7 @@ Composable lists of media items.
 Minimal shape:
 - `id = "..."` (required)
 - `[[item]]` entries, each referencing `media = "<media-id>"` (preferred) or inlining `source = {...}`
+- `[[item]]` can also nest `playlist = "<playlist-id>"` for composition
 
 Playlist items can also carry per-item overrides:
 - `duration_slots`, `title`, `subtitle`, `tag`, `remote_controls`, HUD fields, etc
@@ -40,6 +41,7 @@ Blocks are the thing that fills time slots.
 For now, blocks are simple:
 - `id = "..."` (required)
 - `mode = "loop"` (default) and `playlist = "<playlist-id>"`
+- Optional `[[item]]` entries can reference `media`, `playlist`, or inline `source`
 
 We can extend blocks later to support:
 - bumpers, commercials
@@ -69,4 +71,3 @@ See `cable2/config/profiles/README.md`.
 Code shapes and parsing live in:
 - `cable2/apps/server/src/config.ts`
 - `cable2/apps/server/src/index-builder-config.ts`
-

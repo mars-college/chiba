@@ -19,6 +19,7 @@ export type MediaDef = {
 
 export type PlaylistItemDef = {
   media?: string;
+  playlist?: string;
   source?: SourceRef;
 };
 
@@ -33,11 +34,18 @@ export type BlockProgramDef = {
   source?: SourceRef;
 };
 
+export type BlockItemDef = {
+  media?: string;
+  playlist?: string;
+  source?: SourceRef;
+};
+
 export type BlockDef = {
   id: string;
   filePath: string;
   mode?: "loop" | "once" | "clocked";
   playlist?: string;
+  items: BlockItemDef[];
   programs: BlockProgramDef[];
 };
 
@@ -55,6 +63,8 @@ export type ChannelDef = {
 
 export type ProfileModeDef = {
   mode?: "gallery" | "guide";
+  target_kind?: "media" | "playlist" | "block" | "channel";
+  target_id?: string;
   channel?: string;
   playlist?: boolean;
   lock?: boolean;
@@ -65,13 +75,46 @@ export type ProfileModeDef = {
   text_scale?: number;
   hours?: number;
   prefetch_channels?: string[];
+  prefetch_targets?: string[];
 };
+
+export type ProfilePrepareDirDef = {
+  kind: "dir";
+  path: string;
+  playlist_id: string;
+  playlist_title?: string;
+  tag?: string;
+  cache?: boolean;
+  channel_id?: string;
+  channel_name?: string;
+  channel_number?: string;
+};
+
+export type ProfilePrepareEdenCollectionDef = {
+  kind: "eden_collection";
+  source: string;
+  db?: "PROD" | "STAGE";
+  playlist_id: string;
+  playlist_title?: string;
+  tag?: string;
+  cache?: boolean;
+  channel_id?: string;
+  channel_name?: string;
+  channel_number?: string;
+  artist?: string;
+  max_items?: number;
+};
+
+export type ProfilePrepareStepDef =
+  | ProfilePrepareDirDef
+  | ProfilePrepareEdenCollectionDef;
 
 export type ProfileDef = {
   id: string;
   filePath: string;
   defaults: ProfileModeDef;
   pis: Record<string, ProfileModeDef>;
+  prepare?: ProfilePrepareStepDef[];
 };
 
 export type ResourceStore = {
@@ -149,6 +192,15 @@ function parseProfileMode(raw: unknown): ProfileModeDef {
   if (!isObject(raw)) return {};
   const modeRaw = coerceString(raw.mode);
   const mode = modeRaw === "gallery" || modeRaw === "guide" ? modeRaw : undefined;
+  const targetKindRaw = coerceString(raw.target_kind) ?? coerceString((raw.target as any)?.kind);
+  const targetKind =
+    targetKindRaw === "media" ||
+    targetKindRaw === "playlist" ||
+    targetKindRaw === "block" ||
+    targetKindRaw === "channel"
+      ? targetKindRaw
+      : undefined;
+  const targetId = coerceString(raw.target_id) ?? coerceString((raw.target as any)?.id);
   const out: ProfileModeDef = {};
   const channel = coerceString(raw.channel);
   const playlist = coerceBoolean(raw.playlist);
@@ -160,8 +212,11 @@ function parseProfileMode(raw: unknown): ProfileModeDef {
   const textScale = coerceNumber(raw.text_scale);
   const hours = coerceNumber(raw.hours);
   const prefetchChannels = coerceStringArray(raw.prefetch_channels);
+  const prefetchTargets = coerceStringArray(raw.prefetch_targets);
 
   if (mode !== undefined) out.mode = mode;
+  if (targetKind !== undefined) out.target_kind = targetKind;
+  if (targetId !== undefined) out.target_id = targetId;
   if (channel !== undefined) out.channel = channel;
   if (playlist !== undefined) out.playlist = playlist;
   if (lock !== undefined) out.lock = lock;
@@ -172,6 +227,94 @@ function parseProfileMode(raw: unknown): ProfileModeDef {
   if (textScale !== undefined) out.text_scale = textScale;
   if (hours !== undefined) out.hours = hours;
   if (prefetchChannels.length > 0) out.prefetch_channels = prefetchChannels;
+  if (prefetchTargets.length > 0) out.prefetch_targets = prefetchTargets;
+
+  return out;
+}
+
+function parseProfilePrepareDir(raw: unknown): ProfilePrepareDirDef | null {
+  if (!isObject(raw)) return null;
+  const pathValue = coerceString(raw.path);
+  const playlistId = coerceString(raw.playlist_id);
+  if (!pathValue || !playlistId) return null;
+
+  const out: ProfilePrepareDirDef = {
+    kind: "dir",
+    path: pathValue,
+    playlist_id: playlistId,
+  };
+  const playlistTitle = coerceString(raw.playlist_title);
+  const tag = coerceString(raw.tag);
+  const cache = coerceBoolean(raw.cache);
+  const channelId = coerceString(raw.channel_id);
+  const channelName = coerceString(raw.channel_name);
+  const channelNumber = coerceString(raw.channel_number);
+
+  if (playlistTitle !== undefined) out.playlist_title = playlistTitle;
+  if (tag !== undefined) out.tag = tag;
+  if (cache !== undefined) out.cache = cache;
+  if (channelId !== undefined) out.channel_id = channelId;
+  if (channelName !== undefined) out.channel_name = channelName;
+  if (channelNumber !== undefined) out.channel_number = channelNumber;
+  return out;
+}
+
+function parseProfilePrepareEdenCollection(raw: unknown): ProfilePrepareEdenCollectionDef | null {
+  if (!isObject(raw)) return null;
+  const source = coerceString(raw.source);
+  const playlistId = coerceString(raw.playlist_id);
+  if (!source || !playlistId) return null;
+
+  const dbRaw = coerceString(raw.db);
+  const db =
+    dbRaw && dbRaw.toUpperCase() === "PROD"
+      ? "PROD"
+      : dbRaw && dbRaw.toUpperCase() === "STAGE"
+        ? "STAGE"
+        : undefined;
+
+  const out: ProfilePrepareEdenCollectionDef = {
+    kind: "eden_collection",
+    source,
+    playlist_id: playlistId,
+  };
+
+  const playlistTitle = coerceString(raw.playlist_title);
+  const tag = coerceString(raw.tag);
+  const cache = coerceBoolean(raw.cache);
+  const channelId = coerceString(raw.channel_id);
+  const channelName = coerceString(raw.channel_name);
+  const channelNumber = coerceString(raw.channel_number);
+  const artist = coerceString(raw.artist);
+  const maxItems = coerceNumber(raw.max_items);
+
+  if (db !== undefined) out.db = db;
+  if (playlistTitle !== undefined) out.playlist_title = playlistTitle;
+  if (tag !== undefined) out.tag = tag;
+  if (cache !== undefined) out.cache = cache;
+  if (channelId !== undefined) out.channel_id = channelId;
+  if (channelName !== undefined) out.channel_name = channelName;
+  if (channelNumber !== undefined) out.channel_number = channelNumber;
+  if (artist !== undefined) out.artist = artist;
+  if (maxItems !== undefined && maxItems > 0) out.max_items = Math.floor(maxItems);
+  return out;
+}
+
+function parseProfilePrepare(raw: unknown): ProfilePrepareStepDef[] {
+  if (!isObject(raw)) return [];
+  const dirStepsRaw = ensureArray<Record<string, unknown>>(raw.dir);
+  const edenStepsRaw = ensureArray<Record<string, unknown>>(raw.eden_collection ?? raw.eden);
+  const out: ProfilePrepareStepDef[] = [];
+
+  for (const step of dirStepsRaw) {
+    const parsed = parseProfilePrepareDir(step);
+    if (parsed) out.push(parsed);
+  }
+
+  for (const step of edenStepsRaw) {
+    const parsed = parseProfilePrepareEdenCollection(step);
+    if (parsed) out.push(parsed);
+  }
 
   return out;
 }
@@ -245,8 +388,10 @@ export async function loadResourceStore(options: LoadResourceStoreOptions = {}):
     const items: PlaylistItemDef[] = itemsRaw.map((item) => {
       const out: PlaylistItemDef = {};
       const media = coerceString(item.media);
+      const playlist = coerceString(item.playlist);
       const source = parseSource(item.source);
       if (media !== undefined) out.media = media;
+      if (playlist !== undefined) out.playlist = playlist;
       if (source !== undefined) out.source = source;
       return out;
     });
@@ -272,10 +417,22 @@ export async function loadResourceStore(options: LoadResourceStoreOptions = {}):
       if (source !== undefined) out.source = source;
       return out;
     });
+    const itemsRaw = ensureArray<Record<string, unknown>>(row.parsed.items ?? row.parsed.item);
+    const items: BlockItemDef[] = itemsRaw.map((item) => {
+      const out: BlockItemDef = {};
+      const media = coerceString(item.media);
+      const playlist = coerceString(item.playlist);
+      const source = parseSource(item.source);
+      if (media !== undefined) out.media = media;
+      if (playlist !== undefined) out.playlist = playlist;
+      if (source !== undefined) out.source = source;
+      return out;
+    });
 
     const entry: BlockDef = {
       id,
       filePath: row.filePath,
+      items,
       programs,
     };
     const playlist = coerceString(row.parsed.playlist);
@@ -322,12 +479,16 @@ export async function loadResourceStore(options: LoadResourceStoreOptions = {}):
       pis[piId] = mode;
     }
 
-    profilesById[id] = {
+    const prepare = parseProfilePrepare(isObject(row.parsed.prepare) ? row.parsed.prepare : undefined);
+
+    const profile: ProfileDef = {
       id,
       filePath: row.filePath,
       defaults,
       pis,
     };
+    if (prepare.length > 0) profile.prepare = prepare;
+    profilesById[id] = profile;
   }
 
   return {

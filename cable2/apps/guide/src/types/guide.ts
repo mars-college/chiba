@@ -78,11 +78,15 @@ export type DisplaySettings = {
 // Persisted on the cable server and pushed to running kiosk clients over WS.
 export type KioskState = {
   mode?: "gallery" | "guide";
+  targetKind?: "media" | "playlist" | "block" | "channel";
+  targetId?: string;
   channel?: string;
   lock?: boolean;
   qr?: boolean;
   playlist?: boolean;
   nosplash?: boolean;
+  hudMode?: "always" | "start" | "never";
+  hudShowSec?: number;
   theme?: string;
   scale?: number;
   textScale?: number;

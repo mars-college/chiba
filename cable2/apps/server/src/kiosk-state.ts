@@ -5,11 +5,15 @@ import path from 'node:path';
 export type KioskState = {
   // High-level mode hints. The guide can treat these as overrides.
   mode?: 'gallery' | 'guide';
+  targetKind?: 'media' | 'playlist' | 'block' | 'channel';
+  targetId?: string;
   channel?: string; // channel id or number string
   lock?: boolean;
   qr?: boolean;
   playlist?: boolean;
   nosplash?: boolean;
+  hudMode?: 'always' | 'start' | 'never';
+  hudShowSec?: number;
   theme?: string;
   scale?: number;
   textScale?: number;
@@ -149,17 +153,44 @@ export function coerceString(v: unknown): string | undefined {
 export function sanitizeKioskState(input: unknown): KioskState {
   const raw = (input ?? {}) as any;
   const mode = raw.mode === 'gallery' || raw.mode === 'guide' ? raw.mode : undefined;
+  const targetKindRaw =
+    coerceString(raw.targetKind) ??
+    coerceString(raw.target_kind) ??
+    coerceString(raw.target?.kind);
+  const targetKind =
+    targetKindRaw === 'media' ||
+    targetKindRaw === 'playlist' ||
+    targetKindRaw === 'block' ||
+    targetKindRaw === 'channel'
+      ? targetKindRaw
+      : undefined;
+  const targetId =
+    coerceString(raw.targetId) ??
+    coerceString(raw.target_id) ??
+    coerceString(raw.target?.id);
   return {
     mode,
+    targetKind,
+    targetId,
     channel: coerceString(raw.channel),
     lock: coerceBoolean(raw.lock),
     qr: coerceBoolean(raw.qr),
     playlist: coerceBoolean(raw.playlist),
     nosplash: coerceBoolean(raw.nosplash),
+    hudMode:
+      coerceString(raw.hudMode) === 'always' ||
+      coerceString(raw.hudMode) === 'start' ||
+      coerceString(raw.hudMode) === 'never'
+        ? (coerceString(raw.hudMode) as 'always' | 'start' | 'never')
+        : coerceString(raw.hud) === 'always' ||
+            coerceString(raw.hud) === 'start' ||
+            coerceString(raw.hud) === 'never'
+          ? (coerceString(raw.hud) as 'always' | 'start' | 'never')
+          : undefined,
+    hudShowSec: coerceNumber(raw.hudShowSec ?? raw.hud_sec ?? raw.hudSec),
     theme: coerceString(raw.theme),
     scale: coerceNumber(raw.scale),
     textScale: coerceNumber(raw.textScale),
     hours: coerceNumber(raw.hours),
   };
 }
-

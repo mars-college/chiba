@@ -655,15 +655,16 @@
 .player-media {
   width: 100%;
   height: 100%;
+  object-position: center center;
+  background: #05060c;
 }
 
 .player-video {
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .player-image {
   object-fit: contain;
-  background: #05060c;
 }
 
 .player-audio {

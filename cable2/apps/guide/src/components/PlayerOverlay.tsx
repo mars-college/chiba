@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo, type CSSProperties, type RefObject } from "react";
 import { createLogger } from "../lib/logger";
+import { getMediaKind as inferMediaKind } from "../lib/media";
 import type {
   GuideChannel,
   MediaKind,
@@ -8,6 +9,7 @@ import type {
 } from "../types/guide";
 
 const log = createLogger("player-overlay");
+const IMAGE_DURATION_DEFAULT_SEC = 15;
 
 type PlayerOverlayProps = {
   playerUrl: string | null;
@@ -19,6 +21,7 @@ type PlayerOverlayProps = {
   selectedProgram?: ProgramSlot | null;
   showPlayerHud: boolean;
   loopVideo?: boolean;
+  imageDurationSec?: number;
   onMediaEnded?: () => void;
   onMediaError?: (kind: MediaKind, url: string) => void;
   ambientAudio: {
@@ -45,6 +48,7 @@ export function PlayerOverlay({
   selectedProgram,
   showPlayerHud,
   loopVideo = true,
+  imageDurationSec,
   onMediaEnded,
   onMediaError,
   ambientAudio,
@@ -59,7 +63,12 @@ export function PlayerOverlay({
   const mediaAudioRef = useRef<HTMLAudioElement | null>(null);
   const mediaVideoRef = useRef<HTMLVideoElement | null>(null);
   const didSeekRef = useRef(false);
+  const onMediaEndedRef = useRef(onMediaEnded);
   const [ambientOffsetSec, setAmbientOffsetSec] = useState<number | null>(null);
+
+  useEffect(() => {
+    onMediaEndedRef.current = onMediaEnded;
+  }, [onMediaEnded]);
 
   const playlistForcesNoLoop = useMemo(() => {
     // Defensive: force no-loop in gallery playlist mode even if props are stale.
@@ -75,19 +84,25 @@ export function PlayerOverlay({
     }
   }, []);
 
+  const effectivePlayerKind = useMemo(() => {
+    if (!playerUrl) return playerKind;
+    const inferred = inferMediaKind(playerUrl);
+    return playerKind === "iframe" && inferred !== "iframe" ? inferred : playerKind ?? inferred;
+  }, [playerKind, playerUrl]);
+
   const effectiveLoopVideo = playlistForcesNoLoop ? false : loopVideo;
   useEffect(() => {
     if (!playerUrl) return;
-    log.info("mount", { url: playerUrl, kind: playerKind, open: playerOpen });
+    log.info("mount", { url: playerUrl, kind: effectivePlayerKind, open: playerOpen });
     return () => {
-      log.info("unmount", { url: playerUrl, kind: playerKind });
+      log.info("unmount", { url: playerUrl, kind: effectivePlayerKind });
     };
-  }, [playerUrl, playerKind, playerOpen]);
+  }, [playerUrl, effectivePlayerKind, playerOpen]);
 
   useEffect(() => {
     if (!playerUrl) return;
-    log.debug("state", { url: playerUrl, kind: playerKind, open: playerOpen });
-  }, [playerUrl, playerKind, playerOpen]);
+    log.debug("state", { url: playerUrl, kind: effectivePlayerKind, open: playerOpen });
+  }, [playerUrl, effectivePlayerKind, playerOpen]);
 
   const iframePolicy = useMemo(() => {
     if (!playerUrl) {
@@ -161,7 +176,7 @@ export function PlayerOverlay({
       video.volume = Math.min(1, Math.max(0, masterVolume));
       video.muted = masterMuted || !playerOpen;
     }
-  }, [masterVolume, masterMuted, playerOpen, playerKind]);
+  }, [masterVolume, masterMuted, playerOpen, effectivePlayerKind]);
 
   useEffect(() => {
     const audio = ambientAudioRef.current;
@@ -201,9 +216,9 @@ export function PlayerOverlay({
     // Best-effort autoplay: some Chromium builds can still be finicky in kiosk mode.
     if (!playerOpen) return;
     if (!playerUrl) return;
-    if (playerKind !== "video" && playerKind !== "audio") return;
+    if (effectivePlayerKind !== "video" && effectivePlayerKind !== "audio") return;
 
-    const target = playerKind === "video" ? mediaVideoRef.current : mediaAudioRef.current;
+    const target = effectivePlayerKind === "video" ? mediaVideoRef.current : mediaAudioRef.current;
     if (!target) return;
 
     let cancelled = false;
@@ -213,7 +228,7 @@ export function PlayerOverlay({
         await target.play();
       } catch (err) {
         if (cancelled) return;
-        log.warn("autoplay-failed", { url: playerUrl, kind: playerKind, err: String(err) });
+        log.warn("autoplay-failed", { url: playerUrl, kind: effectivePlayerKind, err: String(err) });
       }
     };
     // Defer one tick so `muted` props have applied.
@@ -222,7 +237,21 @@ export function PlayerOverlay({
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [playerOpen, playerUrl, playerKind]);
+  }, [playerOpen, playerUrl, effectivePlayerKind]);
+
+  useEffect(() => {
+    if (!playerOpen) return;
+    if (!playerUrl) return;
+    if (effectivePlayerKind !== "image") return;
+    const sec =
+      typeof imageDurationSec === "number" && imageDurationSec > 0
+        ? imageDurationSec
+        : IMAGE_DURATION_DEFAULT_SEC;
+    const timer = window.setTimeout(() => {
+      onMediaEndedRef.current?.();
+    }, Math.round(sec * 1000));
+    return () => window.clearTimeout(timer);
+  }, [imageDurationSec, effectivePlayerKind, playerOpen, playerUrl]);
 
   if (!playerUrl) return null;
 
@@ -246,7 +275,7 @@ export function PlayerOverlay({
       aria-hidden={!playerOpen}
     >
       <div className="player-surface" ref={surfaceRef}>
-        {playerKind === "image" ? (
+        {effectivePlayerKind === "image" ? (
           <img
             className="player-media player-image"
             src={playerUrl}
@@ -260,7 +289,7 @@ export function PlayerOverlay({
               onMediaError?.("image", playerUrl);
             }}
           />
-        ) : playerKind === "video" ? (
+        ) : effectivePlayerKind === "video" ? (
           <video
             className="player-media player-video"
             src={playerUrl}
@@ -281,7 +310,7 @@ export function PlayerOverlay({
               onMediaError?.("video", playerUrl);
             }}
           />
-        ) : playerKind === "audio" ? (
+        ) : effectivePlayerKind === "audio" ? (
           <div className="player-audio">
             <div className="player-audio-visual" />
             <audio

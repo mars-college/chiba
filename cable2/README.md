@@ -79,6 +79,64 @@ node cable2/packages/cli/dist/index.js apply profile default --dry-run --nodes c
 node cable2/packages/cli/dist/index.js apply channel weatherstar --execute --nodes commander --timeout-ms 1200 --json
 ```
 
+Directory import (NAS -> media + playlist):
+
+```sh
+node cable2/packages/cli/dist/index.js import dir '/Volumes/share/chiba-cable/assets/mc26/midterms/co-lab' \
+  --playlist-id pl-co-lab \
+  --playlist-title 'Co-Lab playlist' \
+  --tag CO-LAB \
+  --write --json
+```
+
+Notes:
+- `import dir` scans supported media files, generates deterministic `m-*` IDs from source paths, writes `config/media/*.toml`, and writes a playlist TOML.
+- Channel wrappers are optional. For the semantic model, prefer applying playlists/blocks/media directly.
+
+Eden collection import (Eden API -> media + playlist, optional channel wrapper):
+
+```sh
+EDEN_API_KEY=... \
+node cable2/packages/cli/dist/index.js import eden-collection \
+  'https://app.eden.art/collections/6980dc94fec7de4f6abca3a9' \
+  --playlist-id pl-scanalyzer-daily-digest \
+  --playlist-title 'Scanalyzer Daily Digest' \
+  --tag MARZIPAN \
+  --cache \
+  --write --json
+```
+
+```sh
+EDEN_API_KEY=... \
+node cable2/packages/cli/dist/index.js import eden-collection \
+  'https://app.eden.art/collections/698739a2eb7e84c5958045d3' \
+  --playlist-id pl-mars-college-logo-remixes-v4 \
+  --playlist-title 'Mars College Logo remixes (volume 4)' \
+  --tag MARZIPAN \
+  --cache \
+  --write --json
+```
+
+Notes:
+- `import eden-collection` pulls collection items from Eden (`EDEN_API_KEY` required) and writes deterministic media IDs (`m-eden-<creationId>`).
+- Dry-run by default. Add `--write` to persist.
+- Optional: `--db STAGE` for staging Eden, `--max-items N` to cap imports.
+- Midterms profile assignment is prewired with playlist targets:
+  - `upper-west-4` -> `playlist:pl-earl`
+  - `upper-east-4` -> `playlist:pl-co-lab`
+
+Profile-driven preparation (recommended):
+
+```sh
+EDEN_API_KEY=... \
+node cable2/packages/cli/dist/index.js prepare profile midterms-gallery --write --json
+```
+
+Notes:
+- `prepare profile` reads `[[prepare.*]]` steps from `config/profiles/<profile>.toml`.
+- It can run mixed dependency sources in one command (`prepare.dir`, `prepare.eden_collection`).
+- Use this before `apply profile ...` so all playlists/media dependencies exist and prefetch targets resolve cleanly.
+
 ## Commands
 
 ```sh
@@ -160,12 +218,23 @@ Canonical startup/setup script:
 ./cable2/scripts/pis/bootstrap.sh <pi-name>
 ```
 
-Bootstrap local Pi with local control-plane target:
+`bootstrap.sh` auto-loads env from either:
+- `cable2/.env.pis.local`
+- `.env.pis.local` (repo root)
+
+Simplest (recommended) bootstrap via CLI wrapper:
 
 ```sh
-CHIBA_NODE_API_KEY=dev-shared-key \
-PI_PASSWORD=<pi-password> \
+node cable2/packages/cli/dist/index.js bootstrap pi-local \
+  --registry ./cable2/config/registry.local.toml \
+  --control-plane-url http://192.168.0.117:8790
+```
+
+Direct script bootstrap with explicit env file:
+
+```sh
 ./cable2/scripts/pis/bootstrap.sh pi-local \
+  --env-file ./cable2/.env.pis.local \
   --registry ./cable2/config/registry.local.toml \
   --control-plane-url http://192.168.0.117:8790
 ```

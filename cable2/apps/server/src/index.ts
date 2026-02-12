@@ -22,10 +22,16 @@ import {
   applyModeToFleet,
   applyModeToFleetFromObject,
   applyKioskStateToFleetFromObject,
+  buildKioskState,
+  buildKioskUrl,
   loadModeFromFile,
+  mergeCableMode,
   openArtOnFleet,
+  getApiKeyForPi,
+  type CableMode,
   type CableModeDefaults,
   type ApplyModeResult,
+  type InventoryPi,
 } from './ops-apply-mode.js';
 import { KioskStateStore, getDefaultKioskStatePath, sanitizeKioskState, type KioskState } from './kiosk-state.js';
 
@@ -81,6 +87,7 @@ const distDir = path.resolve(__dirname, '../../guide/dist');
 const indexFile = path.join(distDir, 'index.html');
 const opsDistDir = path.resolve(__dirname, '../../ops/dist');
 const opsIndexFile = path.join(opsDistDir, 'index.html');
+const opsDevUrl = (process.env.CHIBA_OPS_DEV_URL ?? '').trim().replace(/\/$/, '');
 const sourcesFile = path.resolve(__dirname, '../data/sources.json');
 const kioskStatePath = getDefaultKioskStatePath(repoRoot);
 const configPath =
@@ -91,12 +98,31 @@ const configPath =
     return path.resolve(repoRoot, 'config/chiba.toml');
   })();
 
+function resolveOpsRegistryPath(rawPath: string): string {
+  const trimmed = rawPath.trim();
+  if (!trimmed) return 'scripts/pis/registry.toml';
+  if (path.isAbsolute(trimmed)) return trimmed;
+
+  const candidates = [
+    path.resolve(repoRoot, trimmed),
+    path.resolve(cableRoot, trimmed),
+    path.resolve(process.cwd(), trimmed),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return path.relative(repoRoot, candidate);
+    }
+  }
+  return trimmed;
+}
+
 // Ops dashboard registry:
 // Prefer explicit env override, otherwise default to committable source-of-truth registry.
-const OPS_REGISTRY_PATH =
+const OPS_REGISTRY_PATH = resolveOpsRegistryPath(
   process.env.CHIBA_OPS_REGISTRY ??
-  process.env.CHIBA_PIS_REGISTRY ??
-  'scripts/pis/registry.toml';
+    process.env.CHIBA_PIS_REGISTRY ??
+    'scripts/pis/registry.toml'
+);
 const OPS_CONCURRENCY = Number(process.env.CHIBA_OPS_CONCURRENCY ?? 8);
 const OPS_TIMEOUT_MS = Number(process.env.CHIBA_OPS_TIMEOUT_MS ?? 1200);
 const OPS_CONTROL_PLANE_URL = (
@@ -195,6 +221,7 @@ function toOpsFleetHealthFromControlPlane(args: {
   nodes: OpsControlPlaneNode[];
   statuses: OpsControlPlaneNodeStatus[];
   registryPath: string | null;
+  liveKioskUrlById?: Map<string, string>;
 }): any {
   const now = Date.now();
   const local = getLocalOpsMeta(repoRoot);
@@ -227,10 +254,12 @@ function toOpsFleetHealthFromControlPlane(args: {
     const cableProbeFresh = cableCheckedAt !== null && now - cableCheckedAt <= freshnessMs * 2;
     const cableReachable = runtime?.cableReachable === true && cableProbeFresh && fresh;
     const cableHttpStatus = typeof runtime?.cableStatus === 'number' ? runtime.cableStatus : null;
-    const kioskUrl =
+    const runtimeKioskUrl =
       typeof runtime?.kioskUrl === 'string' && runtime.kioskUrl.trim().length > 0
         ? runtime.kioskUrl.trim()
         : null;
+    const liveKioskUrl = args.liveKioskUrlById?.get(node.id) ?? null;
+    const kioskUrl = liveKioskUrl || runtimeKioskUrl;
 
     return {
       id: node.id,
@@ -288,6 +317,81 @@ function toOpsFleetHealthFromControlPlane(args: {
   };
 }
 
+function cableStateToKioskUrl(opts: {
+  node: OpsControlPlaneNode;
+  state: KioskState;
+}): string {
+  const pi: InventoryPi = {
+    id: opts.node.id,
+    host: typeof opts.node.host === 'string' ? opts.node.host : '',
+    ip: typeof opts.node.ip === 'string' ? opts.node.ip : undefined,
+    nodeName:
+      typeof opts.node.nodeName === 'string' && opts.node.nodeName.trim().length > 0
+        ? opts.node.nodeName
+        : opts.node.id,
+    guidePort:
+      typeof opts.node.guidePort === 'number' && Number.isFinite(opts.node.guidePort)
+        ? opts.node.guidePort
+        : 5173,
+    serverPort:
+      typeof opts.node.serverPort === 'number' && Number.isFinite(opts.node.serverPort)
+        ? opts.node.serverPort
+        : 8787,
+  };
+  const cableDefaults: CableModeDefaults = {
+    mode: opts.state.mode,
+    target_kind: opts.state.targetKind,
+    target_id: opts.state.targetId,
+    channel: opts.state.channel,
+    lock: opts.state.lock,
+    qr: opts.state.qr,
+    playlist: opts.state.playlist,
+    nosplash: opts.state.nosplash,
+    hud: opts.state.hudMode,
+    hud_sec: opts.state.hudShowSec,
+    theme: opts.state.theme,
+    scale: opts.state.scale,
+    text_scale: opts.state.textScale,
+    hours: opts.state.hours,
+  };
+  return buildKioskUrl(pi, cableDefaults);
+}
+
+async function fetchLiveKioskUrlForNode(args: {
+  node: OpsControlPlaneNode;
+  timeoutMs: number;
+}): Promise<string | null> {
+  const host = typeof args.node.host === 'string' ? args.node.host.trim() : '';
+  const ip = typeof args.node.ip === 'string' ? args.node.ip.trim() : '';
+  const address = ip || host;
+  if (!address) return null;
+  const serverPort =
+    typeof args.node.serverPort === 'number' && Number.isFinite(args.node.serverPort)
+      ? args.node.serverPort
+      : 8787;
+  const screenId =
+    typeof args.node.nodeName === 'string' && args.node.nodeName.trim().length > 0
+      ? args.node.nodeName.trim()
+      : args.node.id;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), args.timeoutMs);
+  try {
+    const response = await fetch(
+      `http://${formatHostForUrl(address)}:${serverPort}/api/kiosk/state?screenId=${encodeURIComponent(screenId)}`,
+      { signal: controller.signal }
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json().catch(() => null)) as any;
+    const state = payload?.record?.state as KioskState | undefined;
+    if (!state || typeof state !== 'object') return null;
+    return cableStateToKioskUrl({ node: args.node, state });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function buildFleetFromControlPlane(opts: {
   timeoutMs: number;
 }): Promise<any> {
@@ -306,11 +410,29 @@ async function buildFleetFromControlPlane(opts: {
     typeof nodesResp?.canonicalRegistry === 'string'
       ? nodesResp.canonicalRegistry
       : null;
+  const limit = createAsyncLimit(8);
+  const liveKioskPairs = await Promise.all(
+    nodes.map(async (node) =>
+      await limit(async () => {
+        const kioskUrl = await fetchLiveKioskUrlForNode({
+          node,
+          timeoutMs: Math.max(600, Math.floor(opts.timeoutMs)),
+        });
+        return [node.id, kioskUrl] as const;
+      })
+    )
+  );
+  const liveKioskUrlById = new Map<string, string>(
+    liveKioskPairs
+      .filter(([, kioskUrl]) => typeof kioskUrl === 'string' && kioskUrl.trim().length > 0)
+      .map(([nodeId, kioskUrl]) => [nodeId, kioskUrl as string])
+  );
 
   return toOpsFleetHealthFromControlPlane({
     nodes,
     statuses,
     registryPath,
+    liveKioskUrlById,
   });
 }
 
@@ -334,6 +456,24 @@ const swpcSwepam24h = createImagePoller({
 });
 let loadedConfig: LoadedConfig | null = null;
 let mediaRoots: string[] = [];
+type PathPrefixMap = { from: string; to: string };
+const mediaPathPrefixMap: PathPrefixMap[] = (() => {
+  const raw = (process.env.CHIBA_MEDIA_PATH_PREFIX_MAP ?? "").trim();
+  const defaults = ["/Volumes/share=/mnt/share"];
+  const entries = raw ? raw.split(",") : defaults;
+  const out: PathPrefixMap[] = [];
+  for (const entryRaw of entries) {
+    const entry = entryRaw.trim();
+    if (!entry) continue;
+    const idx = entry.indexOf("=");
+    if (idx <= 0 || idx >= entry.length - 1) continue;
+    const from = entry.slice(0, idx).trim();
+    const to = entry.slice(idx + 1).trim();
+    if (!from || !to) continue;
+    out.push({ from, to });
+  }
+  return out;
+})();
 let kioskStateStore: KioskStateStore | null = null;
 const mediaCacheDir = process.env.CHIBA_MEDIA_CACHE_DIR
   ? path.resolve(process.env.CHIBA_MEDIA_CACHE_DIR)
@@ -369,6 +509,176 @@ function normalizeStringArray(value: unknown): string[] {
   }
   return Array.from(new Set(out));
 }
+
+type RuntimeTargetKind = 'media' | 'playlist' | 'block' | 'channel';
+type RuntimeTargetRef = { kind: RuntimeTargetKind; id: string };
+
+function parseRuntimeTargetRef(input: string): RuntimeTargetRef | null {
+  const raw = String(input ?? '').trim();
+  if (!raw) return null;
+  const idx = raw.indexOf(':');
+  if (idx <= 0 || idx >= raw.length - 1) return null;
+  const kind = raw.slice(0, idx).trim().toLowerCase();
+  const id = raw.slice(idx + 1).trim();
+  if (!id) return null;
+  if (kind === 'media' || kind === 'playlist' || kind === 'block' || kind === 'channel') {
+    return { kind, id };
+  }
+  return null;
+}
+
+function normalizeRuntimeTargetRefs(value: unknown): RuntimeTargetRef[] {
+  const out: RuntimeTargetRef[] = [];
+  const arr = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  for (const entry of arr) {
+    if (typeof entry === 'string') {
+      const parsed = parseRuntimeTargetRef(entry);
+      if (parsed) out.push(parsed);
+      continue;
+    }
+    if (entry && typeof entry === 'object') {
+      const kindRaw = typeof (entry as any).kind === 'string' ? (entry as any).kind.trim().toLowerCase() : '';
+      const idRaw = typeof (entry as any).id === 'string' ? (entry as any).id.trim() : '';
+      if (!idRaw) continue;
+      if (kindRaw === 'media' || kindRaw === 'playlist' || kindRaw === 'block' || kindRaw === 'channel') {
+        out.push({ kind: kindRaw as RuntimeTargetKind, id: idRaw });
+      }
+    }
+  }
+  return Array.from(
+    new Map(out.map((target) => [`${target.kind}:${target.id}`, target])).values()
+  );
+}
+
+type ResolvedSource = { type: 'path' | 'url'; value: string; cache?: boolean };
+
+function normalizeResolvedSource(input: unknown): ResolvedSource | null {
+  if (!input || typeof input !== 'object') return null;
+  const type = (input as any).type;
+  const value = typeof (input as any).value === 'string' ? (input as any).value.trim() : '';
+  if ((type !== 'path' && type !== 'url') || !value) return null;
+  return {
+    type,
+    value,
+    cache: typeof (input as any).cache === 'boolean' ? (input as any).cache : undefined,
+  };
+}
+
+function resolveProgramsForChannel(config: LoadedConfig, channel: any): any[] {
+  const blocks = Array.isArray(channel?.blocks) ? channel.blocks : [];
+  if (!blocks.length) return Array.isArray(channel?.programs) ? channel.programs : [];
+  const out: any[] = [];
+  for (const blockId of blocks) {
+    const block = (config as any).blocksById?.[blockId];
+    if (!block) continue;
+    if (Array.isArray(block.programs) && block.programs.length) {
+      out.push(...block.programs);
+    }
+    const blockItems = Array.isArray(block.items) ? block.items : [];
+    for (const item of blockItems) {
+      const source = normalizeResolvedSource((item as any).source);
+      const mediaId = typeof (item as any).media === 'string' ? (item as any).media.trim() : '';
+      const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
+      if (source) out.push({ ...(item as any), source });
+      else if (media?.source) out.push({ ...(item as any), source: media.source });
+      const playlistId = typeof (item as any).playlist === 'string' ? (item as any).playlist.trim() : '';
+      if (playlistId) {
+        out.push(...resolveProgramsForPlaylist(config, playlistId, new Set<string>()));
+      }
+    }
+    const playlistId = String(block.playlist ?? '').trim();
+    if (!playlistId) continue;
+    out.push(...resolveProgramsForPlaylist(config, playlistId, new Set<string>()));
+  }
+  return out.length ? out : (Array.isArray(channel.programs) ? channel.programs : []);
+}
+
+function resolveProgramsForPlaylist(
+  config: LoadedConfig,
+  playlistId: string,
+  visiting: Set<string>
+): any[] {
+  const pid = String(playlistId ?? '').trim();
+  if (!pid) return [];
+  if (visiting.has(pid)) return [];
+  visiting.add(pid);
+  const playlist = (config as any).playlistsById?.[pid];
+  if (!playlist || !Array.isArray(playlist.items)) {
+    visiting.delete(pid);
+    return [];
+  }
+  const out: any[] = [];
+  for (const item of playlist.items) {
+    const mediaId = typeof (item as any).media === 'string' ? (item as any).media.trim() : '';
+    const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
+    const source = normalizeResolvedSource((item as any).source) ?? normalizeResolvedSource(media?.source);
+    if (source) out.push({ ...(item as any), source });
+    const nestedPlaylistId =
+      typeof (item as any).playlist === 'string' ? (item as any).playlist.trim() : '';
+    if (nestedPlaylistId) out.push(...resolveProgramsForPlaylist(config, nestedPlaylistId, visiting));
+  }
+  visiting.delete(pid);
+  return out;
+}
+
+function resolveChannelByKey(config: LoadedConfig, key: string): any | null {
+  const k = key.trim();
+  if (!k) return null;
+  const byId = config.channels.find((c) => c.id === k);
+  if (byId) return byId;
+  const byNum = config.channels.find((c) => String(c.number ?? '').trim() === k);
+  return byNum ?? null;
+}
+
+function resolveSourcesForTarget(config: LoadedConfig, target: RuntimeTargetRef): ResolvedSource[] {
+  if (target.kind === 'media') {
+    const media = (config as any).mediaById?.[target.id];
+    const source = normalizeResolvedSource(media?.source);
+    return source ? [source] : [];
+  }
+  if (target.kind === 'playlist') {
+    return resolveProgramsForPlaylist(config, target.id, new Set<string>())
+      .map((program) => normalizeResolvedSource((program as any).source))
+      .filter((source): source is ResolvedSource => Boolean(source));
+  }
+  if (target.kind === 'block') {
+    const block = (config as any).blocksById?.[target.id];
+    if (!block) return [];
+    const out: ResolvedSource[] = [];
+    if (block.playlist) {
+      out.push(...resolveSourcesForTarget(config, { kind: 'playlist', id: String(block.playlist) }));
+    }
+    for (const item of Array.isArray(block.items) ? block.items : []) {
+      const source = normalizeResolvedSource((item as any).source);
+      if (source) out.push(source);
+      const mediaId = typeof (item as any).media === 'string' ? (item as any).media.trim() : '';
+      if (mediaId) out.push(...resolveSourcesForTarget(config, { kind: 'media', id: mediaId }));
+      const playlistId = typeof (item as any).playlist === 'string' ? (item as any).playlist.trim() : '';
+      if (playlistId) out.push(...resolveSourcesForTarget(config, { kind: 'playlist', id: playlistId }));
+    }
+    for (const program of Array.isArray(block.programs) ? block.programs : []) {
+      const source = normalizeResolvedSource((program as any).source);
+      if (source) out.push(source);
+    }
+    return out;
+  }
+  const channel = resolveChannelByKey(config, target.id);
+  if (!channel) return [];
+  return resolveProgramsForChannel(config, channel)
+    .map((program) => normalizeResolvedSource((program as any).source))
+    .filter((source): source is ResolvedSource => Boolean(source));
+}
+
+function resolveSourcesForTargets(config: LoadedConfig, targets: RuntimeTargetRef[]): ResolvedSource[] {
+  const out: ResolvedSource[] = [];
+  for (const target of targets) {
+    out.push(...resolveSourcesForTarget(config, target));
+  }
+  return Array.from(
+    new Map(out.map((source) => [`${source.type}:${source.value}:${source.cache ? 1 : 0}`, source])).values()
+  );
+}
+
 type RemoteControl =
   | {
       id: string;
@@ -1680,6 +1990,18 @@ function simplifyApplyResult(r: ApplyModeResult): OpsApplyResult {
   };
 }
 
+function normalizeApplyResults(
+  results: Array<ApplyModeResult | OpsApplyResult>
+): OpsApplyResult[] {
+  return results.map((result) => {
+    const r = result as any;
+    if (r && typeof r === 'object' && 'pi' in r) {
+      return simplifyApplyResult(result as ApplyModeResult);
+    }
+    return result as OpsApplyResult;
+  });
+}
+
 function parseStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
@@ -1690,6 +2012,243 @@ function parseStringArray(value: unknown): string[] {
     out.push(s);
   }
   return Array.from(new Set(out));
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function readRawJsonObject(req: any): Promise<Record<string, unknown> | null> {
+  if (req.readableEnded || req.complete) return null;
+  try {
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      req.on('data', (chunk: Buffer | string) => {
+        const next = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        chunks.push(next);
+        if (chunks.reduce((sum, part) => sum + part.length, 0) > 1024 * 1024) {
+          reject(new Error('payload_too_large'));
+        }
+      });
+      req.on('end', () => resolve());
+      req.on('error', reject);
+    });
+    const raw = Buffer.concat(chunks).toString('utf-8').trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readOpsBody(req: any): Promise<Record<string, unknown>> {
+  if (isPlainObject(req.body) && Object.keys(req.body).length > 0) {
+    return req.body as Record<string, unknown>;
+  }
+  if (typeof req.body === 'string' && req.body.trim().length > 0) {
+    try {
+      const parsed = JSON.parse(req.body);
+      if (isPlainObject(parsed)) return parsed;
+    } catch {
+      // ignore
+    }
+  }
+  const raw = await readRawJsonObject(req);
+  if (raw) return raw;
+  return {};
+}
+
+type OpsApplyTarget = 'profile' | 'channel' | 'block' | 'playlist' | 'media';
+
+type OpsApplyOverrides = {
+  mode?: 'guide' | 'gallery';
+  targetKind?: 'media' | 'playlist' | 'block' | 'channel';
+  targetId?: string;
+  channel?: string;
+  lock?: boolean;
+  showQr?: boolean;
+  playlist?: boolean;
+  nosplash?: boolean;
+  hudMode?: 'always' | 'start' | 'never';
+  hudShowSec?: number;
+  theme?: string;
+  scale?: number;
+  textScale?: number;
+  hours?: number;
+};
+
+function parseOptionalBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'string' && !value.trim()) return undefined;
+  return parseBooleanQuery(value);
+}
+
+function parseOptionalFinite(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const raw = Array.isArray(value) ? value[0] : value;
+  const n =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string'
+        ? Number(raw)
+        : NaN;
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseOpsApplyTarget(value: unknown): OpsApplyTarget | null {
+  if (typeof value !== 'string') return null;
+  const t = value.trim().toLowerCase();
+  if (t === 'profile' || t === 'channel' || t === 'block' || t === 'playlist' || t === 'media') {
+    return t;
+  }
+  return null;
+}
+
+function parseRuntimeTargetKind(value: unknown): 'media' | 'playlist' | 'block' | 'channel' | undefined {
+  if (typeof value !== 'string') return undefined;
+  const t = value.trim().toLowerCase();
+  if (t === 'media' || t === 'playlist' || t === 'block' || t === 'channel') return t;
+  return undefined;
+}
+
+function parseOpsApplyOverrides(body: Record<string, unknown>): OpsApplyOverrides {
+  const modeRaw = parseOptionalString(body.mode);
+  const mode = modeRaw === 'guide' || modeRaw === 'gallery' ? modeRaw : undefined;
+  const channel = parseOptionalString(body.channel);
+  const theme = parseOptionalString(body.theme);
+  const targetKind =
+    parseRuntimeTargetKind(body.targetKind) ??
+    parseRuntimeTargetKind(body.target_kind);
+  const targetId =
+    parseOptionalString(body.targetId) ??
+    parseOptionalString(body.target_id);
+  const hudModeRaw =
+    parseOptionalString(body.hudMode) ??
+    parseOptionalString(body.hud_mode) ??
+    parseOptionalString(body.hud);
+  const hudMode =
+    hudModeRaw === 'always' || hudModeRaw === 'start' || hudModeRaw === 'never'
+      ? hudModeRaw
+      : undefined;
+  const hudShowSecRaw = parseOptionalFinite(body.hudShowSec ?? body.hud_sec ?? body.hudSec);
+  const hudShowSec =
+    typeof hudShowSecRaw === 'number' && hudShowSecRaw >= 0 ? hudShowSecRaw : undefined;
+
+  return {
+    mode,
+    targetKind,
+    targetId,
+    channel,
+    lock: parseOptionalBoolean(body.lock),
+    showQr: parseOptionalBoolean(body.showQr ?? body.qr),
+    playlist: parseOptionalBoolean(body.playlist),
+    nosplash: parseOptionalBoolean(body.nosplash),
+    hudMode,
+    hudShowSec,
+    theme,
+    scale: parseOptionalFinite(body.scale),
+    textScale: parseOptionalFinite(body.textScale ?? body.text_scale),
+    hours: parseOptionalFinite(body.hours),
+  };
+}
+
+function hasOpsApplyOverrides(overrides: OpsApplyOverrides): boolean {
+  return Object.values(overrides).some((value) => value !== undefined);
+}
+
+function mergeProfileModeWithOverrides(mode: CableMode, overrides: OpsApplyOverrides): CableMode {
+  const baseDefaults = (mode.defaults?.cable ?? {}) as CableModeDefaults;
+  const nextDefaults: CableModeDefaults = { ...baseDefaults };
+
+  if (overrides.mode) nextDefaults.mode = overrides.mode;
+  if (overrides.targetKind) nextDefaults.target_kind = overrides.targetKind;
+  if (overrides.targetId) nextDefaults.target_id = overrides.targetId;
+  if (overrides.channel) {
+    nextDefaults.channel = overrides.channel;
+    nextDefaults.target_kind = 'channel';
+    nextDefaults.target_id = overrides.channel;
+  }
+  if (overrides.lock !== undefined) nextDefaults.lock = overrides.lock;
+  if (overrides.showQr !== undefined) nextDefaults.qr = overrides.showQr;
+  if (overrides.playlist !== undefined) nextDefaults.playlist = overrides.playlist;
+  if (overrides.nosplash !== undefined) nextDefaults.nosplash = overrides.nosplash;
+  if (overrides.hudMode !== undefined) nextDefaults.hud = overrides.hudMode;
+  if (overrides.hudShowSec !== undefined) nextDefaults.hud_sec = overrides.hudShowSec;
+  if (overrides.theme !== undefined) nextDefaults.theme = overrides.theme;
+  if (overrides.scale !== undefined) nextDefaults.scale = overrides.scale;
+  if (overrides.textScale !== undefined) nextDefaults.text_scale = overrides.textScale;
+  if (overrides.hours !== undefined) nextDefaults.hours = overrides.hours;
+  if (nextDefaults.target_kind === 'channel') {
+    nextDefaults.channel = nextDefaults.target_id ?? nextDefaults.channel;
+  } else {
+    nextDefaults.channel = undefined;
+  }
+
+  return {
+    ...mode,
+    defaults: {
+      ...(mode.defaults ?? {}),
+      cable: nextDefaults,
+    },
+  };
+}
+
+function buildTargetDefaults(args: {
+  target: OpsApplyTarget;
+  id: string;
+  overrides: OpsApplyOverrides;
+}): CableModeDefaults {
+  const { target, id, overrides } = args;
+  const isProfileTarget = target === 'profile';
+  const defaultTargetKind: 'media' | 'playlist' | 'block' | 'channel' =
+    isProfileTarget ? 'channel' : target;
+
+  // Important guardrail:
+  // `channel` is a profile fallback only. For direct semantic applies
+  // (media/playlist/block/channel), never coerce target kind from a stray
+  // channel override coming from UI state.
+  let resolvedTargetKind: 'media' | 'playlist' | 'block' | 'channel' =
+    overrides.targetKind ?? defaultTargetKind;
+  let resolvedTargetId = overrides.targetId ?? id;
+
+  if (isProfileTarget && overrides.targetKind === undefined && overrides.channel) {
+    resolvedTargetKind = 'channel';
+    resolvedTargetId = overrides.channel;
+  } else if (
+    resolvedTargetKind === 'channel' &&
+    overrides.targetId === undefined &&
+    overrides.channel
+  ) {
+    resolvedTargetId = overrides.channel;
+  }
+
+  const defaults: CableModeDefaults = {
+    mode: overrides.mode ?? 'gallery',
+    target_kind: resolvedTargetKind,
+    target_id: resolvedTargetId,
+    channel: resolvedTargetKind === 'channel' ? resolvedTargetId : undefined,
+    nosplash: overrides.nosplash ?? true,
+    qr: overrides.showQr ?? false,
+  };
+
+  if (overrides.lock !== undefined) defaults.lock = overrides.lock;
+  if (overrides.playlist !== undefined) defaults.playlist = overrides.playlist;
+  else if (resolvedTargetKind === 'playlist') defaults.playlist = true;
+  if (overrides.hudMode !== undefined) defaults.hud = overrides.hudMode;
+  if (overrides.hudShowSec !== undefined) defaults.hud_sec = overrides.hudShowSec;
+  if (overrides.theme !== undefined) defaults.theme = overrides.theme;
+  if (overrides.scale !== undefined) defaults.scale = overrides.scale;
+  if (overrides.textScale !== undefined) defaults.text_scale = overrides.textScale;
+  if (overrides.hours !== undefined) defaults.hours = overrides.hours;
+
+  return defaults;
 }
 
 async function applyViaControlPlane(args: {
@@ -1735,13 +2294,34 @@ async function applyViaControlPlane(args: {
       .map((entry) => [entry.nodeId as string, entry])
   );
 
-  const nodeIds = intents
+  const plannedNodeIds = intents
     .map((intent) => (typeof intent.nodeId === 'string' ? intent.nodeId : ''))
     .filter((id) => id.length > 0);
+  const requestedNodeIds = Array.isArray(args.piIds) ? args.piIds.filter((id) => typeof id === 'string' && id.trim().length > 0) : [];
+  const nodeIds = requestedNodeIds.length > 0 ? requestedNodeIds : plannedNodeIds;
 
   return nodeIds.map((nodeId) => {
     const node = nodeById.get(nodeId);
     const result = dispatchById.get(nodeId);
+    const knownInControlPlane = Boolean(node);
+
+    if (!knownInControlPlane) {
+      return {
+        id: nodeId,
+        host: '',
+        ip: null,
+        nodeName: nodeId,
+        guidePort: 5173,
+        url: `${OPS_CONTROL_PLANE_URL}/api/apply`,
+        ok: false,
+        status: null,
+        ms: null,
+        error: 'node_not_in_control_plane_inventory',
+        state: null,
+        prefetch: null,
+      } satisfies OpsApplyResult;
+    }
+
     const host = typeof node?.host === 'string' ? node.host : '';
     const ip = typeof node?.ip === 'string' ? node.ip : null;
     return {
@@ -1754,11 +2334,249 @@ async function applyViaControlPlane(args: {
       ok: args.dryRun ? true : Boolean(result?.ok),
       status: args.dryRun ? null : (typeof result?.status === 'number' ? result.status : null),
       ms: args.dryRun ? null : (typeof result?.ms === 'number' ? result.ms : null),
-      error: args.dryRun ? null : (result?.error ?? null),
+      error: args.dryRun ? null : (result?.error ?? (result ? null : 'missing_dispatch_result')),
       state: null,
       prefetch: null,
     } satisfies OpsApplyResult;
   });
+}
+
+function createAsyncLimit(concurrency: number): <T>(fn: () => Promise<T>) => Promise<T> {
+  const max = Number.isFinite(concurrency) ? Math.max(1, Math.floor(concurrency)) : 8;
+  let active = 0;
+  const queue: Array<() => void> = [];
+  const next = () => {
+    if (active >= max) return;
+    const job = queue.shift();
+    if (!job) return;
+    active += 1;
+    job();
+  };
+  return async <T>(fn: () => Promise<T>) =>
+    await new Promise<T>((resolve, reject) => {
+      queue.push(() => {
+        fn()
+          .then(resolve)
+          .catch(reject)
+          .finally(() => {
+            active -= 1;
+            next();
+          });
+      });
+      next();
+    });
+}
+
+function toInventoryPiFromControlPlane(node: OpsControlPlaneNode): InventoryPi | null {
+  const id = typeof node?.id === 'string' ? node.id.trim() : '';
+  if (!id) return null;
+  const host = typeof node?.host === 'string' ? node.host.trim() : '';
+  const ip = typeof node?.ip === 'string' ? node.ip.trim() : '';
+  const nodeName = typeof node?.nodeName === 'string' && node.nodeName.trim() ? node.nodeName.trim() : id;
+  const guidePort = typeof node?.guidePort === 'number' && Number.isFinite(node.guidePort) ? node.guidePort : 5173;
+  const serverPort = typeof node?.serverPort === 'number' && Number.isFinite(node.serverPort) ? node.serverPort : 8787;
+  return {
+    id,
+    host,
+    ip: ip || undefined,
+    nodeName,
+    guidePort,
+    serverPort,
+  };
+}
+
+async function postKioskStateToNode(args: {
+  hostOrIp: string;
+  serverPort: number;
+  screenId: string;
+  state: KioskState;
+  timeoutMs: number;
+}): Promise<{ ok: boolean; status: number | null; ms: number | null; error?: string }> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), args.timeoutMs);
+  try {
+    const response = await fetch(`http://${formatHostForUrl(args.hostOrIp)}:${args.serverPort}/api/kiosk/state`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ screenId: args.screenId, state: args.state, replace: true }),
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      ms: Date.now() - started,
+      error: response.ok ? undefined : `http_${response.status}`,
+    };
+  } catch (err) {
+    return { ok: false, status: null, ms: null, error: (err as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function postKioskUrlToNode(args: {
+  hostOrIp: string;
+  url: string;
+  apiKey?: string | null;
+  restart?: boolean;
+  timeoutMs: number;
+}): Promise<{ ok: boolean; status: number | null; ms: number | null; error?: string }> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), args.timeoutMs);
+  try {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (args.apiKey && args.apiKey.trim().length > 0) {
+      headers.authorization = `Bearer ${args.apiKey.trim()}`;
+    }
+    const response = await fetch(`http://${formatHostForUrl(args.hostOrIp)}:8080/kiosk-url`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers,
+      body: JSON.stringify({
+        url: args.url,
+        restart: args.restart ?? false,
+      }),
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      ms: Date.now() - started,
+      error: response.ok ? undefined : `http_${response.status}`,
+    };
+  } catch (err) {
+    return { ok: false, status: null, ms: null, error: (err as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function applyModeViaControlPlane(args: {
+  mode: CableMode;
+  piIds?: string[];
+  timeoutMs: number;
+  concurrency: number;
+  dryRun: boolean;
+}): Promise<OpsApplyResult[]> {
+  const nodesResp = await fetchControlPlaneJson('/api/nodes', args.timeoutMs);
+  const nodes = Array.isArray(nodesResp?.nodes) ? (nodesResp.nodes as OpsControlPlaneNode[]) : [];
+  const inventory = nodes
+    .map((node) => toInventoryPiFromControlPlane(node))
+    .filter((pi): pi is InventoryPi => Boolean(pi));
+  const inventoryById = new Map(inventory.map((pi) => [pi.id, pi]));
+  const requestedIds = args.piIds?.length ? Array.from(new Set(args.piIds)) : inventory.map((pi) => pi.id);
+
+  const limit = createAsyncLimit(args.concurrency);
+  const results = await Promise.all(
+    requestedIds.map(async (nodeId) =>
+      await limit(async () => {
+        const pi = inventoryById.get(nodeId);
+        if (!pi) {
+          return {
+            id: nodeId,
+            host: '',
+            ip: null,
+            nodeName: nodeId,
+            guidePort: 5173,
+            url: `${OPS_CONTROL_PLANE_URL}/api/apply`,
+            ok: false,
+            status: null,
+            ms: null,
+            error: 'node_not_in_control_plane_inventory',
+            state: null,
+            prefetch: null,
+          } satisfies OpsApplyResult;
+        }
+
+        const address = (pi.ip ?? '').trim() || (pi.host ?? '').trim();
+        const cable = mergeCableMode(args.mode, pi.id);
+        const url = buildKioskUrl(pi, cable);
+        if (!address) {
+          return {
+            id: pi.id,
+            host: pi.host,
+            ip: pi.ip ?? null,
+            nodeName: pi.nodeName,
+            guidePort: pi.guidePort,
+            url,
+            ok: false,
+            status: null,
+            ms: null,
+            error: 'node_has_no_address',
+            state: null,
+            prefetch: null,
+          } satisfies OpsApplyResult;
+        }
+
+        if (args.dryRun) {
+          return {
+            id: pi.id,
+            host: pi.host,
+            ip: pi.ip ?? null,
+            nodeName: pi.nodeName,
+            guidePort: pi.guidePort,
+            url,
+            ok: true,
+            status: null,
+            ms: null,
+            error: null,
+            state: null,
+            prefetch: null,
+          } satisfies OpsApplyResult;
+        }
+
+        const state = buildKioskState(pi, cable);
+        const posted = await postKioskStateToNode({
+          hostOrIp: address,
+          serverPort: pi.serverPort,
+          screenId: pi.nodeName,
+          state,
+          timeoutMs: args.timeoutMs,
+        });
+        let urlSync:
+          | { ok: boolean; status: number | null; ms: number | null; error?: string }
+          | null = null;
+        if (posted.ok) {
+          const apiKey = getApiKeyForPi(pi.id);
+          urlSync = await postKioskUrlToNode({
+            hostOrIp: address,
+            url,
+            apiKey,
+            restart: false,
+            timeoutMs: args.timeoutMs,
+          });
+        }
+        const ok = posted.ok && (urlSync ? urlSync.ok : true);
+        const error =
+          posted.ok
+            ? urlSync && !urlSync.ok
+              ? `kiosk_url_sync_failed:${urlSync.error ?? 'unknown'}`
+              : null
+            : posted.error ?? 'kiosk_state_failed';
+        return {
+          id: pi.id,
+          host: pi.host,
+          ip: pi.ip ?? null,
+          nodeName: pi.nodeName,
+          guidePort: pi.guidePort,
+          url,
+          ok,
+          status: posted.status,
+          ms: posted.ms,
+          error,
+          state: {
+            ok,
+            status: posted.status,
+            ms: posted.ms,
+            error: error ?? undefined,
+          },
+          prefetch: null,
+        } satisfies OpsApplyResult;
+      })
+    )
+  );
+  return results;
 }
 
 app.get('/api/ops/profiles', async (_req, res) => {
@@ -1823,6 +2641,202 @@ app.get('/api/ops/catalog', async (_req, res) => {
   });
 });
 
+app.get('/api/catalog', (_req, res) => {
+  if (!loadedConfig) {
+    res.status(503).json({ ok: false, error: 'config_not_ready' });
+    return;
+  }
+  const media = Object.values(loadedConfig.mediaById ?? {});
+  const playlists = Object.values(loadedConfig.playlistsById ?? {});
+  const blocks = Object.values(loadedConfig.blocksById ?? {});
+  const channels = loadedConfig.channels ?? [];
+  res.json({
+    ok: true,
+    catalog: {
+      media,
+      playlists,
+      blocks,
+      channels,
+    },
+  });
+});
+
+app.post('/api/ops/apply-target', async (req, res) => {
+  const body = await readOpsBody(req);
+  const target = parseOpsApplyTarget(body.target);
+  if (!target) {
+    res.status(400).json({
+      ok: false,
+      error: 'invalid_target',
+      message: 'Provide JSON body { target: "profile|channel|block|playlist|media", id: "..." } (set Content-Type: application/json).',
+    });
+    return;
+  }
+
+  const idRaw =
+    body.id ??
+    body.targetId ??
+    (target === 'profile' ? body.profileId : undefined) ??
+    (target === 'channel' ? body.channelId : undefined) ??
+    (target === 'block' ? body.blockId : undefined) ??
+    (target === 'playlist' ? body.playlistId : undefined) ??
+    (target === 'media' ? body.mediaId : undefined);
+  const id = typeof idRaw === 'string' ? idRaw.trim() : '';
+  if (!id) {
+    res.status(400).json({ ok: false, error: 'missing_id', message: 'Provide a non-empty target id.' });
+    return;
+  }
+
+  const methodRaw = body.method ?? req.query.method;
+  const defaultMethod = 'state';
+  const method =
+    methodRaw === 'kiosk-url'
+      ? 'kiosk-url'
+      : methodRaw === 'state'
+        ? 'state'
+        : defaultMethod;
+  const timeoutMs =
+    clampInt(body.timeoutMs, 150, 8000) ??
+    clampInt(req.query.timeoutMs, 150, 8000) ??
+    2500;
+  const concurrency =
+    clampInt(body.concurrency, 1, 64) ??
+    clampInt(body.parallel, 1, 64) ??
+    clampInt(req.query.concurrency ?? req.query.parallel, 1, 64) ??
+    8;
+  const dryRun = parseBooleanQuery(body.dryRun) || parseBooleanQuery(req.query.dryRun);
+  const piIds = parseStringArray(body.piIds ?? body.pis);
+  const forceLegacy = parseBooleanQuery(body.forceLegacy ?? req.query.forceLegacy);
+  const overrides = parseOpsApplyOverrides(body);
+  const hasOverrides = hasOpsApplyOverrides(overrides);
+
+  try {
+    // Route profile applies through control-plane for fleet-wide desired-state workflows.
+    // For direct semantic targets (media/playlist/block/channel), apply from server state
+    // so explicit target_kind/target_id semantics are preserved even if a node is running
+    // an older agent build.
+    if (OPS_USE_CONTROL_PLANE && method !== 'state' && !forceLegacy && !hasOverrides && target === 'profile') {
+      const results = await applyViaControlPlane({
+        target,
+        id,
+        piIds: piIds.length ? piIds : undefined,
+        dryRun,
+        timeoutMs,
+      });
+      res.json({ ok: true, target, id, results });
+      return;
+    }
+
+    if (target === 'profile') {
+      const file = id.endsWith('.toml') ? id : `${id}.toml`;
+      const modePath = path.join('cable2', 'config', 'profiles', file);
+      const mode = await loadModeFromFile(repoRoot, modePath);
+      const modeWithOverrides = hasOverrides ? mergeProfileModeWithOverrides(mode, overrides) : mode;
+
+      const results = await (async () => {
+        // In control-plane mode, state applies should use control-plane inventory
+        // for all profile applies (with or without overrides). This avoids
+        // per-node local registry drift causing unknown_pi_id failures.
+        if (OPS_USE_CONTROL_PLANE && !forceLegacy && method === 'state') {
+          return await applyModeViaControlPlane({
+            mode: modeWithOverrides,
+            piIds: piIds.length ? piIds : undefined,
+            concurrency,
+            timeoutMs,
+            dryRun,
+          });
+        }
+        if (method === 'kiosk-url') {
+          return await applyModeToFleetFromObject({
+            repoRoot,
+            inventoryPath: OPS_REGISTRY_PATH,
+            mode: modeWithOverrides,
+            piIds: piIds.length ? piIds : undefined,
+            concurrency,
+            timeoutMs,
+            dryRun,
+          });
+        }
+        return await applyKioskStateToFleetFromObject({
+          repoRoot,
+          inventoryPath: OPS_REGISTRY_PATH,
+          mode: modeWithOverrides,
+          piIds: piIds.length ? piIds : undefined,
+          concurrency,
+          timeoutMs,
+          dryRun,
+        });
+      })();
+
+      res.json({ ok: true, target, id, modePath, results: normalizeApplyResults(results) });
+      return;
+    }
+
+    // Direct semantic applies (media/playlist/block/channel) must always honor
+    // the selected target+id. Keep behavioral/display options, but ignore
+    // stale target override fields from the UI.
+    const directTargetOverrides: OpsApplyOverrides = {
+      ...overrides,
+      targetKind: undefined,
+      targetId: undefined,
+      channel: undefined,
+    };
+    const defaults = buildTargetDefaults({
+      target,
+      id,
+      overrides: directTargetOverrides,
+    });
+    const modeForTarget: CableMode = { defaults: { cable: defaults } };
+
+    const results = await (async () => {
+      // In control-plane mode, state applies should use control-plane inventory
+      // for direct semantic targets as well.
+      if (OPS_USE_CONTROL_PLANE && !forceLegacy && method === 'state') {
+        return await applyModeViaControlPlane({
+          mode: modeForTarget,
+          piIds: piIds.length ? piIds : undefined,
+          concurrency,
+          timeoutMs,
+          dryRun,
+        });
+      }
+      if (method === 'kiosk-url') {
+        return await applyModeToFleetFromObject({
+          repoRoot,
+          inventoryPath: OPS_REGISTRY_PATH,
+          mode: modeForTarget,
+          piIds: piIds.length ? piIds : undefined,
+          concurrency,
+          timeoutMs,
+          dryRun,
+        });
+      }
+      return await applyKioskStateToFleetFromObject({
+        repoRoot,
+        inventoryPath: OPS_REGISTRY_PATH,
+        mode: modeForTarget,
+        piIds: piIds.length ? piIds : undefined,
+        concurrency,
+        timeoutMs,
+        dryRun,
+      });
+    })();
+
+    res.json({
+      ok: true,
+      target,
+      id,
+      resolvedTarget: {
+        kind: defaults.target_kind ?? target,
+        id: defaults.target_id ?? id,
+      },
+      results: normalizeApplyResults(results),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'ops_apply_target_failed', message: (err as Error).message });
+  }
+});
+
 app.post('/api/ops/apply-profile', async (req, res) => {
   const profileIdRaw = (req.body as any)?.profileId ?? (req.body as any)?.id ?? (req.body as any)?.profile;
   const profileId = typeof profileIdRaw === 'string' ? profileIdRaw.trim() : '';
@@ -1851,7 +2865,7 @@ app.post('/api/ops/apply-profile', async (req, res) => {
   const piIds = parseStringArray((req.body as any)?.piIds ?? (req.body as any)?.pis);
 
   try {
-    if (OPS_USE_CONTROL_PLANE) {
+    if (OPS_USE_CONTROL_PLANE && method !== 'state') {
       const results = await applyViaControlPlane({
         target: 'profile',
         id: profileId,
@@ -1886,7 +2900,7 @@ app.post('/api/ops/apply-profile', async (req, res) => {
         dryRun,
       });
     })();
-    res.json({ ok: true, modePath, results: results.map(simplifyApplyResult) });
+    res.json({ ok: true, modePath, results: normalizeApplyResults(results) });
   } catch (err) {
     res.status(500).json({ ok: false, error: 'ops_apply_profile_failed', message: (err as Error).message });
   }
@@ -1924,6 +2938,8 @@ app.post('/api/ops/set-channel', async (req, res) => {
 
   const defaults: CableModeDefaults = {
     mode: 'gallery',
+    target_kind: 'channel',
+    target_id: channelId,
     channel: channelId,
     nosplash,
     // Schema uses qr=false to hide (default behavior in gallery is hidden anyway).
@@ -1968,7 +2984,7 @@ app.post('/api/ops/set-channel', async (req, res) => {
         dryRun,
       });
     })();
-    res.json({ ok: true, channelId, results: results.map(simplifyApplyResult) });
+    res.json({ ok: true, channelId, results: normalizeApplyResults(results) });
   } catch (err) {
     res.status(500).json({ ok: false, error: 'ops_set_channel_failed', message: (err as Error).message });
   }
@@ -2060,7 +3076,7 @@ app.post('/api/ops/open-program', async (req, res) => {
         dryRun,
       });
     })();
-    res.json({ ok: true, channelId, index, results: results.map(simplifyApplyResult) });
+    res.json({ ok: true, channelId, index, results: normalizeApplyResults(results) });
   } catch (err) {
     res.status(500).json({ ok: false, error: 'ops_open_program_failed', message: (err as Error).message });
   }
@@ -2098,9 +3114,19 @@ app.post('/api/ops/open-guide', async (req, res) => {
     nosplash,
     playlist: false,
   };
+  const modeForGuide: CableMode = { defaults: { cable: defaults } };
 
   try {
     const results = await (async () => {
+      if (OPS_USE_CONTROL_PLANE && method === 'state') {
+        return await applyModeViaControlPlane({
+          mode: modeForGuide,
+          piIds: piIds.length ? piIds : undefined,
+          concurrency,
+          timeoutMs,
+          dryRun,
+        });
+      }
       if (method === 'kiosk-url') {
         return await applyKioskUrlToFleet({
           repoRoot,
@@ -2124,14 +3150,14 @@ app.post('/api/ops/open-guide', async (req, res) => {
       return await applyKioskStateToFleetFromObject({
         repoRoot,
         inventoryPath: OPS_REGISTRY_PATH,
-        mode: { defaults: { cable: defaults } },
+        mode: modeForGuide,
         piIds: piIds.length ? piIds : undefined,
         concurrency,
         timeoutMs,
         dryRun,
       });
     })();
-    res.json({ ok: true, action: 'open-guide', results: results.map(simplifyApplyResult) });
+    res.json({ ok: true, action: 'open-guide', results: normalizeApplyResults(results) });
   } catch (err) {
     res.status(500).json({ ok: false, error: 'ops_open_guide_failed', message: (err as Error).message });
   }
@@ -2320,6 +3346,10 @@ async function ensureStashed(sourcePath: string): Promise<string> {
   const work = (async () => {
     await fsp.mkdir(stashCacheDir, { recursive: true });
     if (fs.existsSync(targetPath)) return targetPath;
+    const resolvedSourcePath = resolveAllowedMediaPath(sourcePath);
+    if (!resolvedSourcePath) {
+      throw new Error('forbidden_path');
+    }
 
     // Copy with a timeout so a dead NAS mount doesn't hang the process forever.
     const timeoutMs =
@@ -2340,7 +3370,7 @@ async function ensureStashed(sourcePath: string): Promise<string> {
 
     const copyWithTimeout = async () => {
       return await new Promise<void>((resolve, reject) => {
-        const read = fs.createReadStream(sourcePath);
+        const read = fs.createReadStream(resolvedSourcePath);
         const write = fs.createWriteStream(tmpPath, { flags: 'wx' });
         let settled = false;
 
@@ -2377,7 +3407,7 @@ async function ensureStashed(sourcePath: string): Promise<string> {
     };
     try {
       // Validate source exists and is a file.
-      const stat = await withTimeout(() => fsp.stat(sourcePath));
+      const stat = await withTimeout(() => fsp.stat(resolvedSourcePath));
       if (!stat.isFile()) throw new Error('not_file');
 
       await copyWithTimeout();
@@ -2403,12 +3433,37 @@ async function ensureStashed(sourcePath: string): Promise<string> {
 }
 
 function isPathAllowed(target: string): boolean {
-  if (!mediaRoots.length) return false;
-  const resolved = path.resolve(target);
-  return mediaRoots.some((root) => {
-    const base = path.resolve(root);
-    return resolved === base || resolved.startsWith(`${base}${path.sep}`);
-  });
+  return resolveAllowedMediaPath(target) !== null;
+}
+
+function rewritePathWithPrefixMap(target: string): string[] {
+  const out = [target];
+  for (const map of mediaPathPrefixMap) {
+    if (target === map.from || target.startsWith(`${map.from}${path.sep}`)) {
+      const suffix = target.slice(map.from.length);
+      out.push(`${map.to}${suffix}`);
+    }
+  }
+  return Array.from(new Set(out));
+}
+
+function resolveAllowedMediaPath(target: string): string | null {
+  if (!mediaRoots.length) return null;
+  const rootCandidates = new Set<string>();
+  for (const root of mediaRoots) {
+    for (const maybe of rewritePathWithPrefixMap(root)) {
+      rootCandidates.add(path.resolve(maybe));
+    }
+  }
+  for (const maybeTarget of rewritePathWithPrefixMap(target)) {
+    const resolved = path.resolve(maybeTarget);
+    for (const base of rootCandidates) {
+      if (resolved === base || resolved.startsWith(`${base}${path.sep}`)) {
+        return resolved;
+      }
+    }
+  }
+  return null;
 }
 
 app.get('/cache/:id', async (req, res) => {
@@ -2521,7 +3576,7 @@ app.get('/stash/:id', async (req, res) => {
     return;
   }
   const decoded = decodeURIComponent(rawPath);
-  if (!isPathAllowed(decoded)) {
+  if (!resolveAllowedMediaPath(decoded)) {
     res.status(403).send('forbidden');
     return;
   }
@@ -2618,63 +3673,27 @@ app.post('/api/stash/prefetch', async (req, res) => {
   const rawPaths = Array.isArray(body.paths) ? body.paths : null;
   const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
   const channelIds = normalizeStringArray(body.channelIds ?? body.channels);
+  const targetRefs = normalizeRuntimeTargetRefs(body.targets ?? body.target);
   const config = loadedConfig;
 
   let paths: string[] = [];
   if (rawPaths) {
     paths = rawPaths.filter((p: any) => typeof p === 'string' && p.trim()).map((p: string) => p.trim());
-  } else if ((channelId || channelIds.length) && config?.channels?.length) {
-    const keys = Array.from(new Set([channelId, ...channelIds].map((s) => s.trim()).filter(Boolean)));
-    const findChannel = (key: string) => {
-      const k = key.trim();
-      if (!k) return null;
-      const byId = config.channels.find((c) => c.id === k);
-      if (byId) return byId;
-      // allow numeric channel strings
-      const byNum = config.channels.find((c) => String(c.number ?? '').trim() === k);
-      return byNum ?? null;
-    };
-
-    const resolveProgramsForChannel = (channel: any): any[] => {
-      const blocks = Array.isArray(channel.blocks) ? channel.blocks : [];
-      if (!blocks.length) return Array.isArray(channel.programs) ? channel.programs : [];
-      const out: any[] = [];
-      for (const blockId of blocks) {
-        const block = (config as any).blocksById?.[blockId];
-        if (!block) continue;
-        if (Array.isArray(block.programs) && block.programs.length) {
-          out.push(...block.programs);
-          continue;
-        }
-        const playlistId = String(block.playlist ?? '').trim();
-        if (!playlistId) continue;
-        const playlist = (config as any).playlistsById?.[playlistId];
-        if (!playlist) continue;
-        for (const item of playlist.items ?? []) {
-          const mediaId = String(item.media ?? '').trim();
-          const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
-          const source = item.source ?? media?.source ?? null;
-          if (!source) continue;
-          out.push({ ...item, source });
-        }
-      }
-      return out.length ? out : (Array.isArray(channel.programs) ? channel.programs : []);
-    };
-
-    paths = keys
-      .map(findChannel)
-      .filter(Boolean)
-      .flatMap((channel: any) =>
-        resolveProgramsForChannel(channel)
-          .map((p: any) => (p.source?.type === 'path' && p.source.cache ? p.source.value : null))
-          .filter((p: any) => typeof p === 'string' && p.trim().length > 0)
-      );
+  } else if (config) {
+    const channelTargets: RuntimeTargetRef[] = Array.from(new Set([channelId, ...channelIds].map((s) => s.trim()).filter(Boolean))).map((id) => ({
+      kind: 'channel',
+      id,
+    }));
+    const resolvedSources = resolveSourcesForTargets(config, [...targetRefs, ...channelTargets]);
+    paths = resolvedSources
+      .filter((source) => source.type === 'path' && source.cache)
+      .map((source) => source.value);
   }
 
   const filtered = Array.from(new Set(paths))
     .map((p) => p.trim())
     .filter((p) => p.length > 0)
-    .filter((p) => isPathAllowed(p));
+    .filter((p) => resolveAllowedMediaPath(p) !== null);
 
   // Kick off background copies (do not await).
   filtered.forEach((p) => {
@@ -2688,6 +3707,7 @@ app.post('/api/stash/prefetch', async (req, res) => {
     queued: filtered.length,
     channelId: channelId || null,
     channelIds: channelIds.length ? channelIds : null,
+    targets: targetRefs.length ? targetRefs.map((target) => `${target.kind}:${target.id}`) : null,
   });
 });
 
@@ -2703,6 +3723,7 @@ app.get('/api/stash/status', async (req, res) => {
     : typeof req.query.channelIds === 'string'
     ? [req.query.channelIds]
     : [];
+  const targetRefs = normalizeRuntimeTargetRefs(req.query.targets ?? req.query.target);
   const pathParam = typeof req.query.path === 'string' ? req.query.path : '';
   const pathsParam = Array.isArray(req.query.paths)
     ? req.query.paths
@@ -2712,49 +3733,15 @@ app.get('/api/stash/status', async (req, res) => {
   const config = loadedConfig;
 
   let paths: string[] = [];
-  if ((channelId || channelIds.length) && config?.channels?.length) {
-    const keys = Array.from(new Set([channelId, ...channelIds].map((s) => String(s ?? '').trim()).filter(Boolean)));
-    const findChannel = (key: string) => {
-      const k = key.trim();
-      if (!k) return null;
-      const byId = config.channels.find((c) => c.id === k);
-      if (byId) return byId;
-      const byNum = config.channels.find((c) => String(c.number ?? '').trim() === k);
-      return byNum ?? null;
-    };
-    const resolveProgramsForChannel = (channel: any): any[] => {
-      const blocks = Array.isArray(channel.blocks) ? channel.blocks : [];
-      if (!blocks.length) return Array.isArray(channel.programs) ? channel.programs : [];
-      const out: any[] = [];
-      for (const blockId of blocks) {
-        const block = (config as any).blocksById?.[blockId];
-        if (!block) continue;
-        if (Array.isArray(block.programs) && block.programs.length) {
-          out.push(...block.programs);
-          continue;
-        }
-        const playlistId = String(block.playlist ?? '').trim();
-        if (!playlistId) continue;
-        const playlist = (config as any).playlistsById?.[playlistId];
-        if (!playlist) continue;
-        for (const item of playlist.items ?? []) {
-          const mediaId = String(item.media ?? '').trim();
-          const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
-          const source = item.source ?? media?.source ?? null;
-          if (!source) continue;
-          out.push({ ...item, source });
-        }
-      }
-      return out.length ? out : (Array.isArray(channel.programs) ? channel.programs : []);
-    };
-    paths = keys
-      .map(findChannel)
-      .filter(Boolean)
-      .flatMap((channel: any) =>
-        resolveProgramsForChannel(channel)
-          .map((p: any) => (p.source?.type === 'path' && p.source.cache ? p.source.value : null))
-          .filter((p: any) => typeof p === 'string' && p.trim().length > 0)
-      );
+  if ((channelId || channelIds.length || targetRefs.length) && config) {
+    const channelTargets: RuntimeTargetRef[] = Array.from(new Set([channelId, ...channelIds].map((s) => String(s ?? '').trim()).filter(Boolean))).map((id) => ({
+      kind: 'channel',
+      id,
+    }));
+    const resolvedSources = resolveSourcesForTargets(config, [...targetRefs, ...channelTargets]);
+    paths = resolvedSources
+      .filter((source) => source.type === 'path' && source.cache)
+      .map((source) => source.value);
   } else if (pathParam) {
     paths = [pathParam];
   } else if (pathsParam.length) {
@@ -2762,7 +3749,7 @@ app.get('/api/stash/status', async (req, res) => {
   }
 
   const uniq = Array.from(new Set(paths.map((p) => p.trim()).filter(Boolean)))
-    .filter((p) => isPathAllowed(p));
+    .filter((p) => resolveAllowedMediaPath(p) !== null);
 
   const items = uniq.map((p) => {
     const name = stashedFilenameForPath(p);
@@ -2778,6 +3765,7 @@ app.get('/api/stash/status', async (req, res) => {
     ok: true,
     channelId: channelId || null,
     channelIds: channelIds.length ? channelIds : null,
+    targets: targetRefs.length ? targetRefs.map((target) => `${target.kind}:${target.id}`) : null,
     items,
     cached: items.filter((i) => i.cached).length,
     total: items.length,
@@ -2790,54 +3778,21 @@ app.post('/api/cache/prefetch', async (req, res) => {
   const rawUrls = Array.isArray(body.urls) ? body.urls : null;
   const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
   const channelIds = normalizeStringArray(body.channelIds ?? body.channels);
+  const targetRefs = normalizeRuntimeTargetRefs(body.targets ?? body.target);
   const config = loadedConfig;
 
   let urls: string[] = [];
   if (rawUrls) {
     urls = rawUrls.filter((u: any) => typeof u === 'string' && u.trim()).map((u: string) => u.trim());
-  } else if ((channelId || channelIds.length) && config?.channels?.length) {
-    const keys = Array.from(new Set([channelId, ...channelIds].map((s) => s.trim()).filter(Boolean)));
-    const findChannel = (key: string) => {
-      const k = key.trim();
-      if (!k) return null;
-      const byId = config.channels.find((c) => c.id === k);
-      if (byId) return byId;
-      const byNum = config.channels.find((c) => String(c.number ?? '').trim() === k);
-      return byNum ?? null;
-    };
-    const resolveProgramsForChannel = (channel: any): any[] => {
-      const blocks = Array.isArray(channel.blocks) ? channel.blocks : [];
-      if (!blocks.length) return Array.isArray(channel.programs) ? channel.programs : [];
-      const out: any[] = [];
-      for (const blockId of blocks) {
-        const block = (config as any).blocksById?.[blockId];
-        if (!block) continue;
-        if (Array.isArray(block.programs) && block.programs.length) {
-          out.push(...block.programs);
-          continue;
-        }
-        const playlistId = String(block.playlist ?? '').trim();
-        if (!playlistId) continue;
-        const playlist = (config as any).playlistsById?.[playlistId];
-        if (!playlist) continue;
-        for (const item of playlist.items ?? []) {
-          const mediaId = String(item.media ?? '').trim();
-          const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
-          const source = item.source ?? media?.source ?? null;
-          if (!source) continue;
-          out.push({ ...item, source });
-        }
-      }
-      return out.length ? out : (Array.isArray(channel.programs) ? channel.programs : []);
-    };
-    urls = keys
-      .map(findChannel)
-      .filter(Boolean)
-      .flatMap((channel: any) =>
-        resolveProgramsForChannel(channel)
-          .map((p: any) => (p.source?.type === 'url' && p.source.cache ? p.source.value : null))
-          .filter((u: any) => typeof u === 'string' && u.trim().length > 0)
-      );
+  } else if (config) {
+    const channelTargets: RuntimeTargetRef[] = Array.from(new Set([channelId, ...channelIds].map((s) => s.trim()).filter(Boolean))).map((id) => ({
+      kind: 'channel',
+      id,
+    }));
+    const resolvedSources = resolveSourcesForTargets(config, [...targetRefs, ...channelTargets]);
+    urls = resolvedSources
+      .filter((source) => source.type === 'url' && source.cache)
+      .map((source) => source.value);
   }
 
   // Only prefetch http(s) URLs. Relative URLs won't work with ensureCached.
@@ -2857,6 +3812,7 @@ app.post('/api/cache/prefetch', async (req, res) => {
     queued: filtered.length,
     channelId: channelId || null,
     channelIds: channelIds.length ? channelIds : null,
+    targets: targetRefs.length ? targetRefs.map((target) => `${target.kind}:${target.id}`) : null,
   });
 });
 
@@ -2868,6 +3824,7 @@ app.get('/api/cache/status', async (req, res) => {
     : typeof req.query.channelIds === 'string'
     ? [req.query.channelIds]
     : [];
+  const targetRefs = normalizeRuntimeTargetRefs(req.query.targets ?? req.query.target);
   const urlParam = typeof req.query.url === 'string' ? req.query.url : '';
   const urlsParam = Array.isArray(req.query.urls)
     ? req.query.urls
@@ -2877,49 +3834,15 @@ app.get('/api/cache/status', async (req, res) => {
   const config = loadedConfig;
 
   let urls: string[] = [];
-  if ((channelId || channelIds.length) && config?.channels?.length) {
-    const keys = Array.from(new Set([channelId, ...channelIds].map((s) => String(s ?? '').trim()).filter(Boolean)));
-    const findChannel = (key: string) => {
-      const k = key.trim();
-      if (!k) return null;
-      const byId = config.channels.find((c) => c.id === k);
-      if (byId) return byId;
-      const byNum = config.channels.find((c) => String(c.number ?? '').trim() === k);
-      return byNum ?? null;
-    };
-    const resolveProgramsForChannel = (channel: any): any[] => {
-      const blocks = Array.isArray(channel.blocks) ? channel.blocks : [];
-      if (!blocks.length) return Array.isArray(channel.programs) ? channel.programs : [];
-      const out: any[] = [];
-      for (const blockId of blocks) {
-        const block = (config as any).blocksById?.[blockId];
-        if (!block) continue;
-        if (Array.isArray(block.programs) && block.programs.length) {
-          out.push(...block.programs);
-          continue;
-        }
-        const playlistId = String(block.playlist ?? '').trim();
-        if (!playlistId) continue;
-        const playlist = (config as any).playlistsById?.[playlistId];
-        if (!playlist) continue;
-        for (const item of playlist.items ?? []) {
-          const mediaId = String(item.media ?? '').trim();
-          const media = mediaId ? (config as any).mediaById?.[mediaId] ?? null : null;
-          const source = item.source ?? media?.source ?? null;
-          if (!source) continue;
-          out.push({ ...item, source });
-        }
-      }
-      return out.length ? out : (Array.isArray(channel.programs) ? channel.programs : []);
-    };
-    urls = keys
-      .map(findChannel)
-      .filter(Boolean)
-      .flatMap((channel: any) =>
-        resolveProgramsForChannel(channel)
-          .map((p: any) => (p.source?.type === 'url' && p.source.cache ? p.source.value : null))
-          .filter((u: any) => typeof u === 'string' && u.trim().length > 0)
-      );
+  if ((channelId || channelIds.length || targetRefs.length) && config) {
+    const channelTargets: RuntimeTargetRef[] = Array.from(new Set([channelId, ...channelIds].map((s) => String(s ?? '').trim()).filter(Boolean))).map((id) => ({
+      kind: 'channel',
+      id,
+    }));
+    const resolvedSources = resolveSourcesForTargets(config, [...targetRefs, ...channelTargets]);
+    urls = resolvedSources
+      .filter((source) => source.type === 'url' && source.cache)
+      .map((source) => source.value);
   } else if (urlParam) {
     urls = [urlParam];
   } else if (urlsParam.length) {
@@ -2939,6 +3862,7 @@ app.get('/api/cache/status', async (req, res) => {
     ok: true,
     channelId: channelId || null,
     channelIds: channelIds.length ? channelIds : null,
+    targets: targetRefs.length ? targetRefs.map((target) => `${target.kind}:${target.id}`) : null,
     items,
     cached: items.filter((i) => i.cached).length,
     total: items.length,
@@ -2989,14 +3913,15 @@ app.get('/media/:id', async (req, res) => {
     return;
   }
   const decoded = decodeURIComponent(rawPath);
-  if (!isPathAllowed(decoded)) {
+  const resolvedPath = resolveAllowedMediaPath(decoded);
+  if (!resolvedPath) {
     res.status(403).send('forbidden');
     recordMediaError(decoded);
     return;
   }
   let stat: fs.Stats;
   try {
-    stat = await fsp.stat(decoded);
+    stat = await fsp.stat(resolvedPath);
   } catch {
     res.status(404).send('not_found');
     recordMediaError(decoded);
@@ -3008,21 +3933,21 @@ app.get('/media/:id', async (req, res) => {
     return;
   }
 
-  const mimeType = mime.contentType(path.extname(decoded)) || 'application/octet-stream';
+  const mimeType = mime.contentType(path.extname(resolvedPath)) || 'application/octet-stream';
   const range = req.headers.range;
 
   if (!range) {
     mediaStats.requests += 1;
     mediaStats.active += 1;
     mediaStats.lastRequestAt = Date.now();
-    mediaStats.lastPath = decoded;
+    mediaStats.lastPath = resolvedPath;
     mediaStats.bytesRequested += stat.size;
-    bumpPathStats(decoded, 0);
+    bumpPathStats(resolvedPath, 0);
     res.status(200);
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Length', stat.size);
     res.setHeader('Accept-Ranges', 'bytes');
-    const stream = fs.createReadStream(decoded);
+    const stream = fs.createReadStream(resolvedPath);
     let completed = false;
     const done = () => {
       if (completed) return;
@@ -3032,12 +3957,12 @@ app.get('/media/:id', async (req, res) => {
     };
     stream.on('data', (chunk) => {
       mediaStats.bytesSent += chunk.length;
-      const entry = mediaPathStats.get(decoded);
+      const entry = mediaPathStats.get(resolvedPath);
       if (entry) entry.bytes += chunk.length;
     });
     stream.on('error', (err) => {
       recordMediaError(decoded);
-      console.warn('[media] stream error', decoded, err?.message ?? err);
+      console.warn('[media] stream error', resolvedPath, err?.message ?? err);
       done();
       if (!res.headersSent) {
         res.status(500).end();
@@ -3078,16 +4003,16 @@ app.get('/media/:id', async (req, res) => {
   mediaStats.requests += 1;
   mediaStats.active += 1;
   mediaStats.lastRequestAt = Date.now();
-  mediaStats.lastPath = decoded;
+  mediaStats.lastPath = resolvedPath;
   mediaStats.bytesRequested += end - start + 1;
-  bumpPathStats(decoded, 0);
+  bumpPathStats(resolvedPath, 0);
 
   res.status(206);
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
   res.setHeader('Content-Length', end - start + 1);
-  const stream = fs.createReadStream(decoded, { start, end });
+  const stream = fs.createReadStream(resolvedPath, { start, end });
   let completed = false;
   const done = () => {
     if (completed) return;
@@ -3097,12 +4022,12 @@ app.get('/media/:id', async (req, res) => {
   };
   stream.on('data', (chunk) => {
     mediaStats.bytesSent += chunk.length;
-    const entry = mediaPathStats.get(decoded);
+    const entry = mediaPathStats.get(resolvedPath);
     if (entry) entry.bytes += chunk.length;
   });
   stream.on('error', (err) => {
     recordMediaError(decoded);
-    console.warn('[media] stream error', decoded, err?.message ?? err);
+    console.warn('[media] stream error', resolvedPath, err?.message ?? err);
     done();
     if (!res.headersSent) {
       res.status(500).end();
@@ -4119,7 +5044,13 @@ app.use(
   })
 );
 app.use(express.static(distDir, { index: false }));
-app.use('/ops', express.static(opsDistDir, { index: false }));
+if (opsDevUrl) {
+  app.use('/ops', (req, res) => {
+    res.redirect(307, `${opsDevUrl}${req.originalUrl}`);
+  });
+} else {
+  app.use('/ops', express.static(opsDistDir, { index: false }));
+}
 
 function getBaseUrl(req: express.Request): string {
   const forwardedProto = req.headers['x-forwarded-proto'];
@@ -4279,6 +5210,10 @@ app.get('*', (req, res) => {
     return;
   }
   if (req.path.startsWith('/ops')) {
+    if (opsDevUrl) {
+      res.redirect(307, `${opsDevUrl}${req.originalUrl}`);
+      return;
+    }
     sendOpsIndex(req, res);
     return;
   }

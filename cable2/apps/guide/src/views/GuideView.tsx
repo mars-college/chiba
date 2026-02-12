@@ -124,6 +124,7 @@ export function GuideView() {
         selectedProgram={selectedProgram}
         showPlayerHud={showPlayerHud}
         loopVideo={loopVideo}
+        imageDurationSec={selectedProgram?.durationSec}
         onMediaEnded={onPlayerEnded}
         onMediaError={onPlayerError}
         ambientAudio={ambientAudio}

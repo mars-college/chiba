@@ -29,6 +29,11 @@ body {
   touch-action: none;
 }
 
+body.kiosk-cursor-hidden,
+body.kiosk-cursor-hidden * {
+  cursor: none !important;
+}
+
 img,
 svg,
 video {

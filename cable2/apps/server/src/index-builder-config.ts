@@ -213,6 +213,50 @@ function normalizeAccent(accent?: string): string {
   return accent ?? "#7ed7ff";
 }
 
+function resolveProgramsForPlaylist(
+  playlistId: string,
+  loaded: LoadedConfig,
+  visiting: Set<string> = new Set<string>()
+): ChannelManifest["programs"] {
+  const id = playlistId.trim();
+  if (!id || visiting.has(id)) return [];
+  visiting.add(id);
+  const playlist = loaded.playlistsById?.[id];
+  if (!playlist) {
+    visiting.delete(id);
+    return [];
+  }
+
+  const out: ChannelManifest["programs"] = [];
+  for (const item of playlist.items ?? []) {
+    const mediaId = (item.media ?? "").trim();
+    const media = mediaId ? loaded.mediaById?.[mediaId] ?? null : null;
+    const source = item.source ?? media?.source ?? undefined;
+    if (source) {
+      out.push({
+        title: item.title ?? media?.title ?? "Untitled",
+        subtitle: item.subtitle ?? media?.subtitle,
+        tag: item.tag ?? media?.tag,
+        artist: item.artist ?? media?.artist,
+        info_title: item.info_title ?? undefined,
+        description: item.description ?? media?.description,
+        info_mode: item.info_mode ?? undefined,
+        show_sec: item.show_sec ?? undefined,
+        duration_slots: item.duration_slots ?? 1,
+        remote_controls: item.remote_controls,
+        source,
+      });
+    }
+    const nestedPlaylistId = (item.playlist ?? "").trim();
+    if (nestedPlaylistId) {
+      out.push(...resolveProgramsForPlaylist(nestedPlaylistId, loaded, visiting));
+    }
+  }
+
+  visiting.delete(id);
+  return out;
+}
+
 function resolveProgramsForChannel(channel: ChannelManifest, loaded: LoadedConfig): ChannelManifest["programs"] {
   const blocks = channel.blocks ?? [];
   if (!blocks.length) return channel.programs ?? [];
@@ -225,35 +269,38 @@ function resolveProgramsForChannel(channel: ChannelManifest, loaded: LoadedConfi
     // 1) Inline legacy programs on the block itself.
     if (Array.isArray(block.programs) && block.programs.length) {
       out.push(...block.programs);
-      continue;
     }
 
-    // 2) Playlist reference.
-    const playlistId = (block.playlist ?? "").trim();
-    if (!playlistId) continue;
-    const playlist = loaded.playlistsById?.[playlistId];
-    if (!playlist) continue;
-
-    for (const item of playlist.items ?? []) {
+    // 2) Block item list can include media/playlist/source entries.
+    for (const item of block.items ?? []) {
       const mediaId = (item.media ?? "").trim();
       const media = mediaId ? loaded.mediaById?.[mediaId] ?? null : null;
       const source = item.source ?? media?.source ?? undefined;
-      if (!source) continue;
-      out.push({
-        title: item.title ?? media?.title ?? "Untitled",
-        subtitle: item.subtitle ?? media?.subtitle,
-        tag: item.tag ?? media?.tag,
-        artist: item.artist ?? media?.artist,
-        info_title: item.info_title ?? undefined,
-        description: item.description ?? media?.description,
-        // Per-program HUD settings.
-        info_mode: item.info_mode ?? undefined,
-        show_sec: item.show_sec ?? undefined,
-        duration_slots: item.duration_slots ?? 1,
-        remote_controls: item.remote_controls,
-        source,
-      });
+      if (source) {
+        out.push({
+          title: item.title ?? media?.title ?? "Untitled",
+          subtitle: item.subtitle ?? media?.subtitle,
+          tag: item.tag ?? media?.tag,
+          artist: item.artist ?? media?.artist,
+          info_title: item.info_title ?? undefined,
+          description: item.description ?? media?.description,
+          info_mode: item.info_mode ?? undefined,
+          show_sec: item.show_sec ?? undefined,
+          duration_slots: item.duration_slots ?? 1,
+          remote_controls: item.remote_controls,
+          source,
+        });
+      }
+      const nestedPlaylistId = (item.playlist ?? "").trim();
+      if (nestedPlaylistId) {
+        out.push(...resolveProgramsForPlaylist(nestedPlaylistId, loaded, new Set<string>()));
+      }
     }
+
+    // 3) Playlist reference.
+    const playlistId = (block.playlist ?? "").trim();
+    if (!playlistId) continue;
+    out.push(...resolveProgramsForPlaylist(playlistId, loaded, new Set<string>()));
   }
 
   // Merge fallback: if blocks exist but don't resolve, keep legacy programs.

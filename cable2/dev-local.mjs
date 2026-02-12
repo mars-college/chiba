@@ -20,6 +20,9 @@ const controlDbUrl =
   (process.env.CHIBA_CONTROL_DB_URL ?? "postgresql://chiba:chiba@127.0.0.1:54329/chiba")
     .trim();
 const registryPath = (process.env.CHIBA_REGISTRY_PATH ?? "./config/registry.local.toml").trim();
+const opsDevUrl = (process.env.CHIBA_OPS_DEV_URL ?? "http://127.0.0.1:8792")
+  .trim()
+  .replace(/\/$/, "");
 
 const children = new Set();
 let stopping = false;
@@ -111,10 +114,16 @@ async function main() {
   log("starting local stack");
   log(`control-plane: ${controlPlaneUrl}`);
   log(`registry: ${registryPath}`);
+  log(`ops dev: ${opsDevUrl}/ops`);
 
   await runStep("db:up", "pnpm", ["db:up"]);
   await runStep("build:guide", "pnpm", ["build:guide"]);
-  await runStep("build:ops", "pnpm", ["build:ops"]);
+
+  const ops = spawnCommand({
+    name: "ops",
+    cmd: "pnpm",
+    args: ["-C", "apps/ops", "dev"],
+  });
 
   const controlPlane = spawnCommand({
     name: "control-plane",
@@ -150,6 +159,8 @@ async function main() {
       CHIBA_NODE_API_KEY: sharedApiKey,
       CHIBA_OPS_CONTROL_PLANE_URL: controlPlaneUrl,
       CHIBA_CONTROL_PLANE_URL: controlPlaneUrl,
+      CHIBA_OPS_REGISTRY: registryPath,
+      CHIBA_OPS_DEV_URL: opsDevUrl,
     },
   });
 
@@ -164,9 +175,11 @@ async function main() {
   watch("control-plane", controlPlane);
   watch("node-agent", nodeAgent);
   watch("server", server);
+  watch("ops", ops);
 
   log("stack is running");
-  log("open: http://127.0.0.1:8787/ops");
+  log(`open (hot reload): ${opsDevUrl}/ops`);
+  log("open (server route): http://127.0.0.1:8787/ops");
 }
 
 main().catch((error) => {

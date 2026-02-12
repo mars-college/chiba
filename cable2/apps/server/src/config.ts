@@ -19,12 +19,15 @@ export type MediaManifest = {
   tag?: string;
   artist?: string;
   description?: string;
+  duration_sec?: number;
   source: ChannelProgramSource;
 };
 
 export type PlaylistItem = {
   // Prefer referencing a media object for reuse.
   media?: string;
+  // Nested playlist reference for composition.
+  playlist?: string;
   // Inline source is allowed as an escape hatch.
   source?: ChannelProgramSource;
 
@@ -37,6 +40,7 @@ export type PlaylistItem = {
   info_mode?: "always" | "start" | "never";
   show_sec?: number;
   duration_slots?: number;
+  duration_sec?: number;
   remote_controls?: RemoteRegistration[];
 };
 
@@ -53,6 +57,7 @@ export type BlockManifest = {
   id: string;
   mode?: BlockMode;
   playlist?: string;
+  items?: PlaylistItem[];
   // Blocks can also inline legacy programs.
   programs?: ChannelProgram[];
 };
@@ -353,6 +358,7 @@ function normalizePlaylistItems(items: PlaylistItem[] | undefined): PlaylistItem
   return ensureArray(items ?? []).map((item) => ({
     ...item,
     media: isString((item as any).media) ? String((item as any).media).trim() : undefined,
+    playlist: isString((item as any).playlist) ? String((item as any).playlist).trim() : undefined,
     source: normalizeSource((item as any).source) ?? (item as any).source,
     title: isString((item as any).title) ? (item as any).title : undefined,
     subtitle: isString((item as any).subtitle) ? (item as any).subtitle : undefined,
@@ -370,6 +376,10 @@ function normalizePlaylistItems(items: PlaylistItem[] | undefined): PlaylistItem
       typeof (item as any).duration_slots === "number" && (item as any).duration_slots > 0
         ? (item as any).duration_slots
         : 1,
+    duration_sec:
+      typeof (item as any).duration_sec === "number" && (item as any).duration_sec > 0
+        ? (item as any).duration_sec
+        : undefined,
     show_sec:
       typeof (item as any).show_sec === "number" && (item as any).show_sec >= 0
         ? (item as any).show_sec
@@ -451,6 +461,10 @@ async function loadMediaManifest(filePath: string): Promise<MediaManifest> {
     tag: isString(parsed?.tag) ? parsed.tag : undefined,
     artist: isString(parsed?.artist) ? parsed.artist : undefined,
     description: isString(parsed?.description) ? parsed.description : undefined,
+    duration_sec:
+      typeof parsed?.duration_sec === "number" && parsed.duration_sec > 0
+        ? parsed.duration_sec
+        : undefined,
     source,
   };
 }
@@ -483,6 +497,9 @@ async function loadBlockManifest(filePath: string): Promise<BlockManifest> {
       ? (modeRaw as any)
       : undefined;
   const playlist = isString(parsed?.playlist) ? String(parsed.playlist).trim() : undefined;
+  const items = normalizePlaylistItems(
+    (parsed?.items ?? parsed?.item ?? []) as PlaylistItem[] | undefined
+  );
   const programs = normalizePrograms(
     (parsed?.programs ?? parsed?.program) as ChannelProgram[] | undefined
   );
@@ -490,6 +507,7 @@ async function loadBlockManifest(filePath: string): Promise<BlockManifest> {
     id,
     mode,
     playlist,
+    items: items.length ? items : undefined,
     programs: programs.length ? programs : undefined,
   };
 }

@@ -27,12 +27,16 @@ export function appendQueryParam(
     const base =
       typeof window !== "undefined" ? window.location.origin : "http://localhost";
     const parsed = new URL(inputUrl, base);
-    if (parsed.searchParams.has(key)) return inputUrl;
     parsed.searchParams.set(key, value);
     if (/^https?:\/\//i.test(inputUrl)) return parsed.toString();
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   } catch {
-    if (inputUrl.includes(`${key}=`)) return inputUrl;
+    if (inputUrl.includes(`${key}=`)) {
+      return inputUrl.replace(
+        new RegExp(`([?&])${key}=[^&]*`),
+        `$1${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+      );
+    }
     const joiner = inputUrl.includes("?") ? "&" : "?";
     return `${inputUrl}${joiner}${encodeURIComponent(key)}=${encodeURIComponent(
       value

@@ -41,6 +41,8 @@ import {
   PARAM_HUD_MODE,
   PARAM_HUD_SEC_KEYS,
   PARAM_PLAYLIST,
+  PARAM_TARGET_ID_KEYS,
+  PARAM_TARGET_KIND_KEYS,
   PARAM_HOURS,
   PARAM_LOCK_KEYS,
   PARAM_MUTE_KEYS,
@@ -111,6 +113,8 @@ const log = createLogger("guide-app");
 
 const REMOTE_CURSOR_HIDE_MS = 2200;
 const REMOTE_MOUSE_SENSITIVITY = 1.25;
+const PLAYLIST_IMAGE_DURATION_DEFAULT_SEC = 15;
+const ART_IMAGE_DURATION_DEFAULT_SEC = 15;
 
 type RemoteCursorState = {
   x: number;
@@ -118,6 +122,233 @@ type RemoteCursorState = {
   visible: boolean;
   pressed: boolean;
 };
+
+type RuntimeTargetKind = "media" | "playlist" | "block" | "channel";
+type RuntimeTarget = { kind: RuntimeTargetKind; id: string };
+type CatalogPayload = {
+  catalog?: {
+    media?: any[];
+    playlists?: any[];
+    blocks?: any[];
+    channels?: any[];
+  };
+};
+
+function parseRuntimeTargetKind(value: unknown): RuntimeTargetKind | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim().toLowerCase();
+  if (raw === "media") return "media";
+  if (raw === "playlist") return "playlist";
+  if (raw === "block") return "block";
+  if (raw === "channel") return "channel";
+  return null;
+}
+
+function normalizeTargetId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function sourceToPlayableUrl(source: { type: "path" | "url"; value: string; cache?: boolean }): string {
+  if (source.type === "path") {
+    const pathValue = encodeURIComponent(source.value);
+    if (source.cache) return `/stash/raw?path=${pathValue}`;
+    return `/media/raw?path=${pathValue}`;
+  }
+  if (source.cache) return `/cache/raw?url=${encodeURIComponent(source.value)}`;
+  return source.value;
+}
+
+function normalizeSource(value: unknown): { type: "path" | "url"; value: string; cache?: boolean } | null {
+  if (!value || typeof value !== "object") return null;
+  const type = (value as any).type;
+  const rawValue = (value as any).value;
+  const sourceValue = typeof rawValue === "string" ? rawValue.trim() : "";
+  if ((type !== "path" && type !== "url") || !sourceValue) return null;
+  return {
+    type,
+    value: sourceValue,
+    cache: typeof (value as any).cache === "boolean" ? (value as any).cache : undefined,
+  };
+}
+
+function parsePositiveSeconds(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}
+
+function resolveDurationForPlayableUrl(url: string, explicitSec: number | undefined): number | undefined {
+  if (typeof explicitSec === "number" && explicitSec > 0) return explicitSec;
+  const kind = getMediaKind(url);
+  if (kind === "image") return PLAYLIST_IMAGE_DURATION_DEFAULT_SEC;
+  return undefined;
+}
+
+function buildTargetPrograms(args: {
+  target: RuntimeTarget;
+  catalog: CatalogPayload["catalog"];
+}): ProgramSlot[] {
+  const mediaRows = Array.isArray(args.catalog?.media) ? args.catalog?.media : [];
+  const playlistRows = Array.isArray(args.catalog?.playlists) ? args.catalog?.playlists : [];
+  const blockRows = Array.isArray(args.catalog?.blocks) ? args.catalog?.blocks : [];
+  const mediaById = new Map(mediaRows.map((row) => [String(row?.id ?? "").trim(), row]));
+  const playlistById = new Map(playlistRows.map((row) => [String(row?.id ?? "").trim(), row]));
+  const blockById = new Map(blockRows.map((row) => [String(row?.id ?? "").trim(), row]));
+
+  type ResolvedProgram = {
+    title: string;
+    subtitle?: string;
+    tag?: string;
+    artist?: string;
+    description?: string;
+    durationSlots: number;
+    durationSec?: number;
+    url: string;
+  };
+
+  const resolvePlaylist = (playlistId: string, visiting = new Set<string>()): ResolvedProgram[] => {
+    const id = playlistId.trim();
+    if (!id || visiting.has(id)) return [];
+    visiting.add(id);
+    const playlist = playlistById.get(id);
+    const items = Array.isArray((playlist as any)?.items) ? (playlist as any).items : [];
+    const out: ResolvedProgram[] = [];
+    for (const item of items) {
+      const mediaId = String((item as any)?.media ?? "").trim();
+      const nestedPlaylist = String((item as any)?.playlist ?? "").trim();
+      const media = mediaId ? mediaById.get(mediaId) ?? null : null;
+      const source = normalizeSource((item as any)?.source) ?? normalizeSource((media as any)?.source);
+      const durationSlotsRaw = Number((item as any)?.duration_slots ?? 1);
+      const durationSlots = Number.isFinite(durationSlotsRaw) && durationSlotsRaw > 0 ? Math.floor(durationSlotsRaw) : 1;
+      if (source) {
+        const url = sourceToPlayableUrl(source);
+        const explicitDurationSec = parsePositiveSeconds(
+          (item as any)?.duration_sec ??
+            (item as any)?.durationSec ??
+            (media as any)?.duration_sec ??
+            (media as any)?.durationSec
+        );
+        out.push({
+          title: String((item as any)?.title ?? (media as any)?.title ?? "Untitled"),
+          subtitle: (item as any)?.subtitle ?? (media as any)?.subtitle,
+          tag: (item as any)?.tag ?? (media as any)?.tag,
+          artist: (item as any)?.artist ?? (media as any)?.artist,
+          description: (item as any)?.description ?? (media as any)?.description,
+          durationSlots,
+          durationSec: resolveDurationForPlayableUrl(url, explicitDurationSec),
+          url,
+        });
+      }
+      if (nestedPlaylist) {
+        out.push(...resolvePlaylist(nestedPlaylist, visiting));
+      }
+    }
+    visiting.delete(id);
+    return out;
+  };
+
+  const resolveBlock = (blockId: string): ResolvedProgram[] => {
+    const block = blockById.get(blockId.trim());
+    if (!block) return [];
+    const out: ResolvedProgram[] = [];
+    const blockPlaylist = String((block as any)?.playlist ?? "").trim();
+    if (blockPlaylist) out.push(...resolvePlaylist(blockPlaylist, new Set<string>()));
+    const blockItems = Array.isArray((block as any)?.items) ? (block as any).items : [];
+    for (const item of blockItems) {
+      const mediaId = String((item as any)?.media ?? "").trim();
+      const playlistId = String((item as any)?.playlist ?? "").trim();
+      const media = mediaId ? mediaById.get(mediaId) ?? null : null;
+      const source = normalizeSource((item as any)?.source) ?? normalizeSource((media as any)?.source);
+      const durationSlotsRaw = Number((item as any)?.duration_slots ?? 1);
+      const durationSlots = Number.isFinite(durationSlotsRaw) && durationSlotsRaw > 0 ? Math.floor(durationSlotsRaw) : 1;
+      if (source) {
+        const url = sourceToPlayableUrl(source);
+        const explicitDurationSec = parsePositiveSeconds(
+          (item as any)?.duration_sec ??
+            (item as any)?.durationSec ??
+            (media as any)?.duration_sec ??
+            (media as any)?.durationSec
+        );
+        out.push({
+          title: String((item as any)?.title ?? (media as any)?.title ?? "Untitled"),
+          subtitle: (item as any)?.subtitle ?? (media as any)?.subtitle,
+          tag: (item as any)?.tag ?? (media as any)?.tag,
+          artist: (item as any)?.artist ?? (media as any)?.artist,
+          description: (item as any)?.description ?? (media as any)?.description,
+          durationSlots,
+          durationSec: resolveDurationForPlayableUrl(url, explicitDurationSec),
+          url,
+        });
+      }
+      if (playlistId) out.push(...resolvePlaylist(playlistId, new Set<string>()));
+    }
+    const blockPrograms = Array.isArray((block as any)?.programs) ? (block as any).programs : [];
+    for (const program of blockPrograms) {
+      const source = normalizeSource((program as any)?.source);
+      if (!source) continue;
+      const durationSlotsRaw = Number((program as any)?.duration_slots ?? 1);
+      const durationSlots = Number.isFinite(durationSlotsRaw) && durationSlotsRaw > 0 ? Math.floor(durationSlotsRaw) : 1;
+      const url = sourceToPlayableUrl(source);
+      const explicitDurationSec = parsePositiveSeconds(
+        (program as any)?.duration_sec ?? (program as any)?.durationSec
+      );
+      out.push({
+        title: String((program as any)?.title ?? "Untitled"),
+        subtitle: (program as any)?.subtitle,
+        tag: (program as any)?.tag,
+        artist: (program as any)?.artist,
+        description: (program as any)?.description,
+        durationSlots,
+        durationSec: resolveDurationForPlayableUrl(url, explicitDurationSec),
+        url,
+      });
+    }
+    return out;
+  };
+
+  const resolvedPrograms = (() => {
+    if (args.target.kind === "media") {
+      const media = mediaById.get(args.target.id);
+      const source = normalizeSource((media as any)?.source);
+      if (!source) return [];
+      const url = sourceToPlayableUrl(source);
+      const explicitDurationSec = parsePositiveSeconds(
+        (media as any)?.duration_sec ?? (media as any)?.durationSec
+      );
+      return [
+        {
+          title: String((media as any)?.title ?? "Untitled"),
+          subtitle: (media as any)?.subtitle,
+          tag: (media as any)?.tag,
+          artist: (media as any)?.artist,
+          description: (media as any)?.description,
+          durationSlots: 1,
+          durationSec: resolveDurationForPlayableUrl(url, explicitDurationSec),
+          url,
+        },
+      ];
+    }
+    if (args.target.kind === "playlist") return resolvePlaylist(args.target.id, new Set<string>());
+    if (args.target.kind === "block") return resolveBlock(args.target.id);
+    return [];
+  })();
+
+  return resolvedPrograms.map((program) => ({
+    title: program.title,
+    subtitle: program.subtitle,
+    tag: program.tag,
+    artist: program.artist,
+    description: program.description,
+    start: 0,
+    span: Math.max(1, program.durationSlots),
+    end: Math.max(0, program.durationSlots - 1),
+    durationSec: program.durationSec,
+    url: program.url,
+  }));
+}
 
 function App() {
   const isRemote = window.location.pathname.startsWith("/remote");
@@ -140,12 +371,18 @@ function App() {
   const embedDebugParam = params.get(PARAM_EMBED_DEBUG);
   const galleryParam = params.get(PARAM_GALLERY);
   const pinnedChannelParam = getFirstParam(params, PARAM_GALLERY_CHANNEL_KEYS);
+  const targetKindParam = getFirstParam(params, PARAM_TARGET_KIND_KEYS);
+  const targetIdParam = getFirstParam(params, PARAM_TARGET_ID_KEYS);
   const lockParam = getFirstParam(params, PARAM_LOCK_KEYS);
   const qrParam = getFirstParam(params, PARAM_QR_KEYS);
   const hudModeParam = params.get(PARAM_HUD_MODE);
   const hudSecParam = getFirstParam(params, PARAM_HUD_SEC_KEYS);
-  const galleryEnabled = parseBooleanParam(galleryParam) === true;
-  const playlistEnabled = parseBooleanParam(params.get(PARAM_PLAYLIST)) === true;
+  const galleryParamParsed = parseBooleanParam(galleryParam);
+  const playlistParamParsed = parseBooleanParam(params.get(PARAM_PLAYLIST));
+  const lockParamParsed = parseBooleanParam(lockParam);
+  const qrParamParsed = parseBooleanParam(qrParam);
+  const galleryEnabled = galleryParamParsed === true;
+  const playlistEnabled = playlistParamParsed === true;
 
   const [screenId, setScreenId] = useState(() =>
     screenParam ? screenParam : loadScreenId()
@@ -177,35 +414,82 @@ function App() {
   }, [screenId]);
 
   const galleryEnabledEffective =
-    kioskState?.mode === "gallery"
-      ? true
-      : kioskState?.mode === "guide"
-        ? false
-        : galleryEnabled;
+    galleryParamParsed !== null
+      ? galleryParamParsed
+      : kioskState?.mode === "gallery"
+        ? true
+        : kioskState?.mode === "guide"
+          ? false
+          : galleryEnabled;
+  const runtimeTarget = useMemo<RuntimeTarget | null>(() => {
+    const paramKind = parseRuntimeTargetKind(targetKindParam);
+    const paramId = normalizeTargetId(targetIdParam);
+    const stateKind = parseRuntimeTargetKind(kioskState?.targetKind);
+    const stateId = normalizeTargetId(kioskState?.targetId);
+
+    // Managed kiosk screens (screenId present) should follow live kiosk-state
+    // updates from Ops/WS. URL params are bootstrap defaults only.
+    const isManagedScreen = Boolean((screenParam ?? "").trim());
+    if (isManagedScreen) {
+      if (stateKind && stateId) return { kind: stateKind, id: stateId };
+      if (paramKind && paramId) return { kind: paramKind, id: paramId };
+      return null;
+    }
+
+    // Non-managed routes keep URL-first behavior for ad-hoc testing/dev links.
+    if (paramKind && paramId) return { kind: paramKind, id: paramId };
+    if (stateKind && stateId) return { kind: stateKind, id: stateId };
+
+    return null;
+  }, [kioskState?.targetKind, kioskState?.targetId, screenParam, targetKindParam, targetIdParam]);
+  const syntheticTargetChannelId =
+    runtimeTarget && runtimeTarget.kind !== "channel"
+      ? `target-${runtimeTarget.kind}-${runtimeTarget.id}`
+      : null;
   const playlistEnabledEffective =
-    typeof kioskState?.playlist === "boolean" ? kioskState.playlist : playlistEnabled;
-  const pinnedChannelKey = kioskState?.channel ?? pinnedChannelParam;
+    playlistParamParsed !== null
+      ? playlistParamParsed
+      : typeof kioskState?.playlist === "boolean"
+        ? kioskState.playlist
+        : playlistEnabled;
+  const pinnedChannelKey =
+    (runtimeTarget?.kind === "channel" ? runtimeTarget.id : syntheticTargetChannelId) ??
+    kioskState?.channel ??
+    pinnedChannelParam;
   const channelLocked =
-    typeof kioskState?.lock === "boolean"
-      ? kioskState.lock
-      : parseBooleanParam(lockParam) ?? (galleryEnabledEffective ? true : false);
+    lockParamParsed !== null
+      ? lockParamParsed
+      : typeof kioskState?.lock === "boolean"
+        ? kioskState.lock
+        : galleryEnabledEffective
+          ? true
+          : false;
   const qrForced =
-    typeof kioskState?.qr === "boolean" ? kioskState.qr : parseBooleanParam(qrParam);
+    qrParamParsed !== null
+      ? qrParamParsed
+      : typeof kioskState?.qr === "boolean"
+        ? kioskState.qr
+        : null;
   // Default to hiding the Remote QR in gallery/kiosk installs unless explicitly enabled.
   const qrAllowed = qrForced === null ? (galleryEnabledEffective ? false : true) : qrForced;
   const qrLockedOff = qrAllowed === false;
 
   const hudModeOverride = useMemo(() => {
-    const raw = (hudModeParam ?? "").trim().toLowerCase();
-    if (raw === "always" || raw === "start" || raw === "never") return raw;
+    const rawParam = (hudModeParam ?? "").trim().toLowerCase();
+    if (rawParam === "always" || rawParam === "start" || rawParam === "never")
+      return rawParam;
+    const rawState = (kioskState?.hudMode ?? "").trim().toLowerCase();
+    if (rawState === "always" || rawState === "start" || rawState === "never")
+      return rawState;
     return null;
-  }, [hudModeParam]);
+  }, [hudModeParam, kioskState?.hudMode]);
   const hudShowSecOverride = useMemo(() => {
-    if (!hudSecParam) return null;
-    const n = Number(hudSecParam);
+    const source = hudSecParam ?? kioskState?.hudShowSec;
+    if (source === undefined || source === null || source === "") return null;
+    const n = Number(source);
     if (!Number.isFinite(n) || n < 0) return null;
     return n;
-  }, [hudSecParam]);
+  }, [hudSecParam, kioskState?.hudShowSec]);
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(() =>
     loadDisplaySettings()
   );
@@ -222,6 +506,15 @@ function App() {
   const kioskNosplash =
     typeof kioskState?.nosplash === "boolean" ? kioskState.nosplash : null;
   const hasScreenKioskParam = Boolean((screenParam ?? "").trim());
+  useEffect(() => {
+    // Kiosk screens should not show a system cursor on top of playback.
+    // Remote debug view keeps cursor behavior unchanged.
+    const hideCursor = hasScreenKioskParam && viewMode !== "remote";
+    document.body.classList.toggle("kiosk-cursor-hidden", hideCursor);
+    return () => {
+      document.body.classList.remove("kiosk-cursor-hidden");
+    };
+  }, [hasScreenKioskParam, viewMode]);
   // Kiosk launches almost always include `screenId`; default to no splash there
   // unless an explicit splash override is requested.
   const kioskDefaultNoSplash = hasScreenKioskParam && splashOverride !== true;
@@ -285,6 +578,7 @@ function App() {
   const didVolumeMountRef = useRef(false);
   const [showSplash, setShowSplash] = useState(() => shouldSplash);
   const splashTimerRef = useRef<number | null>(null);
+  const [catalogData, setCatalogData] = useState<CatalogPayload["catalog"] | null>(null);
 
   useEffect(() => {
     saveAudioSettings({ volume: masterVolume, muted: masterMuted });
@@ -342,7 +636,47 @@ function App() {
     const minutes = Math.max(1, indexData.slotMinutes);
     return Math.max(1, Math.round((visibleHours * 60) / minutes));
   }, [indexData.slotMinutes, visibleHours]);
-  const allChannels = indexData.channels;
+  const syntheticTargetChannel = useMemo<GuideChannel | null>(() => {
+    if (!runtimeTarget || runtimeTarget.kind === "channel" || !syntheticTargetChannelId) return null;
+    if (!catalogData) return null;
+    const programs = buildTargetPrograms({
+      target: runtimeTarget,
+      catalog: catalogData,
+    });
+    if (!programs.length) return null;
+    const schedule: ProgramSlot[] = [];
+    let cursor = 0;
+    let index = 0;
+    while (cursor < slotCount) {
+      const next = programs[index % programs.length] ?? programs[0];
+      if (!next) break;
+      const span = Math.min(Math.max(1, next.span ?? 1), slotCount - cursor);
+      schedule.push({
+        ...next,
+        start: cursor,
+        span,
+        end: cursor + span - 1,
+        durationSec: next.durationSec ?? span * Math.max(1, indexData.slotMinutes) * 60,
+      });
+      cursor += span;
+      index += 1;
+    }
+    return {
+      id: syntheticTargetChannelId,
+      number: "000",
+      name: `${runtimeTarget.kind.toUpperCase()} ${runtimeTarget.id}`,
+      callSign: "TARGET",
+      description: `Resolved from ${runtimeTarget.kind}:${runtimeTarget.id}`,
+      accent: "#7ed7ff",
+      previewUrl: "",
+      schedule,
+    };
+  }, [catalogData, indexData.slotMinutes, runtimeTarget, slotCount, syntheticTargetChannelId]);
+  const allChannels = useMemo(() => {
+    const base = indexData.channels;
+    if (!syntheticTargetChannel) return base;
+    return [syntheticTargetChannel, ...base.filter((channel) => channel.id !== syntheticTargetChannel.id)];
+  }, [indexData.channels, syntheticTargetChannel]);
   const channels = useMemo(
     () => allChannels.filter((channel) => !isHiddenChannel(channel)),
     [allChannels]
@@ -1178,6 +1512,18 @@ function App() {
     galleryPlaylist,
     decorateProgramUrl,
   ]);
+
+  useEffect(() => {
+    if (!runtimeTarget || runtimeTarget.kind === "channel") return;
+    const ac = new AbortController();
+    void fetch("/api/catalog", { signal: ac.signal })
+      .then(async (response) => (response.ok ? ((await response.json()) as CatalogPayload) : null))
+      .then((payload) => {
+        if (payload?.catalog) setCatalogData(payload.catalog);
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [runtimeTarget?.id, runtimeTarget?.kind]);
 
   const fetchIndex = useCallback(async () => {
     try {
@@ -2600,7 +2946,7 @@ function App() {
         .find((channel) => channel.id === (channelId ?? "jensen-art"))
         ?.schedule.filter((slot) => slot.url) ?? [];
     const item = artItems[artIndex];
-    const duration = (item?.durationSec ?? 90) * 1000;
+    const duration = (item?.durationSec ?? ART_IMAGE_DURATION_DEFAULT_SEC) * 1000;
     const timer = window.setTimeout(() => {
       setArtIndex((prev) => (prev + 1) % Math.max(1, artItems.length));
     }, duration);
@@ -2809,7 +3155,9 @@ function App() {
       if (galleryEnabledEffective) {
         remoteUrl = appendQueryParam(remoteUrl, PARAM_GALLERY, "1");
       }
-      if (channelLocked) {
+      if (galleryEnabledEffective) {
+        remoteUrl = appendQueryParam(remoteUrl, "lock", channelLocked ? "1" : "0");
+      } else if (channelLocked) {
         remoteUrl = appendQueryParam(remoteUrl, "lock", "1");
       }
       const qrUrl = remoteUrl ? buildQrUrl(remoteUrl) : (data.qrUrl as string);
@@ -2849,7 +3197,7 @@ function App() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [channelLocked, galleryEnabledEffective]);
   const fallbackRemote = buildRemoteUrls({
     hostOverride,
     forceHttps,
@@ -2858,8 +3206,8 @@ function App() {
   let fallbackRemoteUrl = fallbackRemote.remoteUrl;
   if (galleryEnabledEffective) {
     fallbackRemoteUrl = appendQueryParam(fallbackRemoteUrl, PARAM_GALLERY, "1");
-  }
-  if (channelLocked) {
+    fallbackRemoteUrl = appendQueryParam(fallbackRemoteUrl, "lock", channelLocked ? "1" : "0");
+  } else if (channelLocked) {
     fallbackRemoteUrl = appendQueryParam(fallbackRemoteUrl, "lock", "1");
   }
   const fallbackQrUrl = buildQrUrl(fallbackRemoteUrl);
