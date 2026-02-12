@@ -1,0 +1,32 @@
+id = "ai-village"
+number = "066"
+name = "AI Village 24/7"
+call_sign = "VLLG"
+accent = "#9fd6a6"
+description = "Live feed of the AI Village."
+
+[[program]]
+title = "AI Village"
+tag = "LIVE"
+duration_slots = 2
+remote_controls = ["keyboard_mouse"]
+source = { type = "url", value = "/embed/ai-village" }
+
+[[program]]
+title = "AI Village"
+tag = "LIVE"
+duration_slots = 2
+remote_controls = ["keyboard_mouse"]
+source = { type = "url", value = "/embed/ai-village" }
+
+[[program]]
+title = "AI Village"
+tag = "LIVE"
+duration_slots = 2
+remote_controls = ["keyboard_mouse"]
+source = { type = "url", value = "/embed/ai-village" }
+
+[embed]
+mode = "proxy"
+url = "https://theaidigest.org/village"
+dismiss_selectors = ["[role=\"dialog\"]", ".modal", ".popup"]

@@ -1,0 +1,8 @@
+id = "m-solar-wind-ddde071a26"
+title = "Solar Wind"
+subtitle = "ACE SWEPAM 24h"
+tag = "LIVE"
+
+[source]
+type = "url"
+value = "/swpc/swepam-24h"

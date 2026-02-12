@@ -1,0 +1,42 @@
+id = "ai-village-2"
+number = "566"
+name = "AI Village Encore"
+call_sign = "VLLG"
+accent = "#9fd6a6"
+description = "Live feed of the AI Village."
+blocks = [ "blk-ai-village-2" ]
+
+[[program]]
+title = "AI Village"
+tag = "LIVE"
+duration_slots = 2
+remote_controls = [ "keyboard_mouse" ]
+
+  [program.source]
+  type = "url"
+  value = "/embed/ai-village-2"
+
+[[program]]
+title = "AI Village"
+tag = "LIVE"
+duration_slots = 2
+remote_controls = [ "keyboard_mouse" ]
+
+  [program.source]
+  type = "url"
+  value = "/embed/ai-village-2"
+
+[[program]]
+title = "AI Village"
+tag = "LIVE"
+duration_slots = 2
+remote_controls = [ "keyboard_mouse" ]
+
+  [program.source]
+  type = "url"
+  value = "/embed/ai-village-2"
+
+[embed]
+mode = "proxy"
+url = "https://theaidigest.org/village"
+dismiss_selectors = [ "[role=\"dialog\"]", ".modal", ".popup" ]

@@ -1,0 +1,28 @@
+{
+  "name": "@chiba-cable/server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "ops:apply-mode": "pnpm -s build && node dist/ops-cli.js apply-mode",
+    "ops:apply-state": "pnpm -s build && node dist/ops-cli.js apply-state"
+  },
+  "dependencies": {
+    "@iarna/toml": "^3.0.0",
+    "express": "^4.19.2",
+    "mime-types": "^2.1.35",
+    "playwright": "^1.49.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/mime-types": "^2.1.4",
+    "@types/node": "^20.14.10",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.16.0",
+    "typescript": "^5.6.2"
+  }
+}

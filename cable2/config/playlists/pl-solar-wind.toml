@@ -1,0 +1,9 @@
+id = "pl-solar-wind"
+name = "Solar Wind playlist"
+
+[[item]]
+media = "m-solar-wind-ddde071a26"
+duration_slots = 2
+title = "Solar Wind"
+subtitle = "ACE SWEPAM 24h"
+tag = "LIVE"

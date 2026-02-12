@@ -1,0 +1,9 @@
+# Block example: the thing that populates channel timeslots.
+#
+# For now, a block can reference a playlist (and the scheduler will loop it).
+# Future block modes can introduce bumpers, commercials, clock-sync, etc.
+
+id = "weatherstar-block"
+mode = "loop"
+playlist = "weatherstar-loop"
+

@@ -1,0 +1,13 @@
+id = "mallard-mystery"
+number = "20"
+name = "Mallard Mystery"
+call_sign = "MALL"
+accent = "#8fd7ff"
+description = "Secret life of Drake Mallard, on loop."
+
+[[program]]
+title = "Secret Life of Drake Mallard"
+subtitle = "Loop"
+tag = "FILM"
+duration_slots = 2
+source = { type = "path", value = "/Volumes/share/mars_films/2025/FILM_FESTIVAL/secret life of drake mallard.mp4" }

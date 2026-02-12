@@ -1,0 +1,28 @@
+# Midterms gallery profile.
+#
+# This file is meant to be composable with the base inventory registry:
+#   - inventory (public state): scripts/pis/registry.toml
+#   - profile (show state): this file
+#
+# Apply it with:
+#   ./scripts/pis/apply-cable-launch.sh \
+#     --inventory ./scripts/pis/registry.toml \
+#     --mode ./cable2/config/profiles/midterms-gallery.toml \
+#     --pi upper-west-4
+#
+# Notes:
+# - Screen orientation is treated as a hardware property and should live in `registry.toml`.
+
+[defaults.cable]
+mode = "gallery"
+theme = "gallery"
+nosplash = true
+lock = true
+qr = false
+
+# Current midterms content: Earl on upper-west-4 only.
+[pis.upper-west-4.cable]
+channel = "earl"
+playlist = true
+prefetch_channels = ["earl"]
+

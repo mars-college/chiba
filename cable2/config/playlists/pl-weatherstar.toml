@@ -1,0 +1,20 @@
+id = "pl-weatherstar"
+name = "WeatherStar 4000+ playlist"
+
+[[item]]
+media = "m-weatherstar-4000-545cc68a76"
+duration_slots = 2
+title = "WeatherStar 4000+"
+tag = "LIVE"
+
+[[item]]
+media = "m-weatherstar-4000-545cc68a76"
+duration_slots = 2
+title = "WeatherStar 4000+"
+tag = "LIVE"
+
+[[item]]
+media = "m-weatherstar-4000-545cc68a76"
+duration_slots = 2
+title = "WeatherStar 4000+"
+tag = "LIVE"

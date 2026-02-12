@@ -1,0 +1,23 @@
+id = "pl-ai-village"
+name = "AI Village 24/7 playlist"
+
+[[item]]
+media = "m-ai-village-d0530d7fcf"
+duration_slots = 2
+title = "AI Village"
+tag = "LIVE"
+remote_controls = [ "keyboard_mouse" ]
+
+[[item]]
+media = "m-ai-village-d0530d7fcf"
+duration_slots = 2
+title = "AI Village"
+tag = "LIVE"
+remote_controls = [ "keyboard_mouse" ]
+
+[[item]]
+media = "m-ai-village-d0530d7fcf"
+duration_slots = 2
+title = "AI Village"
+tag = "LIVE"
+remote_controls = [ "keyboard_mouse" ]

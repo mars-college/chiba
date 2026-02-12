@@ -1,0 +1,13 @@
+id = "ambient-gradient"
+number = "180"
+name = "Ambient Gradient"
+call_sign = "GRAD"
+accent = "#7ed7ff"
+description = "Low-data generative gradient background."
+
+[[program]]
+title = "Gradient Field"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/ambient/gradient" }
+

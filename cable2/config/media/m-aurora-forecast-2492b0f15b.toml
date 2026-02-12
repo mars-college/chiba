@@ -1,0 +1,8 @@
+id = "m-aurora-forecast-2492b0f15b"
+title = "Aurora Forecast"
+subtitle = "Northern Hemisphere"
+tag = "LIVE"
+
+[source]
+type = "url"
+value = "/swpc/aurora-north"

@@ -1,0 +1,7 @@
+id = "m-weatherstar-4000-545cc68a76"
+title = "WeatherStar 4000+"
+tag = "LIVE"
+
+[source]
+type = "url"
+value = "/weatherstar"

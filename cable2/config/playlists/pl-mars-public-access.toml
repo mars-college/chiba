@@ -1,0 +1,20 @@
+id = "pl-mars-public-access"
+name = "Mars Public Access Network playlist"
+
+[[item]]
+media = "m-mars-public-access-network-96ab5db7de"
+duration_slots = 2
+title = "Mars Public Access Network"
+tag = "LIVE"
+
+[[item]]
+media = "m-mars-public-access-network-96ab5db7de"
+duration_slots = 2
+title = "Mars Public Access Network"
+tag = "LIVE"
+
+[[item]]
+media = "m-mars-public-access-network-96ab5db7de"
+duration_slots = 2
+title = "Mars Public Access Network"
+tag = "LIVE"

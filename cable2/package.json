@@ -1,0 +1,33 @@
+{
+  "name": "@chiba/cable2",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "dev:local": "node ./dev-local.mjs",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres",
+    "dev:cli": "pnpm -C packages/cli dev",
+    "dev:control-plane": "pnpm -C packages/control-plane dev",
+    "dev:control-plane:local": "CHIBA_REGISTRY_PATH=./config/registry.local.toml CHIBA_REGISTRY_LOCAL_PATH= pnpm -C packages/control-plane dev",
+    "dev:control-plane:pg": "CHIBA_CONTROL_DB_URL=postgresql://chiba:chiba@127.0.0.1:54329/chiba pnpm -C packages/control-plane dev",
+    "dev:control-plane:local:pg": "CHIBA_REGISTRY_PATH=./config/registry.local.toml CHIBA_REGISTRY_LOCAL_PATH= CHIBA_CONTROL_DB_URL=postgresql://chiba:chiba@127.0.0.1:54329/chiba pnpm -C packages/control-plane dev",
+    "dev:node-agent": "pnpm -C packages/node-agent dev",
+    "dev:node-agent:local": "CHIBA_NODE_ID=commander CHIBA_NODE_NAME=commander PORT=8080 CHIBA_CONTROL_PLANE_URL=http://127.0.0.1:8790 pnpm -C packages/node-agent dev",
+    "dev:guide": "pnpm -C apps/guide dev",
+    "dev:ops": "pnpm -C apps/ops dev",
+    "dev:server": "pnpm -C apps/server dev",
+    "dev:server:ops-cp": "CHIBA_OPS_CONTROL_PLANE_URL=http://127.0.0.1:8790 pnpm -C apps/server dev",
+    "build:guide": "pnpm -C apps/guide build",
+    "build:ops": "pnpm -C apps/ops build",
+    "build:server": "pnpm -C apps/server build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.3"
+  }
+}
