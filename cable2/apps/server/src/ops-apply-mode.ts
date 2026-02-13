@@ -18,6 +18,7 @@ export type CableModeDefaults = {
   mode?: string;
   target_kind?: "media" | "playlist" | "block" | "channel";
   target_id?: string;
+  display_rotate?: 0 | 90 | 180 | 270;
   theme?: string;
   nosplash?: boolean;
   hud?: "always" | "start" | "never";
@@ -376,11 +377,22 @@ function resolveChosenChannel(pi: InventoryPi, cable: CableModeDefaults): string
 
 export function buildKioskState(pi: InventoryPi, cable: CableModeDefaults): KioskState {
   const target = resolveModeTarget(pi, cable);
+  const rotateRaw =
+    typeof cable.display_rotate === "number"
+      ? cable.display_rotate
+      : typeof (cable as any).display_rotate === "string"
+        ? Number((cable as any).display_rotate)
+        : NaN;
+  const rotate =
+    rotateRaw === 0 || rotateRaw === 90 || rotateRaw === 180 || rotateRaw === 270
+      ? (rotateRaw as 0 | 90 | 180 | 270)
+      : undefined;
   return {
     mode: cable.mode === 'gallery' ? 'gallery' : cable.mode === 'guide' ? 'guide' : undefined,
     targetKind: target.kind,
     targetId: target.id,
     channel: target.channelId,
+    rotate,
     lock: typeof cable.lock === 'boolean' ? cable.lock : undefined,
     qr: typeof cable.qr === 'boolean' ? cable.qr : undefined,
     playlist: typeof cable.playlist === 'boolean' ? cable.playlist : undefined,
@@ -440,8 +452,31 @@ export function buildKioskUrl(pi: InventoryPi, cable: CableModeDefaults): string
   if (typeof cable.hours === 'number' && Number.isFinite(cable.hours)) {
     base.searchParams.set('hours', String(cable.hours));
   }
+  const rotateRaw =
+    typeof cable.display_rotate === "number"
+      ? cable.display_rotate
+      : typeof (cable as any).display_rotate === "string"
+        ? Number((cable as any).display_rotate)
+        : NaN;
+  if (rotateRaw === 0 || rotateRaw === 90 || rotateRaw === 180 || rotateRaw === 270) {
+    base.searchParams.set("rotate", String(rotateRaw));
+  }
 
   return base.toString();
+}
+
+function resolveRotationForPi(pi: InventoryPi, cable: CableModeDefaults): 0 | 90 | 180 | 270 {
+  const raw =
+    typeof cable.display_rotate === "number"
+      ? cable.display_rotate
+      : typeof (cable as any).display_rotate === "string"
+        ? Number((cable as any).display_rotate)
+        : NaN;
+  if (raw === 0 || raw === 90 || raw === 180 || raw === 270) {
+    return raw as 0 | 90 | 180 | 270;
+  }
+  const orientation = String(pi.orientation ?? "").trim().toLowerCase();
+  return pi.displayRotate ?? (orientation === "portrait" ? 90 : 0);
 }
 
 async function postKioskUrl(opts: {
@@ -572,6 +607,7 @@ export async function applyKioskUrlToFleet(opts: {
   timeoutMs?: number;
   dryRun?: boolean;
   buildUrl: (pi: InventoryPi) => string;
+  resolveRotation?: (pi: InventoryPi) => 0 | 90 | 180 | 270;
   afterOk?: (pi: InventoryPi) => Promise<{ prefetch?: ApplyModeResult['prefetch'] } | void>;
 }): Promise<ApplyModeResult[]> {
   const timeoutMs = opts.timeoutMs ?? 2500;
@@ -607,11 +643,10 @@ export async function applyKioskUrlToFleet(opts: {
         let prefetch: ApplyModeResult['prefetch'] | undefined = undefined;
         let state: ApplyModeResult['state'] | undefined = undefined;
         if (res.ok) {
-          const o = String(pi.orientation ?? '')
-            .trim()
-            .toLowerCase();
-          const rotation: 0 | 90 | 180 | 270 =
-            pi.displayRotate ?? (o === 'portrait' ? 90 : 0);
+          const o = String(pi.orientation ?? "").trim().toLowerCase();
+          const rotation: 0 | 90 | 180 | 270 = opts.resolveRotation
+            ? opts.resolveRotation(pi)
+            : pi.displayRotate ?? (o === "portrait" ? 90 : 0);
           // Ignore failures; kiosk URL is the primary contract.
           await postRotate({ host: addr, apiKey, rotation, timeoutMs }).catch(() => {});
 
@@ -678,6 +713,7 @@ export async function applyModeToFleet(opts: {
     timeoutMs: opts.timeoutMs,
     dryRun: opts.dryRun,
     buildUrl: (pi) => buildKioskUrl(pi, mergeCableMode(mode, pi.id)),
+    resolveRotation: (pi) => resolveRotationForPi(pi, mergeCableMode(mode, pi.id)),
     afterOk: async (pi) => {
       const addr = pi.ip || pi.host;
       if (!addr) return;
@@ -789,6 +825,7 @@ export async function applyModeToFleetFromObject(opts: {
     timeoutMs: opts.timeoutMs,
     dryRun: opts.dryRun,
     buildUrl: (pi) => buildKioskUrl(pi, mergeCableMode(opts.mode, pi.id)),
+    resolveRotation: (pi) => resolveRotationForPi(pi, mergeCableMode(opts.mode, pi.id)),
     afterOk: async (pi) => {
       const addr = pi.ip || pi.host;
       if (!addr) return;
@@ -932,8 +969,23 @@ export async function applyKioskStateToFleetFromObject(opts: {
         let urlSync:
           | { ok: boolean; status: number | null; ms: number | null; error?: string }
           | undefined = undefined;
+        let rotateSync:
+          | { ok: boolean; status: number | null; ms: number | null; error?: string }
+          | undefined = undefined;
         if (res.ok) {
           const apiKey = getApiKeyForPi(pi.id);
+          const rotation = resolveRotationForPi(pi, cable);
+          rotateSync = await postRotate({
+            host: addr,
+            apiKey,
+            rotation,
+            timeoutMs,
+          }).catch((err) => ({
+            ok: false,
+            status: null,
+            ms: null,
+            error: (err as Error).message,
+          }));
           urlSync = await postKioskUrl({
             host: addr,
             apiKey,
@@ -951,18 +1003,31 @@ export async function applyKioskStateToFleetFromObject(opts: {
         return {
           pi,
           url,
-          ok: res.ok && (urlSync ? urlSync.ok : true),
+          // State apply is the source of truth for active playback.
+          // URL sync is best-effort (used for reboot/startup drift prevention),
+          // so auth failures there should not mark the apply itself as failed.
+          ok: res.ok,
           status: res.status,
           ms: res.ms,
-          error: res.error ?? (urlSync && !urlSync.ok ? `kiosk_url_sync_failed:${urlSync.error ?? 'unknown'}` : undefined),
-          state: urlSync
-            ? {
-                ok: urlSync.ok,
-                status: urlSync.status,
-                ms: urlSync.ms,
-                error: urlSync.error,
-              }
-            : undefined,
+          error: res.error ?? undefined,
+          state:
+            urlSync || rotateSync
+              ? {
+                  ok: (urlSync?.ok ?? true) && (rotateSync?.ok ?? true),
+                  status: urlSync?.status ?? rotateSync?.status ?? null,
+                  ms: urlSync?.ms ?? rotateSync?.ms ?? null,
+                  error: [
+                    rotateSync && !rotateSync.ok
+                      ? `rotate_sync_failed:${rotateSync.error ?? "unknown"}`
+                      : null,
+                    urlSync && !urlSync.ok
+                      ? `kiosk_url_sync_failed:${urlSync.error ?? "unknown"}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(";") || undefined,
+                }
+              : undefined,
         } satisfies ApplyModeResult;
       })
     )

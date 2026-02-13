@@ -8,6 +8,7 @@ export type KioskState = {
   targetKind?: 'media' | 'playlist' | 'block' | 'channel';
   targetId?: string;
   channel?: string; // channel id or number string
+  rotate?: 0 | 90 | 180 | 270;
   lock?: boolean;
   qr?: boolean;
   playlist?: boolean;
@@ -173,6 +174,13 @@ export function sanitizeKioskState(input: unknown): KioskState {
     targetKind,
     targetId,
     channel: coerceString(raw.channel),
+    rotate:
+      coerceNumber(raw.rotate) === 0 ||
+      coerceNumber(raw.rotate) === 90 ||
+      coerceNumber(raw.rotate) === 180 ||
+      coerceNumber(raw.rotate) === 270
+        ? (coerceNumber(raw.rotate) as 0 | 90 | 180 | 270)
+        : undefined,
     lock: coerceBoolean(raw.lock),
     qr: coerceBoolean(raw.qr),
     playlist: coerceBoolean(raw.playlist),

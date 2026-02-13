@@ -159,6 +159,32 @@ type OpsControlPlaneNodeStatus = {
   };
 };
 
+type RuntimeCatalog = {
+  media: any[];
+  playlists: any[];
+  blocks: any[];
+  channels: any[];
+};
+
+type RuntimeCatalogSource = 'control-plane' | 'local';
+
+const RUNTIME_CATALOG_TTL_MS = Math.max(
+  1_000,
+  Number(process.env.CHIBA_RUNTIME_CATALOG_TTL_MS ?? 5_000)
+);
+
+let runtimeCatalogCache:
+  | {
+      at: number;
+      source: RuntimeCatalogSource;
+      catalog: RuntimeCatalog;
+    }
+  | null = null;
+let runtimeCatalogInflight: Promise<{
+  source: RuntimeCatalogSource;
+  catalog: RuntimeCatalog;
+}> | null = null;
+
 function formatHostForUrl(hostOrIp: string): string {
   if (hostOrIp.includes(':') && !hostOrIp.startsWith('[')) {
     return `[${hostOrIp}]`;
@@ -217,11 +243,139 @@ async function postControlPlaneJson(pathname: string, body: unknown, timeoutMs: 
   }
 }
 
+function parseRuntimeCatalog(value: unknown): RuntimeCatalog | null {
+  if (!value || typeof value !== 'object') return null;
+  const obj = value as Record<string, unknown>;
+  const media = Array.isArray(obj.media) ? obj.media : null;
+  const playlists = Array.isArray(obj.playlists) ? obj.playlists : null;
+  const blocks = Array.isArray(obj.blocks) ? obj.blocks : null;
+  const channels = Array.isArray(obj.channels) ? obj.channels : null;
+  if (!media || !playlists || !blocks || !channels) return null;
+  return { media, playlists, blocks, channels };
+}
+
+function buildRuntimeCatalogFromLoadedConfig(config: LoadedConfig | null): RuntimeCatalog | null {
+  if (!config) return null;
+  return {
+    media: Object.values(config.mediaById ?? {}),
+    playlists: Object.values(config.playlistsById ?? {}),
+    blocks: Object.values(config.blocksById ?? {}),
+    channels: config.channels ?? [],
+  };
+}
+
+async function fetchRuntimeCatalogFromControlPlane(timeoutMs: number): Promise<RuntimeCatalog | null> {
+  if (!OPS_CONTROL_PLANE_URL) return null;
+  try {
+    const payload = await fetchControlPlaneJson('/api/catalog', timeoutMs);
+    return parseRuntimeCatalog(payload?.catalog);
+  } catch {
+    return null;
+  }
+}
+
+function toLoadedConfigLikeFromRuntimeCatalog(catalog: RuntimeCatalog): LoadedConfig {
+  const normalizeRow = (kind: 'media' | 'playlist' | 'block' | 'channel', row: any) => {
+    if (!row || typeof row !== 'object') return row;
+    const out: any = { ...row };
+    if (kind === 'playlist') {
+      if (!Array.isArray(out.items) && Array.isArray(out.item)) out.items = out.item;
+      if (!Array.isArray(out.programs) && Array.isArray(out.program)) out.programs = out.program;
+    }
+    if (kind === 'block') {
+      if (!Array.isArray(out.items) && Array.isArray(out.item)) out.items = out.item;
+      if (!Array.isArray(out.programs) && Array.isArray(out.program)) out.programs = out.program;
+    }
+    if (kind === 'channel') {
+      if (!Array.isArray(out.programs) && Array.isArray(out.program)) out.programs = out.program;
+      if (!Array.isArray(out.blocks) && Array.isArray(out.block)) {
+        out.blocks = out.block
+          .map((entry: any) => (typeof entry === 'string' ? entry : String(entry?.id ?? '').trim()))
+          .filter((entry: string) => entry.length > 0);
+      }
+    }
+    return out;
+  };
+
+  const byId = (rows: any[]) =>
+    Object.fromEntries(
+      rows
+        .map((row) => {
+          const normalized =
+            rows === catalog.media
+              ? normalizeRow('media', row)
+              : rows === catalog.playlists
+                ? normalizeRow('playlist', row)
+                : rows === catalog.blocks
+                  ? normalizeRow('block', row)
+                  : normalizeRow('channel', row);
+          return [String((normalized as any)?.id ?? '').trim(), normalized] as const;
+        })
+        .filter(([id]) => id.length > 0)
+    );
+  return {
+    channels: catalog.channels.map((row) => normalizeRow('channel', row)),
+    mediaById: byId(catalog.media),
+    playlistsById: byId(catalog.playlists),
+    blocksById: byId(catalog.blocks),
+  } as LoadedConfig;
+}
+
+async function getRuntimeCatalog(): Promise<{ source: RuntimeCatalogSource; catalog: RuntimeCatalog }> {
+  const now = Date.now();
+  if (runtimeCatalogCache && now - runtimeCatalogCache.at < RUNTIME_CATALOG_TTL_MS) {
+    return { source: runtimeCatalogCache.source, catalog: runtimeCatalogCache.catalog };
+  }
+  if (runtimeCatalogInflight) return runtimeCatalogInflight;
+
+  runtimeCatalogInflight = (async () => {
+    const controlPlaneCatalog = await fetchRuntimeCatalogFromControlPlane(
+      Math.min(4_000, Math.max(800, OPS_TIMEOUT_MS + 600))
+    );
+    if (controlPlaneCatalog) {
+      runtimeCatalogCache = {
+        at: Date.now(),
+        source: 'control-plane',
+        catalog: controlPlaneCatalog,
+      };
+      return { source: 'control-plane' as const, catalog: controlPlaneCatalog };
+    }
+
+    const localCatalog = buildRuntimeCatalogFromLoadedConfig(loadedConfig);
+    if (localCatalog) {
+      runtimeCatalogCache = {
+        at: Date.now(),
+        source: 'local',
+        catalog: localCatalog,
+      };
+      return { source: 'local' as const, catalog: localCatalog };
+    }
+
+    throw new Error('catalog_not_ready');
+  })();
+
+  try {
+    return await runtimeCatalogInflight;
+  } finally {
+    runtimeCatalogInflight = null;
+  }
+}
+
+async function getTargetResolutionConfig(): Promise<LoadedConfig | null> {
+  try {
+    const { catalog } = await getRuntimeCatalog();
+    return toLoadedConfigLikeFromRuntimeCatalog(catalog);
+  } catch {
+    return loadedConfig;
+  }
+}
+
 function toOpsFleetHealthFromControlPlane(args: {
   nodes: OpsControlPlaneNode[];
   statuses: OpsControlPlaneNodeStatus[];
   registryPath: string | null;
   liveKioskUrlById?: Map<string, string>;
+  liveProbeById?: Map<string, any>;
 }): any {
   const now = Date.now();
   const local = getLocalOpsMeta(repoRoot);
@@ -232,6 +386,7 @@ function toOpsFleetHealthFromControlPlane(args: {
     const host = typeof node.host === 'string' ? node.host : '';
     const ip = typeof node.ip === 'string' ? node.ip : undefined;
     const addr = (ip ?? host).trim();
+    const liveProbe = args.liveProbeById?.get(node.id);
     const status = statusById.get(node.id);
     const seenAt = typeof status?.seenAt === 'number' ? status.seenAt : null;
     const fresh = seenAt !== null && now - seenAt <= freshnessMs;
@@ -261,36 +416,51 @@ function toOpsFleetHealthFromControlPlane(args: {
     const liveKioskUrl = args.liveKioskUrlById?.get(node.id) ?? null;
     const kioskUrl = liveKioskUrl || runtimeKioskUrl;
 
+    const syntheticPing = {
+      ok: healthy,
+      ms: healthy ? 1 : null,
+      error: healthy ? undefined : hasAddr ? 'stale_or_missing_heartbeat' : 'missing_host_or_ip',
+    };
+    const syntheticTcp = {
+      ssh22: { ok: healthy, ms: healthy ? 1 : null, error: healthy ? undefined : 'stale_or_missing_heartbeat' },
+      node8080: { ok: healthy, ms: healthy ? 1 : null, error: healthy ? undefined : 'stale_or_missing_heartbeat' },
+      cable8787: { ok: healthy, ms: healthy ? 1 : null, error: healthy ? undefined : 'stale_or_missing_heartbeat' },
+    };
+    const syntheticNodeStatus = {
+      ok: healthy,
+      ms: healthy ? 1 : null,
+      status: healthy ? 200 : null,
+      error: healthy ? undefined : 'stale_or_missing_heartbeat',
+    };
+    const syntheticCableVersion = {
+      ok: cableReachable,
+      ms: cableProbeFresh ? 1 : null,
+      status: cableHttpStatus,
+      error: cableReachable ? undefined : 'missing_or_stale_cable_probe',
+    };
+
+    const ping = liveProbe?.ping ?? syntheticPing;
+    const tcp = liveProbe?.tcp ?? syntheticTcp;
+    const nodeStatusHttp = liveProbe?.http?.nodeStatus ?? syntheticNodeStatus;
+    const cableVersionHttp = liveProbe?.http?.cableVersion ?? syntheticCableVersion;
+    const anyReachable =
+      Boolean(ping?.ok) ||
+      Boolean(tcp?.ssh22?.ok) ||
+      Boolean(tcp?.node8080?.ok) ||
+      Boolean(tcp?.cable8787?.ok);
+
     return {
       id: node.id,
       host,
       ip,
       nodeName: typeof node.nodeName === 'string' ? node.nodeName : node.id,
-      resolvedIp: ip ?? null,
-      dnsOk: hasAddr,
-      ping: {
-        ok: healthy,
-        ms: healthy ? 1 : null,
-        error: healthy ? undefined : hasAddr ? 'stale_or_missing_heartbeat' : 'missing_host_or_ip',
-      },
-      tcp: {
-        ssh22: { ok: healthy, ms: healthy ? 1 : null, error: healthy ? undefined : 'stale_or_missing_heartbeat' },
-        node8080: { ok: healthy, ms: healthy ? 1 : null, error: healthy ? undefined : 'stale_or_missing_heartbeat' },
-        cable8787: { ok: healthy, ms: healthy ? 1 : null, error: healthy ? undefined : 'stale_or_missing_heartbeat' },
-      },
+      resolvedIp: liveProbe?.resolvedIp ?? ip ?? null,
+      dnsOk: typeof liveProbe?.dnsOk === 'boolean' ? liveProbe.dnsOk : hasAddr,
+      ping,
+      tcp,
       http: {
-        nodeStatus: {
-          ok: healthy,
-          ms: healthy ? 1 : null,
-          status: healthy ? 200 : null,
-          error: healthy ? undefined : 'stale_or_missing_heartbeat',
-        },
-        cableVersion: {
-          ok: cableReachable,
-          ms: cableProbeFresh ? 1 : null,
-          status: cableHttpStatus,
-          error: cableReachable ? undefined : 'missing_or_stale_cable_probe',
-        },
+        nodeStatus: nodeStatusHttp,
+        cableVersion: cableVersionHttp,
       },
       chibaNode: {
         version: nodeAgentVersion,
@@ -306,7 +476,11 @@ function toOpsFleetHealthFromControlPlane(args: {
           : null,
       needsUpdate: null,
       lastCheckedAt: now,
-      errorSummary: healthy ? undefined : hasAddr ? 'stale_or_missing_heartbeat' : 'missing_host_or_ip',
+      errorSummary: anyReachable
+        ? undefined
+        : hasAddr
+          ? 'stale_or_missing_heartbeat'
+          : 'missing_host_or_ip',
     };
   });
 
@@ -427,12 +601,37 @@ async function buildFleetFromControlPlane(opts: {
       .filter(([, kioskUrl]) => typeof kioskUrl === 'string' && kioskUrl.trim().length > 0)
       .map(([nodeId, kioskUrl]) => [nodeId, kioskUrl as string])
   );
+  const liveProbePairs = await Promise.all(
+    nodes.map(async (node) =>
+      await limit(async () => {
+        const host = typeof node.host === 'string' ? node.host.trim() : '';
+        const ip = typeof node.ip === 'string' ? node.ip.trim() : undefined;
+        const probe = await probePiHealth({
+          repoRoot,
+          registryPath,
+          timeoutMs: Math.max(500, Math.floor(opts.timeoutMs)),
+          pi: {
+            id: node.id,
+            host,
+            ip,
+            nodeName:
+              typeof node.nodeName === 'string' && node.nodeName.trim().length > 0
+                ? node.nodeName.trim()
+                : node.id,
+          },
+        });
+        return [node.id, probe] as const;
+      })
+    )
+  );
+  const liveProbeById = new Map<string, any>(liveProbePairs);
 
   return toOpsFleetHealthFromControlPlane({
     nodes,
     statuses,
     registryPath,
     liveKioskUrlById,
+    liveProbeById,
   });
 }
 
@@ -1884,21 +2083,81 @@ app.get('/api/ops/fleet/stream', async (req, res) => {
 
   try {
     if (OPS_USE_CONTROL_PLANE) {
-      const payload = await buildFleetFromControlPlane({ timeoutMs });
+      const [nodesResp, statusResp] = await Promise.all([
+        fetchControlPlaneJson('/api/nodes', timeoutMs),
+        fetchControlPlaneJson('/api/node-status?limit=500', timeoutMs),
+      ]);
+      const nodes = Array.isArray(nodesResp?.nodes)
+        ? (nodesResp.nodes as OpsControlPlaneNode[])
+        : [];
+      const statuses = Array.isArray(statusResp?.statuses)
+        ? (statusResp.statuses as OpsControlPlaneNodeStatus[])
+        : [];
+      const registryPath =
+        typeof nodesResp?.canonicalRegistry === 'string'
+          ? nodesResp.canonicalRegistry
+          : null;
+      const local = getLocalOpsMeta(repoRoot);
+
       writeEvent('meta', {
-        now: payload.now,
-        local: payload.local,
-        pis: payload.pis.map((pi: any) => ({
-          id: pi.id,
-          host: pi.host,
-          ip: pi.ip,
-          nodeName: pi.nodeName,
+        now: Date.now(),
+        local: { gitSha: local.gitSha, registryPath },
+        pis: nodes.map((node: any) => ({
+          id: node.id,
+          host: node.host,
+          ip: node.ip,
+          nodeName: node.nodeName,
         })),
         probes: { timeoutMs, concurrency, mode: 'control-plane' },
       });
-      for (const pi of payload.pis ?? []) {
-        writeEvent('pi', pi);
-      }
+
+      const limit = createAsyncLimit(concurrency);
+      const tasks = nodes.map((node) =>
+        limit(async () => {
+          const host = typeof node.host === 'string' ? node.host.trim() : '';
+          const ip = typeof node.ip === 'string' ? node.ip.trim() : undefined;
+          const nodeName =
+            typeof node.nodeName === 'string' && node.nodeName.trim().length > 0
+              ? node.nodeName.trim()
+              : node.id;
+
+          const [probe, liveKioskUrl] = await Promise.all([
+            probePiHealth({
+              repoRoot,
+              registryPath,
+              timeoutMs: Math.max(500, Math.floor(timeoutMs)),
+              pi: {
+                id: node.id,
+                host,
+                ip,
+                nodeName,
+              },
+            }),
+            fetchLiveKioskUrlForNode({
+              node,
+              timeoutMs: Math.max(500, Math.floor(timeoutMs)),
+            }),
+          ]);
+
+          const liveKioskUrlById =
+            typeof liveKioskUrl === 'string' && liveKioskUrl.trim().length > 0
+              ? new Map<string, string>([[node.id, liveKioskUrl]])
+              : undefined;
+          const liveProbeById = new Map<string, any>([[node.id, probe]]);
+
+          const merged = toOpsFleetHealthFromControlPlane({
+            nodes: [node],
+            statuses,
+            registryPath,
+            liveKioskUrlById,
+            liveProbeById,
+          });
+          const pi = Array.isArray(merged?.pis) ? merged.pis[0] : null;
+          if (pi) writeEvent('pi', pi);
+        })
+      );
+      await Promise.allSettled(tasks);
+
       writeEvent('done', { ok: true });
       close();
       return;
@@ -1964,10 +2223,12 @@ type OpsApplyResult = {
   status: number | null;
   ms: number | null;
   error: string | null;
+  warning?: string | null;
   // Optional extra diagnostics (present for kiosk-url applies).
   state?: { ok: boolean; status: number | null; ms: number | null; error?: string } | null;
   prefetch?: {
     channelIds: string[];
+    targets?: string[];
     stash?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string };
     cache?: { ok: boolean; status: number | null; ms: number | null; queued: number | null; error?: string };
   } | null;
@@ -1985,6 +2246,7 @@ function simplifyApplyResult(r: ApplyModeResult): OpsApplyResult {
     status: r.status,
     ms: r.ms,
     error: r.error ?? null,
+    warning: (r as any).warning ?? null,
     state: (r as any).state ?? null,
     prefetch: (r as any).prefetch ?? null,
   };
@@ -2066,6 +2328,7 @@ type OpsApplyOverrides = {
   targetKind?: 'media' | 'playlist' | 'block' | 'channel';
   targetId?: string;
   channel?: string;
+  displayRotate?: 0 | 90 | 180 | 270;
   lock?: boolean;
   showQr?: boolean;
   playlist?: boolean;
@@ -2076,6 +2339,9 @@ type OpsApplyOverrides = {
   scale?: number;
   textScale?: number;
   hours?: number;
+  prefetch?: boolean;
+  prefetchStash?: boolean;
+  prefetchCache?: boolean;
 };
 
 function parseOptionalBoolean(value: unknown): boolean | undefined {
@@ -2140,12 +2406,23 @@ function parseOpsApplyOverrides(body: Record<string, unknown>): OpsApplyOverride
   const hudShowSecRaw = parseOptionalFinite(body.hudShowSec ?? body.hud_sec ?? body.hudSec);
   const hudShowSec =
     typeof hudShowSecRaw === 'number' && hudShowSecRaw >= 0 ? hudShowSecRaw : undefined;
+  const displayRotateRaw = parseOptionalFinite(
+    body.displayRotate ?? body.display_rotate ?? body.rotate ?? body.rotation
+  );
+  const displayRotate =
+    displayRotateRaw === 0 ||
+    displayRotateRaw === 90 ||
+    displayRotateRaw === 180 ||
+    displayRotateRaw === 270
+      ? (displayRotateRaw as 0 | 90 | 180 | 270)
+      : undefined;
 
   return {
     mode,
     targetKind,
     targetId,
     channel,
+    displayRotate,
     lock: parseOptionalBoolean(body.lock),
     showQr: parseOptionalBoolean(body.showQr ?? body.qr),
     playlist: parseOptionalBoolean(body.playlist),
@@ -2156,6 +2433,9 @@ function parseOpsApplyOverrides(body: Record<string, unknown>): OpsApplyOverride
     scale: parseOptionalFinite(body.scale),
     textScale: parseOptionalFinite(body.textScale ?? body.text_scale),
     hours: parseOptionalFinite(body.hours),
+    prefetch: parseOptionalBoolean(body.prefetch),
+    prefetchStash: parseOptionalBoolean(body.prefetchStash ?? body.prefetch_stash),
+    prefetchCache: parseOptionalBoolean(body.prefetchCache ?? body.prefetch_cache),
   };
 }
 
@@ -2175,6 +2455,9 @@ function mergeProfileModeWithOverrides(mode: CableMode, overrides: OpsApplyOverr
     nextDefaults.target_kind = 'channel';
     nextDefaults.target_id = overrides.channel;
   }
+  if (overrides.displayRotate !== undefined) {
+    nextDefaults.display_rotate = overrides.displayRotate;
+  }
   if (overrides.lock !== undefined) nextDefaults.lock = overrides.lock;
   if (overrides.showQr !== undefined) nextDefaults.qr = overrides.showQr;
   if (overrides.playlist !== undefined) nextDefaults.playlist = overrides.playlist;
@@ -2185,6 +2468,23 @@ function mergeProfileModeWithOverrides(mode: CableMode, overrides: OpsApplyOverr
   if (overrides.scale !== undefined) nextDefaults.scale = overrides.scale;
   if (overrides.textScale !== undefined) nextDefaults.text_scale = overrides.textScale;
   if (overrides.hours !== undefined) nextDefaults.hours = overrides.hours;
+  if (overrides.prefetchStash !== undefined) nextDefaults.prefetch_stash = overrides.prefetchStash;
+  if (overrides.prefetchCache !== undefined) nextDefaults.prefetch_cache = overrides.prefetchCache;
+  if (overrides.prefetch === true) {
+    const tk = nextDefaults.target_kind;
+    const tid = nextDefaults.target_id;
+    if (tk && tid) {
+      nextDefaults.prefetch_targets = Array.from(
+        new Set([...(nextDefaults.prefetch_targets ?? []), `${tk}:${tid}`])
+      );
+      if (nextDefaults.prefetch_stash === undefined) nextDefaults.prefetch_stash = true;
+      if (nextDefaults.prefetch_cache === undefined) nextDefaults.prefetch_cache = true;
+    }
+  } else if (overrides.prefetch === false) {
+    nextDefaults.prefetch_targets = [];
+    nextDefaults.prefetch_stash = false;
+    nextDefaults.prefetch_cache = false;
+  }
   if (nextDefaults.target_kind === 'channel') {
     nextDefaults.channel = nextDefaults.target_id ?? nextDefaults.channel;
   } else {
@@ -2238,6 +2538,9 @@ function buildTargetDefaults(args: {
     qr: overrides.showQr ?? false,
   };
 
+  if (overrides.displayRotate !== undefined) {
+    defaults.display_rotate = overrides.displayRotate;
+  }
   if (overrides.lock !== undefined) defaults.lock = overrides.lock;
   if (overrides.playlist !== undefined) defaults.playlist = overrides.playlist;
   else if (resolvedTargetKind === 'playlist') defaults.playlist = true;
@@ -2247,6 +2550,26 @@ function buildTargetDefaults(args: {
   if (overrides.scale !== undefined) defaults.scale = overrides.scale;
   if (overrides.textScale !== undefined) defaults.text_scale = overrides.textScale;
   if (overrides.hours !== undefined) defaults.hours = overrides.hours;
+
+  const shouldPrefetchByDefault =
+    resolvedTargetKind === 'playlist' ||
+    resolvedTargetKind === 'media' ||
+    resolvedTargetKind === 'block' ||
+    resolvedTargetKind === 'channel';
+  const shouldPrefetch =
+    overrides.prefetch !== undefined ? overrides.prefetch : shouldPrefetchByDefault;
+  if (shouldPrefetch && resolvedTargetId) {
+    defaults.prefetch_targets = [`${resolvedTargetKind}:${resolvedTargetId}`];
+    defaults.prefetch_stash = overrides.prefetchStash ?? true;
+    defaults.prefetch_cache = overrides.prefetchCache ?? true;
+  } else if (overrides.prefetch === false) {
+    defaults.prefetch_targets = [];
+    defaults.prefetch_stash = false;
+    defaults.prefetch_cache = false;
+  } else {
+    if (overrides.prefetchStash !== undefined) defaults.prefetch_stash = overrides.prefetchStash;
+    if (overrides.prefetchCache !== undefined) defaults.prefetch_cache = overrides.prefetchCache;
+  }
 
   return defaults;
 }
@@ -2452,6 +2775,81 @@ async function postKioskUrlToNode(args: {
   }
 }
 
+async function postRotateToNode(args: {
+  hostOrIp: string;
+  rotation: 0 | 90 | 180 | 270;
+  apiKey?: string | null;
+  timeoutMs: number;
+}): Promise<{ ok: boolean; status: number | null; ms: number | null; error?: string }> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), args.timeoutMs);
+  try {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (args.apiKey && args.apiKey.trim().length > 0) {
+      headers.authorization = `Bearer ${args.apiKey.trim()}`;
+    }
+    const response = await fetch(`http://${formatHostForUrl(args.hostOrIp)}:8080/rotate`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers,
+      body: JSON.stringify({ rotation: args.rotation }),
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      ms: Date.now() - started,
+      error: response.ok ? undefined : `http_${response.status}`,
+    };
+  } catch (err) {
+    return { ok: false, status: null, ms: null, error: (err as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function postJsonToNode(args: {
+  hostOrIp: string;
+  serverPort: number;
+  route: '/api/stash/prefetch' | '/api/cache/prefetch';
+  body: unknown;
+  timeoutMs: number;
+}): Promise<{ ok: boolean; status: number | null; ms: number | null; json?: any; error?: string }> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), args.timeoutMs);
+  try {
+    const response = await fetch(`http://${formatHostForUrl(args.hostOrIp)}:${args.serverPort}${args.route}`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(args.body),
+    });
+    let parsed: any = null;
+    try {
+      parsed = await response.json();
+    } catch {
+      parsed = null;
+    }
+    return {
+      ok: response.ok,
+      status: response.status,
+      ms: Date.now() - started,
+      json: parsed,
+      error: response.ok ? undefined : `http_${response.status}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: null,
+      ms: null,
+      error: (err as Error).message,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function applyModeViaControlPlane(args: {
   mode: CableMode;
   piIds?: string[];
@@ -2537,8 +2935,30 @@ async function applyModeViaControlPlane(args: {
         let urlSync:
           | { ok: boolean; status: number | null; ms: number | null; error?: string }
           | null = null;
+        let rotateSync:
+          | { ok: boolean; status: number | null; ms: number | null; error?: string }
+          | null = null;
+        let prefetch: OpsApplyResult['prefetch'] | null = null;
         if (posted.ok) {
           const apiKey = getApiKeyForPi(pi.id);
+          const rotateRaw =
+            typeof (cable as any).display_rotate === 'number'
+              ? (cable as any).display_rotate
+              : typeof (cable as any).display_rotate === 'string'
+                ? Number((cable as any).display_rotate)
+                : NaN;
+          const rotation =
+            rotateRaw === 0 || rotateRaw === 90 || rotateRaw === 180 || rotateRaw === 270
+              ? (rotateRaw as 0 | 90 | 180 | 270)
+              : null;
+          if (rotation !== null) {
+            rotateSync = await postRotateToNode({
+              hostOrIp: address,
+              rotation,
+              apiKey,
+              timeoutMs: args.timeoutMs,
+            });
+          }
           urlSync = await postKioskUrlToNode({
             hostOrIp: address,
             url,
@@ -2546,14 +2966,90 @@ async function applyModeViaControlPlane(args: {
             restart: false,
             timeoutMs: args.timeoutMs,
           });
+
+          const explicitChannels = parseStringArray((cable as any).prefetch_channels);
+          const chosenChannel = typeof cable.channel === 'string' ? cable.channel.trim() : '';
+          const channelIds = Array.from(new Set([...explicitChannels, chosenChannel].filter(Boolean)));
+
+          const targetKindRaw = typeof (cable as any).target_kind === 'string' ? String((cable as any).target_kind).trim() : '';
+          const targetKind =
+            targetKindRaw === 'media' || targetKindRaw === 'playlist' || targetKindRaw === 'block' || targetKindRaw === 'channel'
+              ? targetKindRaw
+              : '';
+          let targetId = typeof cable.target_id === 'string' ? cable.target_id.trim() : '';
+          if (!targetId && targetKind === 'channel') targetId = chosenChannel;
+
+          const explicitTargets = parseStringArray((cable as any).prefetch_targets);
+          const implicitTargets = targetKind && targetId ? [`${targetKind}:${targetId}`] : [];
+          const targets = Array.from(new Set([...explicitTargets, ...implicitTargets]));
+
+          if (channelIds.length || targets.length) {
+            const wantStash = (cable as any).prefetch_stash === false ? false : true;
+            const wantCache = (cable as any).prefetch_cache === true;
+            const firstChannel = channelIds.length === 1 ? channelIds[0] : '';
+            const firstTarget = targets.length === 1 ? targets[0] : '';
+
+            const [stash, cache] = await Promise.all([
+              wantStash
+                ? postJsonToNode({
+                    hostOrIp: address,
+                    serverPort: pi.serverPort,
+                    route: '/api/stash/prefetch',
+                    timeoutMs: args.timeoutMs,
+                    body: {
+                      ...(firstChannel ? { channelId: firstChannel } : channelIds.length ? { channelIds } : {}),
+                      ...(firstTarget ? { target: firstTarget } : targets.length ? { targets } : {}),
+                    },
+                  })
+                : Promise.resolve(null),
+              wantCache
+                ? postJsonToNode({
+                    hostOrIp: address,
+                    serverPort: pi.serverPort,
+                    route: '/api/cache/prefetch',
+                    timeoutMs: args.timeoutMs,
+                    body: {
+                      ...(firstChannel ? { channelId: firstChannel } : channelIds.length ? { channelIds } : {}),
+                      ...(firstTarget ? { target: firstTarget } : targets.length ? { targets } : {}),
+                    },
+                  })
+                : Promise.resolve(null),
+            ]);
+
+            prefetch = {
+              channelIds,
+              targets,
+              stash: stash
+                ? {
+                    ok: stash.ok,
+                    status: stash.status,
+                    ms: stash.ms,
+                    queued: typeof stash.json?.queued === 'number' ? stash.json.queued : null,
+                    error: stash.ok ? undefined : stash.error ?? 'prefetch_stash_failed',
+                  }
+                : undefined,
+              cache: cache
+                ? {
+                    ok: cache.ok,
+                    status: cache.status,
+                    ms: cache.ms,
+                    queued: typeof cache.json?.queued === 'number' ? cache.json.queued : null,
+                    error: cache.ok ? undefined : cache.error ?? 'prefetch_cache_failed',
+                  }
+                : undefined,
+            };
+          }
         }
-        const ok = posted.ok && (urlSync ? urlSync.ok : true);
-        const error =
-          posted.ok
-            ? urlSync && !urlSync.ok
-              ? `kiosk_url_sync_failed:${urlSync.error ?? 'unknown'}`
-              : null
-            : posted.error ?? 'kiosk_state_failed';
+        const ok = posted.ok;
+        const warnings: string[] = [];
+        if (posted.ok && rotateSync && !rotateSync.ok) {
+          warnings.push(`rotate_sync_failed:${rotateSync.error ?? 'unknown'}`);
+        }
+        if (posted.ok && urlSync && !urlSync.ok) {
+          warnings.push(`kiosk_url_sync_failed:${urlSync.error ?? 'unknown'}`);
+        }
+        const warning = warnings.length > 0 ? warnings.join(";") : null;
+        const error = posted.ok ? null : posted.error ?? 'kiosk_state_failed';
         return {
           id: pi.id,
           host: pi.host,
@@ -2565,13 +3061,14 @@ async function applyModeViaControlPlane(args: {
           status: posted.status,
           ms: posted.ms,
           error,
+          warning,
           state: {
-            ok,
+            ok: posted.ok,
             status: posted.status,
             ms: posted.ms,
-            error: error ?? undefined,
+            error: error ?? warning ?? undefined,
           },
-          prefetch: null,
+          prefetch,
         } satisfies OpsApplyResult;
       })
     )
@@ -2614,51 +3111,46 @@ app.get('/api/ops/profiles', async (_req, res) => {
 
 app.get('/api/ops/catalog', async (_req, res) => {
   // Expose the composable config model (media/playlists/blocks/channels) to the ops UI.
-  if (!loadedConfig) {
-    res.status(503).json({ ok: false, error: 'config_not_ready' });
-    return;
+  try {
+    const { catalog, source } = await getRuntimeCatalog();
+    res.json({
+      ok: true,
+      source,
+      configPath: source === 'local' ? loadedConfig?.configPath ?? null : null,
+      manifestDir: source === 'local' ? loadedConfig?.manifestDir ?? null : null,
+      libraryRoots: source === 'local' ? loadedConfig?.libraryRoots ?? [] : [],
+      counts: {
+        channels: catalog.channels.length,
+        blocks: catalog.blocks.length,
+        playlists: catalog.playlists.length,
+        media: catalog.media.length,
+      },
+      channels: catalog.channels,
+      blocks: catalog.blocks,
+      playlists: catalog.playlists,
+      media: catalog.media,
+    });
+  } catch (err) {
+    res.status(503).json({ ok: false, error: 'config_not_ready', message: (err as Error).message });
   }
-
-  const media = Object.values(loadedConfig.mediaById ?? {});
-  const playlists = Object.values(loadedConfig.playlistsById ?? {});
-  const blocks = Object.values(loadedConfig.blocksById ?? {});
-
-  res.json({
-    ok: true,
-    configPath: loadedConfig.configPath,
-    manifestDir: loadedConfig.manifestDir,
-    libraryRoots: loadedConfig.libraryRoots,
-    counts: {
-      channels: loadedConfig.channels.length,
-      blocks: blocks.length,
-      playlists: playlists.length,
-      media: media.length,
-    },
-    channels: loadedConfig.channels,
-    blocks,
-    playlists,
-    media,
-  });
 });
 
-app.get('/api/catalog', (_req, res) => {
-  if (!loadedConfig) {
-    res.status(503).json({ ok: false, error: 'config_not_ready' });
-    return;
+app.get('/api/catalog', async (_req, res) => {
+  try {
+    const { catalog, source } = await getRuntimeCatalog();
+    res.json({
+      ok: true,
+      source,
+      catalog: {
+        media: catalog.media,
+        playlists: catalog.playlists,
+        blocks: catalog.blocks,
+        channels: catalog.channels,
+      },
+    });
+  } catch (err) {
+    res.status(503).json({ ok: false, error: 'config_not_ready', message: (err as Error).message });
   }
-  const media = Object.values(loadedConfig.mediaById ?? {});
-  const playlists = Object.values(loadedConfig.playlistsById ?? {});
-  const blocks = Object.values(loadedConfig.blocksById ?? {});
-  const channels = loadedConfig.channels ?? [];
-  res.json({
-    ok: true,
-    catalog: {
-      media,
-      playlists,
-      blocks,
-      channels,
-    },
-  });
 });
 
 app.post('/api/ops/apply-target', async (req, res) => {
@@ -3290,39 +3782,48 @@ async function ensureCached(remoteUrl: string): Promise<string> {
     }
 
     const maxBytes = Number(process.env.CHIBA_MEDIA_CACHE_MAX_BYTES ?? '') || 1024 * 1024 * 1024;
+    const timeoutMs = Number(process.env.CHIBA_CACHE_FETCH_TIMEOUT_MS ?? '') || 120_000;
     const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
-    const res = await fetch(remoteUrl, { redirect: 'follow' });
-    if (!res.ok || !res.body) {
-      throw new Error(`fetch_failed:${res.status}`);
-    }
-    const lengthHeader = res.headers.get('content-length');
-    if (lengthHeader) {
-      const length = Number.parseInt(lengthHeader, 10);
-      if (Number.isFinite(length) && length > maxBytes) {
-        throw new Error('too_large');
-      }
-    }
-
-    const stream = Readable.fromWeb(res.body as any);
-    const file = fs.createWriteStream(tmpPath, { flags: 'wx' });
-    let bytes = 0;
-    stream.on('data', (chunk: Buffer) => {
-      bytes += chunk.length;
-      if (bytes > maxBytes) {
-        stream.destroy(new Error('too_large'));
-      }
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      await pipeline(stream, file);
-      await fsp.rename(tmpPath, targetPath);
-    } catch (err) {
-      try {
-        await fsp.rm(tmpPath, { force: true });
-      } catch {
-        // ignore cleanup errors
+      const res = await fetch(remoteUrl, { redirect: 'follow', signal: controller.signal });
+      if (!res.ok || !res.body) {
+        throw new Error(`fetch_failed:${res.status}`);
       }
-      if (fs.existsSync(targetPath)) return targetPath;
-      throw err;
+      const lengthHeader = res.headers.get('content-length');
+      if (lengthHeader) {
+        const length = Number.parseInt(lengthHeader, 10);
+        if (Number.isFinite(length) && length > maxBytes) {
+          throw new Error('too_large');
+        }
+      }
+
+      const stream = Readable.fromWeb(res.body as any);
+      const file = fs.createWriteStream(tmpPath, { flags: 'wx' });
+      let bytes = 0;
+      stream.on('data', (chunk: Buffer) => {
+        bytes += chunk.length;
+        if (bytes > maxBytes) {
+          stream.destroy(new Error('too_large'));
+        }
+      });
+      try {
+        await pipeline(stream, file);
+        await fsp.rename(tmpPath, targetPath);
+      } catch (err) {
+        try {
+          await fsp.rm(tmpPath, { force: true });
+        } catch {
+          // ignore cleanup errors
+        }
+        if (fs.existsSync(targetPath)) return targetPath;
+        const message = (err as any)?.name === 'AbortError' ? 'timeout' : undefined;
+        if (message) throw new Error(message);
+        throw err;
+      }
+    } finally {
+      clearTimeout(timer);
     }
     return targetPath;
   })();
@@ -3353,7 +3854,7 @@ async function ensureStashed(sourcePath: string): Promise<string> {
 
     // Copy with a timeout so a dead NAS mount doesn't hang the process forever.
     const timeoutMs =
-      Number(process.env.CHIBA_STASH_COPY_TIMEOUT_MS ?? '') || 120_000;
+      Number(process.env.CHIBA_STASH_COPY_TIMEOUT_MS ?? '') || 1_800_000;
     const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
 
     const withTimeout = async <T>(fn: () => Promise<T>): Promise<T> => {
@@ -3466,6 +3967,17 @@ function resolveAllowedMediaPath(target: string): string | null {
   return null;
 }
 
+app.get('/cache/raw', (req, res) => {
+  const remoteUrl = typeof req.query.url === 'string' ? req.query.url : '';
+  if (!remoteUrl) {
+    res.status(400).send('missing_url');
+    return;
+  }
+  const expected = cachedMediaFilenameForUrl(remoteUrl);
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(307, `/cache/${expected}?url=${encodeURIComponent(remoteUrl)}`);
+});
+
 app.get('/cache/:id', async (req, res) => {
   const remoteUrl = typeof req.query.url === 'string' ? req.query.url : '';
   if (!remoteUrl) {
@@ -3489,6 +4001,10 @@ app.get('/cache/:id', async (req, res) => {
     }
     if (message === 'too_large') {
       res.status(413).send('too_large');
+      return;
+    }
+    if (message === 'timeout') {
+      res.status(504).send('fetch_timeout');
       return;
     }
     console.warn('[cache] fetch failed', remoteUrl, message);
@@ -3567,6 +4083,22 @@ app.get('/cache/:id', async (req, res) => {
     }
   });
   stream.pipe(res);
+});
+
+app.get('/stash/raw', (req, res) => {
+  const rawPath = req.query.path;
+  if (typeof rawPath !== 'string' || !rawPath) {
+    res.status(400).send('missing_path');
+    return;
+  }
+  const decoded = decodeURIComponent(rawPath);
+  if (!resolveAllowedMediaPath(decoded)) {
+    res.status(403).send('forbidden');
+    return;
+  }
+  const expected = stashedFilenameForPath(decoded);
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(307, `/stash/${expected}?path=${encodeURIComponent(decoded)}`);
 });
 
 app.get('/stash/:id', async (req, res) => {
@@ -3674,7 +4206,7 @@ app.post('/api/stash/prefetch', async (req, res) => {
   const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
   const channelIds = normalizeStringArray(body.channelIds ?? body.channels);
   const targetRefs = normalizeRuntimeTargetRefs(body.targets ?? body.target);
-  const config = loadedConfig;
+  const config = await getTargetResolutionConfig();
 
   let paths: string[] = [];
   if (rawPaths) {
@@ -3730,7 +4262,7 @@ app.get('/api/stash/status', async (req, res) => {
     : typeof req.query.paths === 'string'
     ? [req.query.paths]
     : [];
-  const config = loadedConfig;
+  const config = await getTargetResolutionConfig();
 
   let paths: string[] = [];
   if ((channelId || channelIds.length || targetRefs.length) && config) {
@@ -3779,7 +4311,7 @@ app.post('/api/cache/prefetch', async (req, res) => {
   const channelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
   const channelIds = normalizeStringArray(body.channelIds ?? body.channels);
   const targetRefs = normalizeRuntimeTargetRefs(body.targets ?? body.target);
-  const config = loadedConfig;
+  const config = await getTargetResolutionConfig();
 
   let urls: string[] = [];
   if (rawUrls) {
@@ -3831,7 +4363,7 @@ app.get('/api/cache/status', async (req, res) => {
     : typeof req.query.urls === 'string'
     ? [req.query.urls]
     : [];
-  const config = loadedConfig;
+  const config = await getTargetResolutionConfig();
 
   let urls: string[] = [];
   if ((channelId || channelIds.length || targetRefs.length) && config) {
@@ -5040,6 +5572,12 @@ app.get('/weatherstar', (_req, res) => {
 app.use(
   '/assets',
   express.static(path.resolve(__dirname, '../../guide/public/assets'), {
+    index: false,
+  })
+);
+app.use(
+  '/assets-local',
+  express.static(path.resolve(repoRoot, 'cable2/assets'), {
     index: false,
   })
 );

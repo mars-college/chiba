@@ -162,6 +162,11 @@ body.drawer-open {
   gap: 10px;
 }
 
+.node-filter-input {
+  min-width: 280px;
+  max-width: 420px;
+}
+
 .toggle {
   display: inline-flex;
   align-items: center;
@@ -924,5 +929,10 @@ body.drawer-open {
     width: 100%;
     justify-content: space-between;
     flex-wrap: wrap;
+  }
+  .node-filter-input {
+    min-width: 0;
+    width: 100%;
+    max-width: none;
   }
 }

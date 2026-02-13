@@ -330,27 +330,74 @@ async function probeOnePi(opts: {
   // Prefer static IP from registry (avoids flaky mDNS + broken client-to-client networks).
   // If no IP is configured, fall back to host (often .local).
   const pingProbe = await pingOnce(addr, timeoutMs);
-  const resolvedIp = ip || pingProbe.resolvedIp;
-  const dnsOk = Boolean(ip) || pingProbe.dnsOk;
-  const ping = { ok: pingProbe.ok, ms: pingProbe.ms, error: pingProbe.ok ? undefined : pingProbe.error };
+  let resolvedIp = ip || pingProbe.resolvedIp;
+  let dnsOk = Boolean(ip) || pingProbe.dnsOk;
+  let ping = { ok: pingProbe.ok, ms: pingProbe.ms, error: pingProbe.ok ? undefined : pingProbe.error };
 
-  const target = ip || resolvedIp || host;
-  const [ssh22, node8080, cable8787] = await Promise.all([
+  let target = ip || resolvedIp || host;
+  let [ssh22, node8080, cable8787] = await Promise.all([
     tcpCheck(target, 22, timeoutMs),
     tcpCheck(target, 8080, timeoutMs),
     tcpCheck(target, registryDefaults.cablePort, timeoutMs),
   ]);
 
-  const nodeStatusHttp = node8080.ok
+  let nodeStatusHttp = node8080.ok
     ? await httpCheckJson(`http://${formatHostForUrl(target)}:8080/status`, timeoutMs + 700)
     : { ok: false, ms: null, status: null, error: 'tcp_8080_failed' };
 
-  const cableVersionHttp = cable8787.ok
+  let cableVersionHttp = cable8787.ok
     ? await httpCheckJson(
         `http://${formatHostForUrl(target)}:${registryDefaults.cablePort}/api/version`,
         timeoutMs + 700
       )
     : { ok: false, ms: null, status: null, error: 'tcp_8787_failed' };
+
+  // If a configured static IP is stale/unroutable but hostname works, retry
+  // once via hostname before marking the node offline.
+  const firstProbeReachable = ssh22.ok || node8080.ok || cable8787.ok || ping.ok;
+  if (ip && host && host !== ip && !firstProbeReachable) {
+    const hostPingProbe = await pingOnce(host, timeoutMs);
+    const hostResolvedIp = hostPingProbe.resolvedIp;
+    const hostTarget = hostResolvedIp || host;
+
+    const [hostSsh22, hostNode8080, hostCable8787] = await Promise.all([
+      tcpCheck(hostTarget, 22, timeoutMs),
+      tcpCheck(hostTarget, 8080, timeoutMs),
+      tcpCheck(hostTarget, registryDefaults.cablePort, timeoutMs),
+    ]);
+
+    const hostNodeStatusHttp = hostNode8080.ok
+      ? await httpCheckJson(`http://${formatHostForUrl(hostTarget)}:8080/status`, timeoutMs + 700)
+      : { ok: false, ms: null, status: null, error: 'tcp_8080_failed' };
+
+    const hostCableVersionHttp = hostCable8787.ok
+      ? await httpCheckJson(
+          `http://${formatHostForUrl(hostTarget)}:${registryDefaults.cablePort}/api/version`,
+          timeoutMs + 700
+        )
+      : { ok: false, ms: null, status: null, error: 'tcp_8787_failed' };
+
+    const hostReachable =
+      hostSsh22.ok ||
+      hostNode8080.ok ||
+      hostCable8787.ok ||
+      hostPingProbe.ok;
+    if (hostReachable) {
+      target = hostTarget;
+      resolvedIp = hostResolvedIp || resolvedIp;
+      dnsOk = dnsOk || hostPingProbe.dnsOk;
+      ping = {
+        ok: hostPingProbe.ok,
+        ms: hostPingProbe.ms,
+        error: hostPingProbe.ok ? undefined : hostPingProbe.error,
+      };
+      ssh22 = hostSsh22;
+      node8080 = hostNode8080;
+      cable8787 = hostCable8787;
+      nodeStatusHttp = hostNodeStatusHttp;
+      cableVersionHttp = hostCableVersionHttp;
+    }
+  }
 
   const chibaNode = {
     version: null as string | null,

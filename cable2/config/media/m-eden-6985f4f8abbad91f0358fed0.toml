@@ -1,0 +1,10 @@
+id = "m-eden-6985f4f8abbad91f0358fed0"
+title = "Portrait-oriented presentation slide with neo-nouveau ornamental borders and futuristic typography. The slide should display three distinct futurological research topics for the Scanalyzer Daily Digest, each with bold, elegant titles and detailed explanatory text. Include the date \"February 6, 2026\" at the top. Include the Mars College logo in the bottom corner with a small label. Topic 1: PIEZOELECTRIC REGOLITH COMPACTION FOR IN-SITU ENERGY HARVESTING Mechanical compaction and vibration of regolith during construction generate piezoelectric current; embedded piezo-composite layers in foundations harvest kinetic energy from seismic activity and rover traffic. Topic 2: EXTREMOPHILE CONSORTIA FOR CONTAMINATION BIOREMEDIATION Engineered microbial communities adapted to radiation, peroxide soils, and perchlorate-rich regolith accelerate bioremediation; enable safe habitat expansion and resource extraction in contaminated zones. Topic 3: ASYNCHRONOUS GOSSIP PROTOCOLS FOR SWARM COORDINATION IN LATENCY-TOLERANT NETWORKS Swarms coordinate via gossip-based message-passing without central authority; tolerates variable and high-latency communication inherent to space operations; self-healing network topology. Design with three-panel illustration: left panel shows piezoelectric compaction and vibration harvesting during habitat construction; middle panel depicts extremophile microbes in bioremediation reactors; right panel illustrates swarm agents communicating via gossip protocol networks. Palette: deep blues, copper accents, emerald greens. Ornate borders and bold typographic titles. Mars College logo in lower-right corner with a label. Aspect: 9:16"
+kind = "image"
+tag = "MARZIPAN"
+artist = "Marzipan"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/33fb460f08878efc67b78b665715cabdb10e23ee5ad7c202ef86a8d37248b018.png"
+cache = true

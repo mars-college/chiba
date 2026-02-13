@@ -1,0 +1,5 @@
+id = "midterms-earl"
+number = "M05"
+name = "Midterms Earl"
+call_sign = "EARL"
+blocks = [ "blk-midterms-earl" ]

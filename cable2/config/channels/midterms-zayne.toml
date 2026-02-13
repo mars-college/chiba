@@ -1,0 +1,5 @@
+id = "midterms-zayne"
+number = "M17"
+name = "Midterms Zayne"
+call_sign = "ZAYNE"
+blocks = [ "blk-midterms-zayne" ]

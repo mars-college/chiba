@@ -9,6 +9,7 @@ import {
   buildApplyComputation,
   dispatchApplyComputation,
   loadCatalog,
+  loadRuntimeCatalog,
   loadNodeInventory,
   loadResourceStore,
 } from "@chiba-cable2/core";
@@ -103,7 +104,10 @@ async function createServer(store: OperationStore): Promise<http.Server> {
 
     if (method === "GET" && url.pathname === "/api/catalog") {
       try {
-        const catalog = await loadCatalog();
+        const [catalog, runtimeCatalog] = await Promise.all([
+          loadCatalog(),
+          loadRuntimeCatalog(),
+        ]);
         sendJson(res, 200, {
           ok: true,
           counts: {
@@ -113,7 +117,8 @@ async function createServer(store: OperationStore): Promise<http.Server> {
             channels: catalog.channels.length,
             profiles: catalog.profiles.length,
           },
-          catalog,
+          catalog: runtimeCatalog,
+          index: catalog,
         });
       } catch (error) {
         sendJson(res, 500, { ok: false, error: (error as Error).message });

@@ -2,6 +2,44 @@
   height: 100%;
 }
 
+.kiosk-rotate-shell {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #05060c;
+}
+
+.kiosk-rotate-inner {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+}
+
+.kiosk-rotate-shell.rot-90 .kiosk-rotate-inner,
+.kiosk-rotate-shell.rot-270 .kiosk-rotate-inner {
+  top: 50%;
+  left: 50%;
+  width: 100vh;
+  height: 100vw;
+  transform-origin: center center;
+}
+
+.kiosk-rotate-shell.rot-90 .kiosk-rotate-inner {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.kiosk-rotate-shell.rot-180 .kiosk-rotate-inner {
+  transform-origin: center center;
+  transform: rotate(180deg);
+}
+
+.kiosk-rotate-shell.rot-270 .kiosk-rotate-inner {
+  transform: translate(-50%, -50%) rotate(270deg);
+}
+
 .guide-shell {
   --bg-0: #0a1121;
   --bg-1: #121c33;
@@ -775,6 +813,11 @@
   font-size: 0.55rem;
   letter-spacing: 0.4em;
   color: rgba(180, 210, 255, 0.7);
+}
+
+.player-loading-progress {
+  letter-spacing: 0.18em;
+  color: rgba(206, 233, 255, 0.82);
 }
 
 .player-hud {

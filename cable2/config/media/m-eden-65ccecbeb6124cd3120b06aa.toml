@@ -1,0 +1,10 @@
+id = "m-eden-65ccecbeb6124cd3120b06aa"
+title = "oil paint, brush strokes, mixed media, man sitting holding a cup, soft pastel sunset colors"
+kind = "image"
+tag = "CHEBEL"
+artist = "Chebel"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/a58b5f5df4b7285e0c81ea3e814b81ca4dff11439407254b5478abd990c3166e.jpg"
+cache = true

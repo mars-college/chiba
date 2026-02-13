@@ -1,8 +1,23 @@
 id = "pl-chebel"
-name = "Chebel playlist"
+name = "Early Visions, Ancestresses & Other Stories"
+title = "Early Visions, Ancestresses & Other Stories (3 links)"
+artist = "Chebel"
+description = "Early Visions, Ancestresses & Other Stories (3 links)"
 
 [[item]]
-playlist = "pl-chebel-a"
+media = "m-early-visions-ac7tkelkfl8-83391fe30c"
+duration_slots = 1
+title = "EARLY VISIONS [AC7tKelKfL8]"
+tag = "CHEBEL"
 
 [[item]]
-playlist = "pl-chebel-b"
+media = "m-the-wedding-of-the-sun-and-the-moon-e-pkhgjh0pa-eeeff1a4e1"
+duration_slots = 1
+title = "The Wedding of the Sun and the Moon [E PkHGJH0PA]"
+tag = "CHEBEL"
+
+[[item]]
+media = "m-ancestresses-series-nature-of-movement-avag8hq-fic-4ed36213b9"
+duration_slots = 1
+title = "Ancestresses series & Nature of Movement [avAG8Hq FIc]"
+tag = "CHEBEL"

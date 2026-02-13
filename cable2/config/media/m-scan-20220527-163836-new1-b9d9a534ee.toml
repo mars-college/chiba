@@ -1,0 +1,8 @@
+id = "m-scan-20220527-163836-new1-b9d9a534ee"
+title = "Scan 20220527 163836 new1"
+tag = "LYOSHA"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/lyosha/Scan_20220527_163836_new1.png"
+cache = true

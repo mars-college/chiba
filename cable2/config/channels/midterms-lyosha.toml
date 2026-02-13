@@ -1,0 +1,5 @@
+id = "midterms-lyosha"
+number = "M09"
+name = "Midterms Lyosha"
+call_sign = "LYOSHA"
+blocks = [ "blk-midterms-lyosha" ]

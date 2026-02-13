@@ -70,6 +70,28 @@ Notes:
   - `CHIBA_CONTROL_DB_URL`
   - `CHIBA_NODE_API_KEY`
 
+## Prod Server (single command)
+
+Deploy local repo + env secrets to prod and start stack in tmux:
+
+```sh
+pnpm -C cable2 prod:deploy
+```
+
+Defaults used by deploy script:
+- host: `10.10.13.9`
+- port: `38764`
+- user: `jmill`
+- remote dir: `/home/jmill/chiba`
+- env file copied/used on remote: `cable2/.env.pis.prod`
+
+Override via env vars:
+- `CHIBA_PROD_HOST`
+- `CHIBA_PROD_PORT`
+- `CHIBA_PROD_USER`
+- `CHIBA_PROD_DIR`
+- `CHIBA_PROD_ENV_FILE`
+
 CLI usage (current):
 
 ```sh
@@ -132,10 +154,22 @@ EDEN_API_KEY=... \
 node cable2/packages/cli/dist/index.js prepare profile midterms-gallery --write --json
 ```
 
+Profile compile (recommended for production applies):
+
+```sh
+EDEN_API_KEY=... \
+node cable2/packages/cli/dist/index.js compile profile midterms-gallery --json
+```
+
 Notes:
 - `prepare profile` reads `[[prepare.*]]` steps from `config/profiles/<profile>.toml`.
 - It can run mixed dependency sources in one command (`prepare.dir`, `prepare.eden_collection`).
 - Use this before `apply profile ...` so all playlists/media dependencies exist and prefetch targets resolve cleanly.
+- `compile profile` is a stricter wrapper around `prepare`:
+  - runs all declared dependency steps
+  - auto-creates `pl-under-construction` + `m-under-construction-stryve` fallback assets when missing
+  - auto-fills missing/unplayable profile target playlists with the under-construction fallback so apply never dead-ends.
+  - exits successfully when runtime targets are safe, even if some import steps failed (those failures remain in JSON output).
 
 ## Commands
 
@@ -149,6 +183,7 @@ node cable2/packages/cli/dist/index.js get playlists
 node cable2/packages/cli/dist/index.js get blocks
 node cable2/packages/cli/dist/index.js get channels
 node cable2/packages/cli/dist/index.js get profiles
+node cable2/packages/cli/dist/index.js compile profile midterms-gallery --json
 
 # Plan/apply
 node cable2/packages/cli/dist/index.js apply profile default --dry-run --nodes commander --json

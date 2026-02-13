@@ -1,0 +1,8 @@
+id = "m-compositestest-a8630d29cc"
+title = "CompositesTest"
+tag = "EARL"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl/CompositesTest.mov"
+cache = true

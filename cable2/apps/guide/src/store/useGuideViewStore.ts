@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { CSSProperties, RefObject } from "react";
 import type { MemoryStats } from "../components/DebugPanel";
 import type {
+  CacheWarmStatus,
   GuideChannel,
   GuideIndex,
   MediaDebugStats,
@@ -42,6 +43,7 @@ type GuideViewData = {
   playerUrl: string | null;
   playerKind: MediaKind | null;
   playerMeta: PlayerMeta | null;
+  cacheWarmStatus: CacheWarmStatus | null;
   showPlayerHud: boolean;
   loopVideo: boolean;
   ambientAudio: {
@@ -121,6 +123,7 @@ export const useGuideViewStore = create<GuideViewStore>((set) => ({
   playerUrl: null,
   playerKind: null,
   playerMeta: null,
+  cacheWarmStatus: null,
   showPlayerHud: false,
   loopVideo: true,
   ambientAudio: null,

@@ -1,0 +1,5 @@
+id = "midterms-anna"
+number = "M02"
+name = "Midterms Anna"
+call_sign = "ANNA"
+blocks = [ "blk-midterms-anna" ]

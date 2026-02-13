@@ -43,6 +43,7 @@ export function GuideView() {
     playerUrl,
     playerKind,
     playerMeta,
+    cacheWarmStatus,
     showPlayerHud,
     loopVideo,
     onPlayerEnded,
@@ -120,6 +121,7 @@ export function GuideView() {
         playerReady={playerReady}
         playerKind={playerKind}
         playerMeta={playerMeta}
+        loadingStatus={cacheWarmStatus}
         selectedChannel={selectedChannel}
         selectedProgram={selectedProgram}
         showPlayerHud={showPlayerHud}

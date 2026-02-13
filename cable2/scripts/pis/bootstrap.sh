@@ -299,6 +299,12 @@ out = {
         or (get_nested_default("nas", "password", "") or "").strip()
         or env_first("CHIBA_NAS_PASSWORD", "NAS_PASSWORD")
     ),
+    "STASH_COPY_TIMEOUT_MS": (
+        ("" if node.get("stash_copy_timeout_ms") is None else str(node.get("stash_copy_timeout_ms")).strip())
+        or ("" if get_default("stash_copy_timeout_ms", "") is None else str(get_default("stash_copy_timeout_ms", "")).strip())
+        or env_first("CHIBA_STASH_COPY_TIMEOUT_MS", "STASH_COPY_TIMEOUT_MS")
+        or "1800000"
+    ),
 }
 
 for key, val in out.items():
@@ -366,7 +372,27 @@ KIOSK_URL="http://localhost:${GUIDE_PORT}/?screenId=${NODE_NAME}"
 printf "\nSyncing repo to %s...\n" "$SSH_TARGET"
 "${SSH_BASE[@]}" "$SSH_TARGET" "mkdir -p $REMOTE_DIR"
 
-RSYNC_ARGS=(-az --delete)
+# Cleanup stale legacy directories from older app layouts (best effort).
+# This prevents noisy rsync delete failures and stale code shadowing.
+"${SSH_BASE[@]}" "$SSH_TARGET" "bash -lc '
+set -e
+rm -rf \"$REMOTE_DIR/cable\" \
+       \"$REMOTE_DIR/packages/controller\" \
+       \"$REMOTE_DIR/packages/dashboard\" \
+       \"$REMOTE_DIR/packages/node\" \
+       \"$REMOTE_DIR/packages/player\" \
+       \"$REMOTE_DIR/packages/shared\" 2>/dev/null || true
+if command -v sudo >/dev/null 2>&1; then
+  sudo rm -rf \"$REMOTE_DIR/cable\" \
+             \"$REMOTE_DIR/packages/controller\" \
+             \"$REMOTE_DIR/packages/dashboard\" \
+             \"$REMOTE_DIR/packages/node\" \
+             \"$REMOTE_DIR/packages/player\" \
+             \"$REMOTE_DIR/packages/shared\" 2>/dev/null || true
+fi
+'"
+
+RSYNC_ARGS=(-az --delete --force)
 if [ "$RSYNC_PROGRESS" -eq 1 ]; then
   # macOS ships an ancient rsync (2.6.x) that doesn't support --info=progress2.
   # Use progress2 only on rsync 3+.
@@ -441,6 +467,7 @@ CHIBA_API_KEY=$API_KEY
 CHIBA_CONTROL_PLANE_URL=$CONTROL_PLANE_URL
 CHIBA_CONTROLLER_URL=$CONTROLLER_URL
 EDEN_API_KEY=$EDEN_KEY
+CHIBA_STASH_COPY_TIMEOUT_MS=$STASH_COPY_TIMEOUT_MS
 ENV
 
 echo "Configuring Wi-Fi credentials (if provided)..."
@@ -468,6 +495,9 @@ WPAEOF
 fi
 
 echo "Ensuring base runtime (Node.js + pnpm + dependencies)..."
+# Some Raspberry Pi images end up with malformed NodeSource apt pin files
+# that break *all* apt operations. Remove the known bad files defensively.
+sudo rm -f /etc/apt/preferences.d/nodejs /etc/apt/preferences.d/nsolid >/dev/null 2>&1 || true
 sudo apt-get update -y
 sudo apt-get install -y curl ca-certificates git python3 build-essential rsync jq
 
@@ -477,7 +507,7 @@ if apt-cache policy chromium 2>/dev/null | grep -q "Candidate:"; then
 elif apt-cache policy chromium-browser 2>/dev/null | grep -q "Candidate:"; then
   sudo apt-get install -y chromium-browser
 fi
-sudo apt-get install -y xinit x11-xserver-utils xserver-xorg xdotool unclutter >/dev/null 2>&1 || true
+sudo apt-get install -y xinit x11-xserver-utils x11-utils xserver-xorg xdotool unclutter >/dev/null 2>&1 || true
 sudo apt-get install -y cage wlr-randr seatd >/dev/null 2>&1 || true
 sudo systemctl enable --now seatd >/dev/null 2>&1 || true
 sudo usermod -aG video,audio,input,render "$PI_USER" >/dev/null 2>&1 || true
@@ -502,10 +532,13 @@ if [ "${PNPM_MAJOR:-0}" -lt 9 ]; then
 fi
 
 echo "Installing workspace dependencies..."
-if ! pnpm -C "$REMOTE_DIR" install --no-frozen-lockfile; then
+# Some Pi images export NODE_ENV=production globally, which causes pnpm to
+# skip devDependencies and breaks TypeScript builds (tsc missing). Force dev
+# deps for bootstrap builds.
+if ! CI=1 NODE_ENV=development pnpm -C "$REMOTE_DIR" install --force --no-frozen-lockfile --prod=false; then
   echo "pnpm install failed once; retrying..."
   sleep 2
-  pnpm -C "$REMOTE_DIR" install --no-frozen-lockfile
+  CI=1 NODE_ENV=development pnpm -C "$REMOTE_DIR" install --force --no-frozen-lockfile --prod=false
 fi
 
 echo "Building runtime targets..."
@@ -517,6 +550,20 @@ pnpm -C "$REMOTE_DIR/apps/server" build
 pnpm -C "$REMOTE_DIR/apps/guide" build
 pnpm -C "$REMOTE_DIR/apps/ops" build
 pnpm -C "$REMOTE_DIR/packages/node-agent" build
+echo "Build step complete."
+
+if [ ! -f "$REMOTE_DIR/apps/server/dist/index.js" ]; then
+  echo "server build artifact missing: $REMOTE_DIR/apps/server/dist/index.js"
+  exit 1
+fi
+if [ ! -f "$REMOTE_DIR/packages/node-agent/dist/index.js" ]; then
+  echo "node-agent build artifact missing: $REMOTE_DIR/packages/node-agent/dist/index.js"
+  exit 1
+fi
+if [ ! -f "$REMOTE_DIR/apps/guide/dist/index.html" ]; then
+  echo "guide build artifact missing: $REMOTE_DIR/apps/guide/dist/index.html"
+  exit 1
+fi
 
 # Ensure we always have a Wi-Fi/network watchdog on nodes.
 if [ ! -x "$REMOTE_DIR/scripts/network-watchdog.sh" ]; then
@@ -815,44 +862,108 @@ launch_with_cage() {
 }
 
 launch_with_xinit() {
-  local kiosk_url chromium_bin
+  local kiosk_url chromium_bin xsession
   kiosk_url="\$1"
   chromium_bin="\$2"
 
   command -v xinit >/dev/null 2>&1 || return 1
-  xinit /bin/bash -lc '
-    chromium_bin="\$1"
-    kiosk_url="\$2"
-    shift 2
-    chromium_args=("\$@")
-    window_size=""
-    if command -v xset >/dev/null 2>&1; then
-      xset s off -dpms s noblank >/dev/null 2>&1 || true
+
+  xsession="\$(mktemp /tmp/chiba-xsession.XXXXXX)"
+  cat > "\$xsession" <<'XSESSION'
+#!/bin/bash
+set -euo pipefail
+
+chromium_bin="\$1"
+kiosk_url="\$2"
+shift 2
+chromium_args=("\$@")
+window_size=""
+
+if command -v xset >/dev/null 2>&1; then
+  xset s off -dpms s noblank >/dev/null 2>&1 || true
+fi
+
+if command -v xrandr >/dev/null 2>&1; then
+  while read -r output; do
+    [ -n "\$output" ] || continue
+    xrandr --output "\$output" --auto >/dev/null 2>&1 || true
+  done < <(xrandr --query 2>/dev/null | awk '/ connected / { print \$1 }')
+fi
+
+if [ -f "\$ROTATE_CONFIG_FILE" ] && command -v xrandr >/dev/null 2>&1; then
+  rotation="\$(cat "\$ROTATE_CONFIG_FILE" 2>/dev/null || true)"
+  output="\$(xrandr --query 2>/dev/null | awk '/ connected / { print \$1; exit }')"
+  if [ -n "\$output" ]; then
+    case "\$rotation" in
+      90) xrandr --output "\$output" --rotate left >/dev/null 2>&1 || true ;;
+      180) xrandr --output "\$output" --rotate inverted >/dev/null 2>&1 || true ;;
+      270) xrandr --output "\$output" --rotate right >/dev/null 2>&1 || true ;;
+      *) : ;;
+    esac
+  fi
+fi
+
+if [ -z "\$window_size" ] && command -v xrandr >/dev/null 2>&1; then
+  mode="\$(xrandr --query 2>/dev/null | awk '
+    / connected primary / {
+      split(\$4, a, "+");
+      print a[1];
+      exit
+    }
+    / connected / {
+      split(\$3, a, "+");
+      print a[1];
+      exit
+    }'
+  )"
+  if [[ "\$mode" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+    window_size="\${BASH_REMATCH[1]},\${BASH_REMATCH[2]}"
+  fi
+fi
+
+if [ -z "\$window_size" ] && command -v xdpyinfo >/dev/null 2>&1; then
+  mode="\$(xdpyinfo 2>/dev/null | awk '/dimensions:/ { print \$2; exit }')"
+  if [[ "\$mode" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+    window_size="\${BASH_REMATCH[1]},\${BASH_REMATCH[2]}"
+  fi
+fi
+
+if command -v xdotool >/dev/null 2>&1; then
+  xdotool mousemove 1 1 >/dev/null 2>&1 || true
+fi
+if command -v unclutter >/dev/null 2>&1; then
+  unclutter -idle 0.25 -root >/dev/null 2>&1 &
+fi
+
+echo "[kiosk] launch backend=x11 size=\${window_size:-auto}" >&2
+chromium_cmd=("\$chromium_bin" "\${chromium_args[@]}" --window-position=0,0)
+if [ -n "\$window_size" ]; then
+  chromium_cmd+=(--window-size="\$window_size")
+fi
+chromium_cmd+=("\$kiosk_url")
+"\${chromium_cmd[@]}" &
+chromium_pid="\$!"
+
+if command -v xdotool >/dev/null 2>&1 && [ -n "\$window_size" ]; then
+  for _i in {1..40}; do
+    win_id="\$(xdotool search --onlyvisible --pid "\$chromium_pid" 2>/dev/null | head -n 1 || true)"
+    if [ -n "\$win_id" ]; then
+      IFS=',' read -r ww hh <<< "\$window_size"
+      xdotool windowmove "\$win_id" 0 0 >/dev/null 2>&1 || true
+      xdotool windowsize "\$win_id" "\$ww" "\$hh" >/dev/null 2>&1 || true
+      break
     fi
-    if command -v xrandr >/dev/null 2>&1; then
-      output="\$(xrandr --query 2>/dev/null | grep " connected " | head -n 1 | cut -d " " -f1)"
-      if [ -n "\$output" ]; then
-        xrandr --output "\$output" --auto >/dev/null 2>&1 || true
-        mode_line="\$(xrandr --query 2>/dev/null | grep -E "^\$output[[:space:]]+connected" | head -n 1)"
-        mode="\$(printf "%s\n" "\$mode_line" | sed -n "s/^[^[:space:]]\\+[[:space:]]\\+connected[[:space:]]\\+\\([0-9]\\+x[0-9]\\+\\).*/\\1/p")"
-        if [[ "\$mode" =~ ^([0-9]+)x([0-9]+)$ ]]; then
-          window_size="\${BASH_REMATCH[1]},\${BASH_REMATCH[2]}"
-        fi
-      fi
-    fi
-    if command -v xdotool >/dev/null 2>&1; then
-      xdotool mousemove 1 1 >/dev/null 2>&1 || true
-    fi
-    if command -v unclutter >/dev/null 2>&1; then
-      unclutter -idle 0.25 -root >/dev/null 2>&1 &
-    fi
-    echo "[kiosk] launch backend=x11 mode=\${mode:-unknown} size=\${window_size:-auto}" >&2
-    if [ -n "\$window_size" ]; then
-      exec "\$chromium_bin" "\${chromium_args[@]}" --window-size="\$window_size" --window-position=0,0 "\$kiosk_url"
-    fi
-    exec "\$chromium_bin" "\${chromium_args[@]}" --window-position=0,0 "\$kiosk_url"
-  ' _ "\$chromium_bin" "\$kiosk_url" "\${CHROMIUM_FLAGS[@]}" -- :0 vt1 -keeptty -nolisten tcp
+    sleep 0.2
+  done
+fi
+
+wait "\$chromium_pid"
+XSESSION
+
+  chmod +x "\$xsession"
+  xinit "\$xsession" "\$chromium_bin" "\$kiosk_url" "\${CHROMIUM_FLAGS[@]}" -- :0 vt1 -keeptty -nolisten tcp
   local rc="\$?"
+  rm -f "\$xsession" >/dev/null 2>&1 || true
   return "\$rc"
 }
 
@@ -955,11 +1066,10 @@ After=network.target
 Type=simple
 User=$PI_USER
 WorkingDirectory=$REMOTE_DIR
+EnvironmentFile=$REMOTE_DIR/.env
 Environment=PORT=$NODE_PORT
 Environment=CHIBA_NODE_ID=$PI_NAME
 Environment=CHIBA_NODE_NAME=$NODE_NAME
-Environment=CHIBA_NODE_API_KEY=$API_KEY
-Environment=CHIBA_API_KEY=$API_KEY
 Environment=CHIBA_CONTROL_PLANE_URL=$CONTROL_PLANE_URL
 Environment=CHIBA_SERVER_PORT=$SERVER_PORT
 Environment=CHIBA_GUIDE_PORT=$GUIDE_PORT
@@ -973,6 +1083,10 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 SERVICE
+
+# Drop stale kiosk overrides from previous installs (they may point to
+# ./scripts/run-kiosk.sh or old runtime dirs).
+sudo rm -rf /etc/systemd/system/chiba-kiosk.service.d >/dev/null 2>&1 || true
 
 sudo tee /etc/systemd/system/chiba-kiosk.service > /dev/null <<SERVICE
 [Unit]
@@ -1011,14 +1125,49 @@ StandardError=journal
 WantedBy=multi-user.target
 SERVICE
 
+# Clean up legacy node services/processes that can still bind the node port.
+for legacy_svc in chiba-node chiba-node-agent chiba-cable-node; do
+  sudo systemctl stop "\$legacy_svc" >/dev/null 2>&1 || true
+  sudo systemctl disable "\$legacy_svc" >/dev/null 2>&1 || true
+  sudo systemctl reset-failed "\$legacy_svc" >/dev/null 2>&1 || true
+done
+
+# Best-effort kill of any stale listener on the node port (e.g. orphaned node process).
+PORT_PIDS="\$(sudo ss -ltnp \"sport = :$NODE_PORT\" 2>/dev/null | sed -n 's/.*pid=\\([0-9][0-9]*\\).*/\\1/p' | sort -u | xargs)"
+if [ -n "\$PORT_PIDS" ]; then
+  echo "Port $NODE_PORT already in use by pid(s): \$PORT_PIDS; terminating stale listeners..."
+  sudo kill -TERM \$PORT_PIDS >/dev/null 2>&1 || true
+  sleep 1
+  for pid in \$PORT_PIDS; do
+    if sudo kill -0 "\$pid" >/dev/null 2>&1; then
+      sudo kill -KILL "\$pid" >/dev/null 2>&1 || true
+    fi
+  done
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl stop chiba-kiosk >/dev/null 2>&1 || true
 sudo systemctl reset-failed chiba-kiosk >/dev/null 2>&1 || true
 sudo systemctl enable --now chiba-cable-server chiba-cable-guide chiba-cable2-node-agent chiba-kiosk
-if ! sudo systemctl is-active --quiet chiba-kiosk; then
-  echo "kiosk service is not active; printing recent logs for debugging..."
-  sudo systemctl status --no-pager -l chiba-kiosk || true
-  sudo journalctl -u chiba-kiosk -n 80 --no-pager || true
+
+echo "Checking service activation..."
+FAILED_SERVICES=()
+for svc in chiba-cable-server chiba-cable-guide chiba-cable2-node-agent chiba-kiosk; do
+  if ! sudo systemctl is-active --quiet "\$svc"; then
+    FAILED_SERVICES+=("\$svc")
+  fi
+done
+
+if [ "\${#FAILED_SERVICES[@]}" -gt 0 ]; then
+  echo "service activation failed for: \${FAILED_SERVICES[*]}"
+  for svc in "\${FAILED_SERVICES[@]}"; do
+    echo ""
+    echo "----- systemctl status: \$svc -----"
+    sudo systemctl status --no-pager -l "\$svc" || true
+    echo "----- journal: \$svc (last 120 lines) -----"
+    sudo journalctl -u "\$svc" -n 120 --no-pager || true
+  done
+  exit 1
 fi
 
 # Ensure node server is running before kiosk URL update
@@ -1030,6 +1179,12 @@ for i in {1..20}; do
   fi
   sleep 1
 done
+if ! curl -s "http://localhost:$NODE_PORT/health" >/dev/null 2>&1; then
+  echo "node agent health endpoint did not become ready on port $NODE_PORT"
+  sudo systemctl status --no-pager -l chiba-cable2-node-agent || true
+  sudo journalctl -u chiba-cable2-node-agent -n 80 --no-pager || true
+  exit 1
+fi
 
 # NAS mount (optional)
 if [ -n "$NAS_HOST" ] && [ -n "$NAS_USER" ] && [ -n "$NAS_PASSWORD" ]; then
@@ -1097,7 +1252,7 @@ esac
 
 if [ "$REBOOT_AFTER" -eq 1 ]; then
   echo "Rebooting $NODE_NAME..."
-  sudo reboot
+  sudo nohup bash -lc "sleep 1; systemctl reboot || reboot" >/dev/null 2>&1 &
 fi
 
 echo "Bootstrap complete on $NODE_NAME"

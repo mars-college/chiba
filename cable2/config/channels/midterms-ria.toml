@@ -1,0 +1,5 @@
+id = "midterms-ria"
+number = "M11"
+name = "Midterms Ria"
+call_sign = "RIA"
+blocks = [ "blk-midterms-ria" ]

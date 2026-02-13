@@ -41,6 +41,7 @@ import {
   PARAM_HUD_MODE,
   PARAM_HUD_SEC_KEYS,
   PARAM_PLAYLIST,
+  PARAM_ROTATE_KEYS,
   PARAM_TARGET_ID_KEYS,
   PARAM_TARGET_KIND_KEYS,
   PARAM_HOURS,
@@ -95,6 +96,7 @@ import { useArtViewStore } from "./store/useArtViewStore";
 import { useGuideViewStore } from "./store/useGuideViewStore";
 import { useRemoteViewStore } from "./store/useRemoteViewStore";
 import type {
+  CacheWarmStatus,
   DisplaySettings,
   GuideChannel,
   GuideIndex,
@@ -133,6 +135,59 @@ type CatalogPayload = {
     channels?: any[];
   };
 };
+
+type CacheStatusPayload = {
+  ok?: boolean;
+  cached?: number;
+  total?: number;
+};
+
+function readOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseNonNegativeNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value < 0) return null;
+  return Math.floor(value);
+}
+
+function buildCacheWarmStatus(args: {
+  target: RuntimeTarget;
+  cache: CacheStatusPayload | null;
+  stash: CacheStatusPayload | null;
+}): CacheWarmStatus | null {
+  const cacheTotal = parseNonNegativeNumber(args.cache?.total);
+  const cacheCached = parseNonNegativeNumber(args.cache?.cached);
+  const stashTotal = parseNonNegativeNumber(args.stash?.total);
+  const stashCached = parseNonNegativeNumber(args.stash?.cached);
+  const hasCache = cacheTotal !== null;
+  const hasStash = stashTotal !== null;
+  if (!hasCache && !hasStash) return null;
+
+  const source: CacheWarmStatus["source"] =
+    hasCache && hasStash ? "mixed" : hasStash ? "stash" : "cache";
+  const total = (cacheTotal ?? 0) + (stashTotal ?? 0);
+  const cached = (cacheCached ?? 0) + (stashCached ?? 0);
+  const complete = total > 0 && cached >= total;
+  const targetLabel = `${args.target.kind}:${args.target.id}`;
+
+  const detailParts: string[] = [];
+  if (hasStash) detailParts.push(`stash ${stashCached ?? 0}/${stashTotal ?? 0}`);
+  if (hasCache) detailParts.push(`remote ${cacheCached ?? 0}/${cacheTotal ?? 0}`);
+
+  return {
+    target: targetLabel,
+    source,
+    label: complete ? "Dependencies Ready" : "Warming Dependencies",
+    detail: detailParts.join(" • "),
+    cached,
+    total,
+    updatedAt: Date.now(),
+  };
+}
 
 function parseRuntimeTargetKind(value: unknown): RuntimeTargetKind | null {
   if (typeof value !== "string") return null;
@@ -180,11 +235,27 @@ function parsePositiveSeconds(value: unknown): number | undefined {
   return n;
 }
 
+function parseRotateValue(value: unknown): 0 | 90 | 180 | 270 | null {
+  if (value === undefined || value === null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (n === 0 || n === 90 || n === 180 || n === 270) return n;
+  return null;
+}
+
 function resolveDurationForPlayableUrl(url: string, explicitSec: number | undefined): number | undefined {
   if (typeof explicitSec === "number" && explicitSec > 0) return explicitSec;
   const kind = getMediaKind(url);
   if (kind === "image") return PLAYLIST_IMAGE_DURATION_DEFAULT_SEC;
   return undefined;
+}
+
+function isLocalPlayableUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return (
+    url.startsWith("/cache/") ||
+    url.startsWith("/stash/") ||
+    url.startsWith("/media/")
+  );
 }
 
 function buildTargetPrograms(args: {
@@ -200,6 +271,7 @@ function buildTargetPrograms(args: {
 
   type ResolvedProgram = {
     title: string;
+    infoTitle?: string;
     subtitle?: string;
     tag?: string;
     artist?: string;
@@ -209,7 +281,29 @@ function buildTargetPrograms(args: {
     url: string;
   };
 
-  const resolvePlaylist = (playlistId: string, visiting = new Set<string>()): ResolvedProgram[] => {
+  type PlaylistInfoOverride = {
+    infoTitle?: string;
+    subtitle?: string;
+    artist?: string;
+    description?: string;
+  };
+
+  const playlistInfoOverrideFor = (playlistId: string): PlaylistInfoOverride => {
+    const row = playlistById.get(playlistId.trim());
+    if (!row) return {};
+    return {
+      infoTitle: readOptionalString((row as any)?.title),
+      subtitle: readOptionalString((row as any)?.subtitle),
+      artist: readOptionalString((row as any)?.artist),
+      description: readOptionalString((row as any)?.description),
+    };
+  };
+
+  const resolvePlaylist = (
+    playlistId: string,
+    visiting = new Set<string>(),
+    targetInfoOverride: PlaylistInfoOverride | null = null
+  ): ResolvedProgram[] => {
     const id = playlistId.trim();
     if (!id || visiting.has(id)) return [];
     visiting.add(id);
@@ -233,17 +327,29 @@ function buildTargetPrograms(args: {
         );
         out.push({
           title: String((item as any)?.title ?? (media as any)?.title ?? "Untitled"),
-          subtitle: (item as any)?.subtitle ?? (media as any)?.subtitle,
+          infoTitle:
+            targetInfoOverride?.infoTitle ??
+            (item as any)?.infoTitle,
+          subtitle:
+            targetInfoOverride?.subtitle ??
+            (item as any)?.subtitle ??
+            (media as any)?.subtitle,
           tag: (item as any)?.tag ?? (media as any)?.tag,
-          artist: (item as any)?.artist ?? (media as any)?.artist,
-          description: (item as any)?.description ?? (media as any)?.description,
+          artist:
+            targetInfoOverride?.artist ??
+            (item as any)?.artist ??
+            (media as any)?.artist,
+          description:
+            targetInfoOverride?.description ??
+            (item as any)?.description ??
+            (media as any)?.description,
           durationSlots,
           durationSec: resolveDurationForPlayableUrl(url, explicitDurationSec),
           url,
         });
       }
       if (nestedPlaylist) {
-        out.push(...resolvePlaylist(nestedPlaylist, visiting));
+        out.push(...resolvePlaylist(nestedPlaylist, visiting, targetInfoOverride));
       }
     }
     visiting.delete(id);
@@ -321,6 +427,7 @@ function buildTargetPrograms(args: {
       return [
         {
           title: String((media as any)?.title ?? "Untitled"),
+          infoTitle: (media as any)?.infoTitle,
           subtitle: (media as any)?.subtitle,
           tag: (media as any)?.tag,
           artist: (media as any)?.artist,
@@ -331,13 +438,17 @@ function buildTargetPrograms(args: {
         },
       ];
     }
-    if (args.target.kind === "playlist") return resolvePlaylist(args.target.id, new Set<string>());
+    if (args.target.kind === "playlist") {
+      const infoOverride = playlistInfoOverrideFor(args.target.id);
+      return resolvePlaylist(args.target.id, new Set<string>(), infoOverride);
+    }
     if (args.target.kind === "block") return resolveBlock(args.target.id);
     return [];
   })();
 
   return resolvedPrograms.map((program) => ({
     title: program.title,
+    infoTitle: program.infoTitle,
     subtitle: program.subtitle,
     tag: program.tag,
     artist: program.artist,
@@ -371,6 +482,7 @@ function App() {
   const embedDebugParam = params.get(PARAM_EMBED_DEBUG);
   const galleryParam = params.get(PARAM_GALLERY);
   const pinnedChannelParam = getFirstParam(params, PARAM_GALLERY_CHANNEL_KEYS);
+  const rotateParam = getFirstParam(params, PARAM_ROTATE_KEYS);
   const targetKindParam = getFirstParam(params, PARAM_TARGET_KIND_KEYS);
   const targetIdParam = getFirstParam(params, PARAM_TARGET_ID_KEYS);
   const lockParam = getFirstParam(params, PARAM_LOCK_KEYS);
@@ -473,6 +585,13 @@ function App() {
   // Default to hiding the Remote QR in gallery/kiosk installs unless explicitly enabled.
   const qrAllowed = qrForced === null ? (galleryEnabledEffective ? false : true) : qrForced;
   const qrLockedOff = qrAllowed === false;
+  const displayRotate = useMemo(() => {
+    const fromParam = parseRotateValue(rotateParam);
+    if (fromParam !== null) return fromParam;
+    const fromState = parseRotateValue(kioskState?.rotate);
+    if (fromState !== null) return fromState;
+    return 0;
+  }, [kioskState?.rotate, rotateParam]);
 
   const hudModeOverride = useMemo(() => {
     const rawParam = (hudModeParam ?? "").trim().toLowerCase();
@@ -716,6 +835,7 @@ function App() {
   const [playerUrl, setPlayerUrl] = useState<string | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [playerMeta, setPlayerMeta] = useState<PlayerMeta | null>(null);
+  const [cacheWarmStatus, setCacheWarmStatus] = useState<CacheWarmStatus | null>(null);
   const [showPlayerHud, setShowPlayerHud] = useState(false);
   const [playerChannelIndex, setPlayerChannelIndex] = useState<number | null>(
     null
@@ -824,6 +944,64 @@ function App() {
   useEffect(() => {
     playerUrlRef.current = playerUrl;
   }, [playerUrl]);
+
+  useEffect(() => {
+    if (!playerOpen || playerReady || !runtimeTarget) {
+      setCacheWarmStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    const targetRef = `${runtimeTarget.kind}:${runtimeTarget.id}`;
+
+    const pullStatus = async () => {
+      const fetchStatus = async (kind: "cache" | "stash"): Promise<CacheStatusPayload | null> => {
+        try {
+          const response = await fetch(
+            `/api/${kind}/status?target=${encodeURIComponent(targetRef)}`,
+            { cache: "no-store" }
+          );
+          if (!response.ok) return null;
+          const payload = (await response.json()) as CacheStatusPayload;
+          return payload;
+        } catch {
+          return null;
+        }
+      };
+
+      const [cache, stash] = await Promise.all([
+        fetchStatus("cache"),
+        fetchStatus("stash"),
+      ]);
+      if (cancelled) return;
+      const next = buildCacheWarmStatus({
+        target: runtimeTarget,
+        cache,
+        stash,
+      });
+      if (next) {
+        setCacheWarmStatus(next);
+        return;
+      }
+      setCacheWarmStatus({
+        target: targetRef,
+        source: "mixed",
+        label: "Checking Dependencies",
+        detail: "Waiting for cache + stash status",
+        updatedAt: Date.now(),
+      });
+    };
+
+    void pullStatus();
+    const timer = window.setInterval(() => {
+      void pullStatus();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [playerOpen, playerReady, runtimeTarget?.id, runtimeTarget?.kind]);
 
   useEffect(() => {
     // If a pinned channel was requested, wait briefly for the real index to load
@@ -1109,7 +1287,20 @@ function App() {
       if (!programUrl) return;
       setPlayerOpen(true);
       if (playerUrl !== programUrl) {
-        setPlayerReady(false);
+        const previousUrl = playerUrlRef.current;
+        const previousKind = previousUrl ? getMediaKind(previousUrl) : null;
+        const nextKind = getMediaKind(programUrl);
+        const preserveReadyForCachedImageTransition =
+          viewMode === "guide" &&
+          galleryEnabledEffective &&
+          playlistEnabledEffective &&
+          previousKind === "image" &&
+          nextKind === "image" &&
+          isLocalPlayableUrl(previousUrl) &&
+          isLocalPlayableUrl(programUrl);
+        if (!preserveReadyForCachedImageTransition) {
+          setPlayerReady(false);
+        }
         setPlayerUrl(programUrl);
       }
       if (hudHideTimerRef.current) {
@@ -1162,7 +1353,17 @@ function App() {
         url: program.url,
       });
     },
-    [decorateProgramUrl, playerUrl, channels, activeRow, hudModeOverride, hudShowSecOverride]
+    [
+      decorateProgramUrl,
+      playerUrl,
+      channels,
+      activeRow,
+      hudModeOverride,
+      hudShowSecOverride,
+      viewMode,
+      galleryEnabledEffective,
+      playlistEnabledEffective,
+    ]
   );
 
   const handleChannelChange = useCallback(
@@ -1473,6 +1674,34 @@ function App() {
       setPlayerReady,
     ]
   );
+
+  useEffect(() => {
+    // Defensive fallback: some Chromium/X11 states can drop image onload/onended
+    // events after long kiosk uptime. Keep playlist motion deterministic.
+    if (!galleryEnabledEffective || !playlistEnabledEffective) return;
+    if (viewMode !== "guide") return;
+    if (!playerOpen || !playerUrl) return;
+
+    const kind = getMediaKind(playerUrl);
+    if (kind !== "image" && kind !== "iframe") return;
+
+    const sec =
+      typeof selectedProgram?.durationSec === "number" && selectedProgram.durationSec > 0
+        ? selectedProgram.durationSec
+        : PLAYLIST_IMAGE_DURATION_DEFAULT_SEC;
+    const timer = window.setTimeout(() => {
+      advanceGalleryPlaylist("fallback_timer");
+    }, Math.round(sec * 1000));
+    return () => window.clearTimeout(timer);
+  }, [
+    galleryEnabledEffective,
+    playlistEnabledEffective,
+    viewMode,
+    playerOpen,
+    playerUrl,
+    selectedProgram?.durationSec,
+    advanceGalleryPlaylist,
+  ]);
 
   useEffect(() => {
     // Playlist lookahead: while one item is playing, warm the next stash item
@@ -3385,6 +3614,7 @@ function App() {
       playerUrl,
       playerKind,
       playerMeta,
+      cacheWarmStatus,
       showPlayerHud,
       loopVideo: !(galleryEnabledEffective && playlistEnabledEffective),
       ambientAudio,
@@ -3426,6 +3656,7 @@ function App() {
     playerUrl,
     playerKind,
     playerMeta,
+    cacheWarmStatus,
     showPlayerHud,
     playlistEnabledEffective,
     ambientAudio,
@@ -3517,6 +3748,7 @@ function App() {
     shouldSplash && viewMode === "guide" ? (
       <SplashScreen active={showSplash} />
     ) : null;
+  const rotatedShellClass = `kiosk-rotate-shell rot-${displayRotate}`;
 
   if (viewMode === "remote") {
     return <RemoteView />;
@@ -3524,23 +3756,27 @@ function App() {
 
   if (viewMode === "art") {
     return (
-      <>
-        <ArtView />
-        {micIndicator}
-        {micAudioElement}
-        {displayTuningOverlay}
-      </>
+      <div className={rotatedShellClass}>
+        <div className="kiosk-rotate-inner">
+          <ArtView />
+          {micIndicator}
+          {micAudioElement}
+          {displayTuningOverlay}
+        </div>
+      </div>
     );
   }
 
   return (
-    <>
-      <GuideView />
-      {micIndicator}
-      {micAudioElement}
-      {displayTuningOverlay}
-      {splashOverlay}
-    </>
+    <div className={rotatedShellClass}>
+      <div className="kiosk-rotate-inner">
+        <GuideView />
+        {micIndicator}
+        {micAudioElement}
+        {displayTuningOverlay}
+        {splashOverlay}
+      </div>
+    </div>
   );
 }
 

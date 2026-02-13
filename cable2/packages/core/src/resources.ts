@@ -83,6 +83,7 @@ export type ProfilePrepareDirDef = {
   path: string;
   playlist_id: string;
   playlist_title?: string;
+  artist?: string;
   tag?: string;
   cache?: boolean;
   channel_id?: string;
@@ -244,6 +245,7 @@ function parseProfilePrepareDir(raw: unknown): ProfilePrepareDirDef | null {
     playlist_id: playlistId,
   };
   const playlistTitle = coerceString(raw.playlist_title);
+  const artist = coerceString(raw.artist);
   const tag = coerceString(raw.tag);
   const cache = coerceBoolean(raw.cache);
   const channelId = coerceString(raw.channel_id);
@@ -251,6 +253,7 @@ function parseProfilePrepareDir(raw: unknown): ProfilePrepareDirDef | null {
   const channelNumber = coerceString(raw.channel_number);
 
   if (playlistTitle !== undefined) out.playlist_title = playlistTitle;
+  if (artist !== undefined) out.artist = artist;
   if (tag !== undefined) out.tag = tag;
   if (cache !== undefined) out.cache = cache;
   if (channelId !== undefined) out.channel_id = channelId;

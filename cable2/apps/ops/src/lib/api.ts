@@ -158,6 +158,7 @@ export async function applyTarget(opts: OpsApplyTargetRequest): Promise<OpsApply
       hudMode: opts.hudMode,
       hudShowSec: opts.hudShowSec,
       theme: opts.theme,
+      displayRotate: opts.displayRotate,
       scale: opts.scale,
       textScale: opts.textScale,
       hours: opts.hours,

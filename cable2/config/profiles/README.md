@@ -103,7 +103,8 @@ These map to query params on `http://localhost:5173/` (the Cable Guide):
 
 Notes:
 - The canonical list of query params lives in `cable2/apps/guide/src/constants/params.ts`.
-- Rotation/orientation are not part of profiles; they are hardware properties in `scripts/pis/registry.toml`.
+- Rotation/orientation should primarily be hardware properties in `scripts/pis/registry.toml`.
+- Optional per-profile override is supported with `display_rotate = 0|90|180|270`.
 
 ## Prefetch (Caching Strategy)
 

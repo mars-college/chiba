@@ -1,0 +1,10 @@
+id = "m-eden-6986288f6f78cc6f32945072"
+title = "Reference image: Plasma confined in toroidal magnetic field geometry, showing standing waves, oscillating filaments, and harmonic echoes radiating from center. Motion: Smooth camera zoom inward from the outer edge of the torus, moving into the interior tube. As we zoom deeper inside, the standing waves, filaments, and oscillations become more detailed and immersive. The plasma pulses and oscillates in harmonic rhythm—waves ripple outward and collapse inward. Filaments glow brighter and dimmer. Echoes fade and brighten as new oscillations propagate. The magnetic field structure becomes increasingly visible and intricate as we move closer. The overall motion is continuous, smooth, organic—the plasma breathing and resonating as we move through it. Full 10-second duration. No cuts. Dark background, luminous plasma. Immersive interior perspective."
+kind = "video"
+tag = "ANNA"
+artist = "Anna"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/53c5badf4f3f23edded9be862ca21ad90d120b21ca2e66345563a0d349456429.mp4"
+cache = true

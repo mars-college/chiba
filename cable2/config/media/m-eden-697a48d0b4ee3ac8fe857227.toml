@@ -1,0 +1,10 @@
+id = "m-eden-697a48d0b4ee3ac8fe857227"
+title = "Scientific diagram illustrating plasma memory and self-organization. Clean infographic layout showing: (1) charged particles moving through magnetic field lines with arrows, (2) plasma pinch formation—particles converging into tight coherent structures labeled \"plasma pinch,\" (3) electromagnetic field visualization around the pinch, (4) double layer formation at boundaries, (5) oscillating waves showing plasma remembering its path with dotted trail lines. Use clear labeling, minimal color palette (purple, blue, white on dark background), technical precision. Include simple legends and geometric annotations. Educational, clear, information-dense."
+kind = "image"
+tag = "ANNA"
+artist = "Anna"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/ca6020070e9b6baca7faaa86ce09ba332110400c393a63612f0c0d4ea8423a21.jpg"
+cache = true

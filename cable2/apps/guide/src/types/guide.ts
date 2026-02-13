@@ -81,6 +81,7 @@ export type KioskState = {
   targetKind?: "media" | "playlist" | "block" | "channel";
   targetId?: string;
   channel?: string;
+  rotate?: 0 | 90 | 180 | 270;
   lock?: boolean;
   qr?: boolean;
   playlist?: boolean;
@@ -104,6 +105,16 @@ export type AudioSettings = {
 };
 
 export type MediaKind = "image" | "video" | "audio" | "iframe";
+
+export type CacheWarmStatus = {
+  target: string;
+  source: "cache" | "stash" | "mixed";
+  label: string;
+  detail?: string;
+  cached?: number;
+  total?: number;
+  updatedAt: number;
+};
 
 export type PreloadEntry = {
   url: string;
