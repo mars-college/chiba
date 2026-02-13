@@ -1,0 +1,8 @@
+id = "pl-chebel"
+name = "Chebel playlist"
+
+[[item]]
+playlist = "pl-chebel-a"
+
+[[item]]
+playlist = "pl-chebel-b"

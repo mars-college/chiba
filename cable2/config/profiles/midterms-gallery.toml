@@ -21,22 +21,118 @@ lock = true
 qr = false
 
 # Midterms content assignments:
-# - upper-west-1 -> Scanalyzer Daily Digest playlist (manual playlist apply)
-# - upper-west-2 -> Mars College Logo remixes v4 playlist (manual playlist apply)
-# - upper-west-4 -> Earl
-# - upper-east-4 -> Co-Lab
+# - LW1 -> ria
+# - LW2 -> jordan
+# - LW3 -> alicia
+# - LW4 -> freeman
+# - LE1 -> anna
+# - LE2 -> yulia
+# - LE3 -> chebel
+# - LE4 -> co-lab
+# - UW1 -> marzipan
+# - UW2 -> marzipan
+# - UW3 -> vanessa
+# - UW4 -> earl
+# - UE1 -> seva
+# - UE2 -> kamau
+# - UE3 -> zayne
+# - UE4 -> tarcila
 
-[pis.upper-east-4.cable]
+[pis.lower-west-1.cable]
+target_kind = "playlist"
+target_id = "pl-ria"
+playlist = true
+prefetch_targets = ["playlist:pl-ria"]
+
+[pis.lower-west-2.cable]
+target_kind = "playlist"
+target_id = "pl-jordan"
+playlist = true
+prefetch_targets = ["playlist:pl-jordan"]
+
+[pis.lower-west-3.cable]
+target_kind = "playlist"
+target_id = "pl-alicia"
+playlist = true
+prefetch_targets = ["playlist:pl-alicia"]
+
+[pis.lower-west-4.cable]
+target_kind = "playlist"
+target_id = "pl-freeman"
+playlist = true
+prefetch_targets = ["playlist:pl-freeman"]
+
+[pis.lower-east-1.cable]
+target_kind = "playlist"
+target_id = "pl-anna"
+playlist = true
+prefetch_targets = ["playlist:pl-anna"]
+
+[pis.lower-east-2.cable]
+target_kind = "playlist"
+target_id = "pl-yulia"
+playlist = true
+prefetch_targets = ["playlist:pl-yulia"]
+
+[pis.lower-east-3.cable]
+target_kind = "playlist"
+target_id = "pl-chebel"
+playlist = true
+prefetch_targets = ["playlist:pl-chebel"]
+
+[pis.lower-east-4.cable]
 target_kind = "playlist"
 target_id = "pl-co-lab"
 playlist = true
 prefetch_targets = ["playlist:pl-co-lab"]
+
+[pis.upper-west-1.cable]
+target_kind = "playlist"
+target_id = "pl-scanalyzer-daily-digest"
+playlist = true
+prefetch_targets = ["playlist:pl-scanalyzer-daily-digest"]
+
+[pis.upper-west-2.cable]
+target_kind = "playlist"
+target_id = "pl-mars-college-logo-remixes-v4"
+playlist = true
+prefetch_targets = ["playlist:pl-mars-college-logo-remixes-v4"]
+
+[pis.upper-west-3.cable]
+target_kind = "playlist"
+target_id = "pl-vanessa"
+playlist = true
+prefetch_targets = ["playlist:pl-vanessa"]
 
 [pis.upper-west-4.cable]
 target_kind = "playlist"
 target_id = "pl-earl"
 playlist = true
 prefetch_targets = ["playlist:pl-earl"]
+
+[pis.upper-east-1.cable]
+target_kind = "playlist"
+target_id = "pl-seva"
+playlist = true
+prefetch_targets = ["playlist:pl-seva"]
+
+[pis.upper-east-2.cable]
+target_kind = "playlist"
+target_id = "pl-kamau"
+playlist = true
+prefetch_targets = ["playlist:pl-kamau"]
+
+[pis.upper-east-3.cable]
+target_kind = "playlist"
+target_id = "pl-zayne"
+playlist = true
+prefetch_targets = ["playlist:pl-zayne"]
+
+[pis.upper-east-4.cable]
+target_kind = "playlist"
+target_id = "pl-tarcila"
+playlist = true
+prefetch_targets = ["playlist:pl-tarcila"]
 
 # ---------------------------------------------------------------------------
 # Preparation steps
@@ -48,10 +144,10 @@ prefetch_targets = ["playlist:pl-earl"]
 # needed by this profile so apply/prefetch stays data-driven.
 
 [[prepare.dir]]
-path = "/Volumes/share/chiba-cable/assets/mc26/midterms/co-lab"
-playlist_id = "pl-co-lab"
-playlist_title = "Co-Lab playlist"
-tag = "CO-LAB"
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/placeholder"
+playlist_id = "pl-under-construction"
+playlist_title = "Under Construction"
+tag = "MIDTERMS"
 cache = true
 
 [[prepare.dir]]
@@ -59,6 +155,70 @@ path = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl"
 playlist_id = "pl-earl"
 playlist_title = "Earl playlist"
 tag = "EARL"
+cache = true
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/co-lab"
+playlist_id = "pl-co-lab"
+playlist_title = "Co-Lab playlist"
+tag = "CO-LAB"
+cache = true
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/ria"
+playlist_id = "pl-ria"
+playlist_title = "Ria playlist"
+tag = "RIA"
+cache = true
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/alicia"
+playlist_id = "pl-alicia"
+playlist_title = "Alicia playlist"
+tag = "ALICIA"
+cache = true
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/kamau"
+playlist_id = "pl-kamau"
+playlist_title = "Kamau playlist"
+tag = "KAMAU"
+cache = true
+
+[[prepare.eden_collection]]
+source = "https://app.eden.art/collections/697d45a9ef3ab8f5f09ab4c8"
+db = "PROD"
+playlist_id = "pl-freeman"
+playlist_title = "Freeman playlist"
+tag = "FREEMAN"
+artist = "Freeman"
+cache = true
+
+[[prepare.eden_collection]]
+source = "https://app.eden.art/collections/698e638a0d9043b9594dbb4e"
+db = "PROD"
+playlist_id = "pl-anna"
+playlist_title = "Anna playlist"
+tag = "ANNA"
+artist = "Anna"
+cache = true
+
+[[prepare.eden_collection]]
+source = "https://app.eden.art/collections/698e2dd60d9043b95945d9de"
+db = "PROD"
+playlist_id = "pl-chebel-a"
+playlist_title = "Chebel playlist A"
+tag = "CHEBEL"
+artist = "Chebel"
+cache = true
+
+[[prepare.eden_collection]]
+source = "https://app.eden.art/collections/65c9acacca4d49603737b42c"
+db = "PROD"
+playlist_id = "pl-chebel-b"
+playlist_title = "Chebel playlist B"
+tag = "CHEBEL"
+artist = "Chebel"
 cache = true
 
 [[prepare.eden_collection]]

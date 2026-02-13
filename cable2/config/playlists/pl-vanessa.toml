@@ -1,0 +1,5 @@
+id = "pl-vanessa"
+name = "Vanessa playlist"
+
+[[item]]
+playlist = "pl-under-construction"

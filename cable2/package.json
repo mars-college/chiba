@@ -7,6 +7,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "dev:local": "node ./dev-local.mjs",
+    "dev:local:prod": "bash -lc 'set -a; source ./.env.pis.prod; set +a; node ./dev-local.mjs'",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
