@@ -1,0 +1,8 @@
+id = "m-under-construction-stryve"
+title = "Under Construction"
+kind = "image"
+tag = "UNDER-CONSTRUCTION"
+
+[source]
+type = "url"
+value = "http://localhost:8787/assets-local/How%20to%20make%20a%20fly%2090s%20website%20A%20GeoCities%20tribute%20%20Stryve.gif"

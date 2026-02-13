@@ -777,6 +777,11 @@
   color: rgba(180, 210, 255, 0.7);
 }
 
+.player-loading-progress {
+  letter-spacing: 0.18em;
+  color: rgba(206, 233, 255, 0.82);
+}
+
 .player-hud {
   position: absolute;
   left: 24px;

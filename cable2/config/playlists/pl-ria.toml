@@ -1,0 +1,8 @@
+id = "pl-ria"
+name = "Ria playlist"
+
+[[item]]
+media = "m-drawing-klerb-excerpt-f6e285771d"
+duration_slots = 1
+title = "Drawing Klerb excerpt"
+tag = "RIA"

@@ -172,6 +172,13 @@ tag = "RIA"
 cache = true
 
 [[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/jordan"
+playlist_id = "pl-jordan"
+playlist_title = "Jordan playlist"
+tag = "JORDAN"
+cache = true
+
+[[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/alicia"
 playlist_id = "pl-alicia"
 playlist_title = "Alicia playlist"
@@ -179,10 +186,45 @@ tag = "ALICIA"
 cache = true
 
 [[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/vanessa"
+playlist_id = "pl-vanessa"
+playlist_title = "Vanessa playlist"
+tag = "VANESSA"
+cache = true
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/seva"
+playlist_id = "pl-seva"
+playlist_title = "Seva playlist"
+tag = "SEVA"
+cache = true
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/yulia"
+playlist_id = "pl-yulia"
+playlist_title = "Yulia playlist"
+tag = "YULIA"
+cache = true
+
+[[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/kamau"
 playlist_id = "pl-kamau"
 playlist_title = "Kamau playlist"
 tag = "KAMAU"
+cache = true
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/zayne"
+playlist_id = "pl-zayne"
+playlist_title = "Zayne playlist"
+tag = "ZAYNE"
+cache = true
+
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/tarcila"
+playlist_id = "pl-tarcila"
+playlist_title = "Tarcila playlist"
+tag = "TARCILA"
 cache = true
 
 [[prepare.eden_collection]]

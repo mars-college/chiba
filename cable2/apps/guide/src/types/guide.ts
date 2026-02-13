@@ -105,6 +105,16 @@ export type AudioSettings = {
 
 export type MediaKind = "image" | "video" | "audio" | "iframe";
 
+export type CacheWarmStatus = {
+  target: string;
+  source: "cache" | "stash" | "mixed";
+  label: string;
+  detail?: string;
+  cached?: number;
+  total?: number;
+  updatedAt: number;
+};
+
 export type PreloadEntry = {
   url: string;
   kind: MediaKind;

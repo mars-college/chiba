@@ -1,0 +1,10 @@
+id = "m-eden-6984e5913a7651e26d8091b3"
+title = "Image 2: Composite showing tokamak reactor examples. Display cross-sectional and 3D views of tokamak chambers with toroidal magnetic field confinement, plasma filaments spiraling inside the torus, showing the donut geometry containing and organizing plasma through magnetic field. Include multiple tokamak designs (ITER concept, spherical tokamak, standard tokamak) all showing purple glowing plasma filaments held in toroidal geometry."
+kind = "image"
+tag = "ANNA"
+artist = "Anna"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/bff7ebdfd8a3d7775de8d12e0226ab7c0ba44aeff86928497aa19b18f9be07c7.jpg"
+cache = true

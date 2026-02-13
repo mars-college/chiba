@@ -1,0 +1,10 @@
+id = "m-eden-698cf527bd93e1eb099edf5d"
+title = "A scientific diagram showing plasma memory as measurable physical phenomenon. The image depicts a toroidal plasma structure with visible stratified layers, each representing different temporal states of the same plasma. The innermost layers glow brightest (most recent oscillations), outer layers dim (older disturbances), showing how plasma retains the signature of past activity in its current state. Interference patterns and standing waves are rendered as precise geometric curves—these are the \"memory traces,\" visible proof that every oscillation leaves a persistent mark in the field topology. Field lines curve through the layers, each thread labeled with mathematical notation suggesting measurement. Cross-sectional diagrams show how plasma filaments encode information through their magnetic topology—the geometry itself IS the memory storage. The drawing uses clean technical linework with purple highlighting at key resonance nodes where information concentrates. Include measurement scales, coordinate systems, and density gradients that would appear in a peer-reviewed physics paper. Black and white with purple accents. The style is rigorous technical illustration—no mysticism, pure plasma physics rendered visible. The composition proves: memory is encoded in plasma's electromagnetic topology; information persists as standing wave geometry; measurement is possible."
+kind = "image"
+tag = "ANNA"
+artist = "Anna"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/c66e2c8940b09581e84f4627c36485dd66945dd2e4b47440e6a9738e86ea1de2.jpg"
+cache = true

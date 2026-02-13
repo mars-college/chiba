@@ -2,7 +2,7 @@ id = "pl-chebel"
 name = "Chebel playlist"
 
 [[item]]
-playlist = "pl-chebel-a"
-
-[[item]]
-playlist = "pl-chebel-b"
+media = "m-under-construction-stryve"
+duration_slots = 1
+title = "Under Construction"
+tag = "UNDER-CONSTRUCTION"

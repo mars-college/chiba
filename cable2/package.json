@@ -8,6 +8,8 @@
     "typecheck": "pnpm -r typecheck",
     "dev:local": "node ./dev-local.mjs",
     "dev:local:prod": "bash -lc 'set -a; source ./.env.pis.prod; set +a; node ./dev-local.mjs'",
+    "prod:deploy": "bash ./scripts/prod/deploy.sh",
+    "bootstrap:all": "bash ./scripts/pis/bootstrap-all.sh",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",

@@ -95,6 +95,7 @@ import { useArtViewStore } from "./store/useArtViewStore";
 import { useGuideViewStore } from "./store/useGuideViewStore";
 import { useRemoteViewStore } from "./store/useRemoteViewStore";
 import type {
+  CacheWarmStatus,
   DisplaySettings,
   GuideChannel,
   GuideIndex,
@@ -133,6 +134,53 @@ type CatalogPayload = {
     channels?: any[];
   };
 };
+
+type CacheStatusPayload = {
+  ok?: boolean;
+  cached?: number;
+  total?: number;
+};
+
+function parseNonNegativeNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value < 0) return null;
+  return Math.floor(value);
+}
+
+function buildCacheWarmStatus(args: {
+  target: RuntimeTarget;
+  cache: CacheStatusPayload | null;
+  stash: CacheStatusPayload | null;
+}): CacheWarmStatus | null {
+  const cacheTotal = parseNonNegativeNumber(args.cache?.total);
+  const cacheCached = parseNonNegativeNumber(args.cache?.cached);
+  const stashTotal = parseNonNegativeNumber(args.stash?.total);
+  const stashCached = parseNonNegativeNumber(args.stash?.cached);
+  const hasCache = cacheTotal !== null;
+  const hasStash = stashTotal !== null;
+  if (!hasCache && !hasStash) return null;
+
+  const source: CacheWarmStatus["source"] =
+    hasCache && hasStash ? "mixed" : hasStash ? "stash" : "cache";
+  const total = (cacheTotal ?? 0) + (stashTotal ?? 0);
+  const cached = (cacheCached ?? 0) + (stashCached ?? 0);
+  const complete = total > 0 && cached >= total;
+  const targetLabel = `${args.target.kind}:${args.target.id}`;
+
+  const detailParts: string[] = [];
+  if (hasStash) detailParts.push(`stash ${stashCached ?? 0}/${stashTotal ?? 0}`);
+  if (hasCache) detailParts.push(`remote ${cacheCached ?? 0}/${cacheTotal ?? 0}`);
+
+  return {
+    target: targetLabel,
+    source,
+    label: complete ? "Dependencies Ready" : "Warming Dependencies",
+    detail: detailParts.join(" • "),
+    cached,
+    total,
+    updatedAt: Date.now(),
+  };
+}
 
 function parseRuntimeTargetKind(value: unknown): RuntimeTargetKind | null {
   if (typeof value !== "string") return null;
@@ -716,6 +764,7 @@ function App() {
   const [playerUrl, setPlayerUrl] = useState<string | null>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [playerMeta, setPlayerMeta] = useState<PlayerMeta | null>(null);
+  const [cacheWarmStatus, setCacheWarmStatus] = useState<CacheWarmStatus | null>(null);
   const [showPlayerHud, setShowPlayerHud] = useState(false);
   const [playerChannelIndex, setPlayerChannelIndex] = useState<number | null>(
     null
@@ -824,6 +873,64 @@ function App() {
   useEffect(() => {
     playerUrlRef.current = playerUrl;
   }, [playerUrl]);
+
+  useEffect(() => {
+    if (!playerOpen || playerReady || !runtimeTarget) {
+      setCacheWarmStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    const targetRef = `${runtimeTarget.kind}:${runtimeTarget.id}`;
+
+    const pullStatus = async () => {
+      const fetchStatus = async (kind: "cache" | "stash"): Promise<CacheStatusPayload | null> => {
+        try {
+          const response = await fetch(
+            `/api/${kind}/status?target=${encodeURIComponent(targetRef)}`,
+            { cache: "no-store" }
+          );
+          if (!response.ok) return null;
+          const payload = (await response.json()) as CacheStatusPayload;
+          return payload;
+        } catch {
+          return null;
+        }
+      };
+
+      const [cache, stash] = await Promise.all([
+        fetchStatus("cache"),
+        fetchStatus("stash"),
+      ]);
+      if (cancelled) return;
+      const next = buildCacheWarmStatus({
+        target: runtimeTarget,
+        cache,
+        stash,
+      });
+      if (next) {
+        setCacheWarmStatus(next);
+        return;
+      }
+      setCacheWarmStatus({
+        target: targetRef,
+        source: "mixed",
+        label: "Checking Dependencies",
+        detail: "Waiting for cache + stash status",
+        updatedAt: Date.now(),
+      });
+    };
+
+    void pullStatus();
+    const timer = window.setInterval(() => {
+      void pullStatus();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [playerOpen, playerReady, runtimeTarget?.id, runtimeTarget?.kind]);
 
   useEffect(() => {
     // If a pinned channel was requested, wait briefly for the real index to load
@@ -3385,6 +3492,7 @@ function App() {
       playerUrl,
       playerKind,
       playerMeta,
+      cacheWarmStatus,
       showPlayerHud,
       loopVideo: !(galleryEnabledEffective && playlistEnabledEffective),
       ambientAudio,
@@ -3426,6 +3534,7 @@ function App() {
     playerUrl,
     playerKind,
     playerMeta,
+    cacheWarmStatus,
     showPlayerHud,
     playlistEnabledEffective,
     ambientAudio,

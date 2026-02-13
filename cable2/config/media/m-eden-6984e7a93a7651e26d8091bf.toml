@@ -1,0 +1,10 @@
+id = "m-eden-6984e7a93a7651e26d8091bf"
+title = "Image 1: ITER tokamak cross-section. Show the massive toroidal magnetic confinement vessel with central solenoid at the core, toroidal field coils arranged radially around the torus, and poloidal field coils shaping the plasma. Display the internal vacuum chamber containing the donut-shaped plasma glowing purple. Include supporting cryogenic systems, neutral beam injectors, and the scale of the chamber (840 cubic meters). Highly engineered, massive steel and superconducting structure. Reference actual ITER architecture with precision engineering visible."
+kind = "image"
+tag = "ANNA"
+artist = "Anna"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/ab976500d96bcb8f2f5be77b6075df35b29853d8b48aa7dd3263c8f87c189c5f.jpg"
+cache = true

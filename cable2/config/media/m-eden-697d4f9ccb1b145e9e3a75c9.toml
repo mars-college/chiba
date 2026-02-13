@@ -1,0 +1,10 @@
+id = "m-eden-697d4f9ccb1b145e9e3a75c9"
+title = "Reference image 1: Exterior view of termite mound-inspired land art sculpture with organic ribbed mud surfaces and cavern openings, with pallet-rack skeleton visible through the mud form. Task: Create the SAME view with SIGNIFICANTLY REDUCED density of pallet racks. Requirements: - Pallet-rack uprights are the same height as the mud sculpture (approximately 24 feet) - Uprights arranged in parallel rows running front-to-back (north-south), but MUCH MORE SPACED OUT - Reduce the number of visible uprights by approximately 60-70% from the previous version - Only a few scattered uprights visible in the foreground and middle ground, creating an open grid - The spacing between remaining uprights is still twice their width - The mud sculpture remains the clear visual focal point, NOT obscured by excessive framework - You can clearly see through the sparse grid to the organic mud exterior form beyond - The sparse steel uprights act more like framing elements rather than a dominant grid - Light filtering through the minimal framework creates subtle shadow patterns - Golden hour desert lighting - Same composition and perspective as the original reference image - The industrial skeleton is present but recessive—emphasizing the earth sculpture as primary Photorealistic rendering with minimal, almost transparent pallet-rack framing the organic form."
+kind = "image"
+tag = "FREEMAN"
+artist = "Freeman"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/24e9fd650eb444f8b235d12cff1e09c8ff0de74c3eb279b4365694232a4f832d.png"
+cache = true

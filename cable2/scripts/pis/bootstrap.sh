@@ -366,7 +366,27 @@ KIOSK_URL="http://localhost:${GUIDE_PORT}/?screenId=${NODE_NAME}"
 printf "\nSyncing repo to %s...\n" "$SSH_TARGET"
 "${SSH_BASE[@]}" "$SSH_TARGET" "mkdir -p $REMOTE_DIR"
 
-RSYNC_ARGS=(-az --delete)
+# Cleanup stale legacy directories from older app layouts (best effort).
+# This prevents noisy rsync delete failures and stale code shadowing.
+"${SSH_BASE[@]}" "$SSH_TARGET" "bash -lc '
+set -e
+rm -rf \"$REMOTE_DIR/cable\" \
+       \"$REMOTE_DIR/packages/controller\" \
+       \"$REMOTE_DIR/packages/dashboard\" \
+       \"$REMOTE_DIR/packages/node\" \
+       \"$REMOTE_DIR/packages/player\" \
+       \"$REMOTE_DIR/packages/shared\" 2>/dev/null || true
+if command -v sudo >/dev/null 2>&1; then
+  sudo rm -rf \"$REMOTE_DIR/cable\" \
+             \"$REMOTE_DIR/packages/controller\" \
+             \"$REMOTE_DIR/packages/dashboard\" \
+             \"$REMOTE_DIR/packages/node\" \
+             \"$REMOTE_DIR/packages/player\" \
+             \"$REMOTE_DIR/packages/shared\" 2>/dev/null || true
+fi
+'"
+
+RSYNC_ARGS=(-az --delete --force)
 if [ "$RSYNC_PROGRESS" -eq 1 ]; then
   # macOS ships an ancient rsync (2.6.x) that doesn't support --info=progress2.
   # Use progress2 only on rsync 3+.
@@ -502,10 +522,13 @@ if [ "${PNPM_MAJOR:-0}" -lt 9 ]; then
 fi
 
 echo "Installing workspace dependencies..."
-if ! pnpm -C "$REMOTE_DIR" install --no-frozen-lockfile; then
+# Some Pi images export NODE_ENV=production globally, which causes pnpm to
+# skip devDependencies and breaks TypeScript builds (tsc missing). Force dev
+# deps for bootstrap builds.
+if ! CI=1 NODE_ENV=development pnpm -C "$REMOTE_DIR" install --force --no-frozen-lockfile --prod=false; then
   echo "pnpm install failed once; retrying..."
   sleep 2
-  pnpm -C "$REMOTE_DIR" install --no-frozen-lockfile
+  CI=1 NODE_ENV=development pnpm -C "$REMOTE_DIR" install --force --no-frozen-lockfile --prod=false
 fi
 
 echo "Building runtime targets..."
@@ -517,6 +540,20 @@ pnpm -C "$REMOTE_DIR/apps/server" build
 pnpm -C "$REMOTE_DIR/apps/guide" build
 pnpm -C "$REMOTE_DIR/apps/ops" build
 pnpm -C "$REMOTE_DIR/packages/node-agent" build
+echo "Build step complete."
+
+if [ ! -f "$REMOTE_DIR/apps/server/dist/index.js" ]; then
+  echo "server build artifact missing: $REMOTE_DIR/apps/server/dist/index.js"
+  exit 1
+fi
+if [ ! -f "$REMOTE_DIR/packages/node-agent/dist/index.js" ]; then
+  echo "node-agent build artifact missing: $REMOTE_DIR/packages/node-agent/dist/index.js"
+  exit 1
+fi
+if [ ! -f "$REMOTE_DIR/apps/guide/dist/index.html" ]; then
+  echo "guide build artifact missing: $REMOTE_DIR/apps/guide/dist/index.html"
+  exit 1
+fi
 
 # Ensure we always have a Wi-Fi/network watchdog on nodes.
 if [ ! -x "$REMOTE_DIR/scripts/network-watchdog.sh" ]; then
@@ -974,6 +1011,10 @@ RestartSec=2
 WantedBy=multi-user.target
 SERVICE
 
+# Drop stale kiosk overrides from previous installs (they may point to
+# ./scripts/run-kiosk.sh or old runtime dirs).
+sudo rm -rf /etc/systemd/system/chiba-kiosk.service.d >/dev/null 2>&1 || true
+
 sudo tee /etc/systemd/system/chiba-kiosk.service > /dev/null <<SERVICE
 [Unit]
 Description=Chiba Kiosk Display
@@ -1015,10 +1056,16 @@ sudo systemctl daemon-reload
 sudo systemctl stop chiba-kiosk >/dev/null 2>&1 || true
 sudo systemctl reset-failed chiba-kiosk >/dev/null 2>&1 || true
 sudo systemctl enable --now chiba-cable-server chiba-cable-guide chiba-cable2-node-agent chiba-kiosk
+
+echo "Checking service activation..."
+sudo systemctl is-active --quiet chiba-cable-server
+sudo systemctl is-active --quiet chiba-cable-guide
+sudo systemctl is-active --quiet chiba-cable2-node-agent
 if ! sudo systemctl is-active --quiet chiba-kiosk; then
   echo "kiosk service is not active; printing recent logs for debugging..."
   sudo systemctl status --no-pager -l chiba-kiosk || true
   sudo journalctl -u chiba-kiosk -n 80 --no-pager || true
+  exit 1
 fi
 
 # Ensure node server is running before kiosk URL update
@@ -1030,6 +1077,12 @@ for i in {1..20}; do
   fi
   sleep 1
 done
+if ! curl -s "http://localhost:$NODE_PORT/health" >/dev/null 2>&1; then
+  echo "node agent health endpoint did not become ready on port $NODE_PORT"
+  sudo systemctl status --no-pager -l chiba-cable2-node-agent || true
+  sudo journalctl -u chiba-cable2-node-agent -n 80 --no-pager || true
+  exit 1
+fi
 
 # NAS mount (optional)
 if [ -n "$NAS_HOST" ] && [ -n "$NAS_USER" ] && [ -n "$NAS_PASSWORD" ]; then
@@ -1097,7 +1150,7 @@ esac
 
 if [ "$REBOOT_AFTER" -eq 1 ]; then
   echo "Rebooting $NODE_NAME..."
-  sudo reboot
+  sudo nohup bash -lc "sleep 1; systemctl reboot || reboot" >/dev/null 2>&1 &
 fi
 
 echo "Bootstrap complete on $NODE_NAME"

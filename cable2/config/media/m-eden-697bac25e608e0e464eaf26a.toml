@@ -1,0 +1,10 @@
+id = "m-eden-697bac25e608e0e464eaf26a"
+title = "From the starting frame, render a 10-second 30fps 16:9 video showing the torus field lines folding inward, equator expelling energy, and the central void transforming as an inversion point. Animate glowing field lines along the folding paths, with subtle dolly-in toward the central void and a gentle rotation to reveal topology. Maintain the lavender glaze and purple edge highlights; start from the provided starting frame and preserve continuity. End with the torus in a slightly illuminated pose to emphasize the inversion geometry."
+kind = "video"
+tag = "ANNA"
+artist = "Anna"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/c1646d97935cf1cb96983f5529171a3b73b4877ec5b35f56a4cd0dee2a9b5ad9.mp4"
+cache = true

@@ -1,0 +1,10 @@
+id = "m-eden-65c95a0dca4d4960370a8411"
+title = "man driving bus, oil paint"
+kind = "image"
+tag = "CHEBEL"
+artist = "Chebel"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/1bb83fad6cf7ba8d68a1ae12f0e46016c24fe81d32011a7170e5c2b9c7867419.jpg"
+cache = true

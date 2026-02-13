@@ -1,0 +1,44 @@
+id = "pl-alicia"
+name = "Alicia playlist"
+
+[[item]]
+media = "m-eden-creation-aliciasadventuresreference-image-1-base-portrait-with-vibrant-neon-purple-magen698410a0d626a0e05d6811c1-eace6a5c69"
+duration_slots = 1
+title = "Eden creation aliciasadventuresReference Image 1 base portrait with vibrant neon purple magen698410a0d626a0e05d6811c1"
+tag = "ALICIA"
+
+[[item]]
+media = "m-eden-creation-aliciasadventuresreference-image-1-cosmic-butterfly-garden-composition-prese698102805f5a3983a319816b-f4ec1bf278"
+duration_slots = 1
+title = "Eden creation aliciasadventuresReference Image 1 cosmic butterfly garden composition prese698102805f5a3983a319816b"
+tag = "ALICIA"
+
+[[item]]
+media = "m-eden-creation-aliciasadventuresreference-image-1-illustration-of-purple-and-pink-mushrooms-s69810c220d8388d2d659554c-58e6902d90"
+duration_slots = 1
+title = "Eden creation aliciasadventuresReference Image 1 illustration of purple and pink mushrooms s69810c220d8388d2d659554c"
+tag = "ALICIA"
+
+[[item]]
+media = "m-eden-creation-aliciasadventuresreference-image-1-static-illustration-of-a-vibrant-pink-and-g698106260d8388d2d659553b-8c99e03824"
+duration_slots = 1
+title = "Eden creation aliciasadventuresReference Image 1 static illustration of a vibrant pink and g698106260d8388d2d659553b"
+tag = "ALICIA"
+
+[[item]]
+media = "m-eden-creation-aliciasadventuresreferences-image-1-character-portrait-with-purple-psychedeli6983e9fa6188afe30d555c90-e64c30d22f"
+duration_slots = 1
+title = "Eden creation aliciasadventuresReferences Image 1 character portrait with purple psychedeli6983e9fa6188afe30d555c90"
+tag = "ALICIA"
+
+[[item]]
+media = "m-eden-creation-aliciasadventuresreferences-image-1-original-illustration-with-open-windows-f6983c3eb6188afe30d555c60-e6e2d33b8a"
+duration_slots = 1
+title = "Eden creation aliciasadventuresReferences Image 1 original illustration with open windows f6983c3eb6188afe30d555c60"
+tag = "ALICIA"
+
+[[item]]
+media = "m-make-my-art-more-trippy-5fa33825ca"
+duration_slots = 1
+title = "Make my art more trippy"
+tag = "ALICIA"

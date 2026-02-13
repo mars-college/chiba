@@ -1,0 +1,10 @@
+id = "m-eden-6984e7ae3a7651e26d8091c0"
+title = "Image 3: SPARC tokamak (Commonwealth Fusion Systems) compact high-field design. Show the smaller, more efficient tokamak with D-shaped toroidal field magnets, vacuum vessel, central solenoid, and cryogenic base. Display high-temperature superconducting (HTS) magnets—these are fundamentally different from older designs and enable much stronger fields in a compact form. Include the 75-ton cryostat base, supporting infrastructure, and purple glowing plasma confined magnetically. Reference the actual design currently under construction in Devens, Massachusetts."
+kind = "image"
+tag = "ANNA"
+artist = "Anna"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/9ff171893bdef0607d25893a1e8e8270c68d146e1ea773826ea1b63e26a53cf5.jpg"
+cache = true

@@ -27,6 +27,7 @@ type Flags = {
   execute: boolean;
   fetch: boolean;
   nodes: string[];
+  envFiles: string[];
   registryPath?: string;
   registryLocalPath?: string | null;
   timeoutMs: number;
@@ -60,6 +61,7 @@ Usage:
   chiba apply <target> <id> [--nodes a,b] [--dry-run] [--execute] [--timeout-ms N] [--control-plane URL] [--json]
   chiba diff <target> <id> [--nodes a,b] [--fetch] [--timeout-ms N] [--json]
   chiba prepare profile <id> [--write] [--continue-on-error] [--json]
+  chiba compile profile <id> [--json]
   chiba import dir <path> --playlist-id <id> [--playlist-title <title>] [--tag <tag>] [--cache] [--write] [--channel-id <id>] [--channel-name <name>] [--channel-number <num>]
   chiba import eden-collection <url-or-id> --playlist-id <id> [--playlist-title <title>] [--tag <tag>] [--db PROD|STAGE] [--cache] [--write] [--channel-id <id>] [--channel-name <name>] [--channel-number <num>]
 
@@ -77,6 +79,7 @@ Registry flags:
 Global flags:
   --json
   --limit N
+  --env-file PATH   Load env file (can be passed multiple times)
 `);
 }
 
@@ -122,6 +125,7 @@ function parseArgs(argv: string[]): { command: string | null; rest: string[]; fl
     execute: false,
     fetch: false,
     nodes: [],
+    envFiles: [],
     timeoutMs: 2500,
     limit: 200,
   };
@@ -157,6 +161,19 @@ function parseArgs(argv: string[]): { command: string | null; rest: string[]; fl
     }
     if (arg === "--fetch") {
       flags.fetch = true;
+      continue;
+    }
+    if (arg === "--env-file") {
+      const value = argv[i + 1];
+      i += 1;
+      if (typeof value === "string" && value.trim()) {
+        flags.envFiles.push(value.trim());
+      }
+      continue;
+    }
+    if (arg.startsWith("--env-file=")) {
+      const value = arg.slice("--env-file=".length).trim();
+      if (value) flags.envFiles.push(value);
       continue;
     }
     if (arg === "--nodes") {
@@ -238,6 +255,80 @@ function parseArgs(argv: string[]): { command: string | null; rest: string[]; fl
   }
 
   return { command, rest, flags };
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function loadEnvFileIfPresent(filePath: string): Promise<boolean> {
+  let raw = "";
+  try {
+    raw = await fs.readFile(filePath, "utf-8");
+  } catch {
+    return false;
+  }
+  for (const line of raw.split("\n")) {
+    const s = line.trim();
+    if (!s || s.startsWith("#")) continue;
+    const m = s.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!m) continue;
+    const key = m[1] ?? "";
+    if (!key) continue;
+    let value = (m[2] ?? "").trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+  return true;
+}
+
+async function loadCliEnv(flags: Flags): Promise<void> {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const cableRoot = path.resolve(moduleDir, "../../..");
+  const repoRoot = path.resolve(cableRoot, "..");
+  const defaults = [
+    path.join(repoRoot, ".env"),
+    path.join(cableRoot, ".env"),
+    path.join(cableRoot, ".env.pis.local"),
+    path.join(cableRoot, ".env.pis.prod"),
+    path.join(repoRoot, "scripts", "pis", ".env.pis.local"),
+  ];
+  const explicit: string[] = [];
+  for (const file of flags.envFiles) {
+    const candidates = path.isAbsolute(file)
+      ? [file]
+      : [
+          path.resolve(process.cwd(), file),
+          path.resolve(repoRoot, file),
+          path.resolve(cableRoot, file),
+        ];
+    let picked: string | null = null;
+    for (const candidate of candidates) {
+      if (await fileExists(candidate)) {
+        picked = candidate;
+        break;
+      }
+    }
+    const firstCandidate = candidates[0] ?? file;
+    explicit.push(picked ?? firstCandidate);
+  }
+
+  const files = Array.from(new Set([...defaults, ...explicit]));
+  for (const file of files) {
+    await loadEnvFileIfPresent(file);
+  }
 }
 
 function printOutput(value: unknown, json: boolean): void {
@@ -1557,54 +1648,139 @@ async function edenApiGetJson(args: {
   }
 }
 
-function parseEdenCollection(raw: unknown): EdenCollection | null {
-  const data = recordOrNull(raw);
-  if (!data) return null;
-  const id = stringOrNull(data._id) ?? stringOrNull(data.id);
-  if (!id) return null;
-  const name = cleanInlineText(stringOrNull(data.name) ?? stringOrNull(data.title)) ?? id;
-  const description = cleanInlineText(stringOrNull(data.description) ?? undefined) ?? undefined;
-  const user = recordOrNull(data.user);
-  const author =
-    cleanInlineText(stringOrNull(user?.username) ?? stringOrNull(user?.name) ?? undefined) ?? undefined;
-  const out: EdenCollection = { id, name };
-  if (description !== undefined) out.description = description;
-  if (author !== undefined) out.author = author;
-  return out;
+function parseEdenCollection(raw: unknown, fallbackId?: string): EdenCollection | null {
+  const root = recordOrNull(raw);
+  if (!root) return null;
+  const candidates: Record<string, unknown>[] = [];
+  const pushCandidate = (value: unknown) => {
+    const rec = recordOrNull(value);
+    if (!rec) return;
+    candidates.push(rec);
+  };
+
+  pushCandidate(root);
+  pushCandidate(root.collection);
+  pushCandidate(root.data);
+  pushCandidate(root.doc);
+  pushCandidate(root.result);
+  pushCandidate(root.item);
+  pushCandidate(root.payload);
+  const dataObj = recordOrNull(root.data);
+  if (dataObj) {
+    pushCandidate(dataObj.collection);
+    pushCandidate(dataObj.item);
+    pushCandidate(dataObj.doc);
+  }
+
+  for (const data of candidates) {
+    const id = stringOrNull(data._id) ?? stringOrNull(data.id) ?? fallbackId ?? null;
+    const name =
+      cleanInlineText(
+        stringOrNull(data.name) ??
+          stringOrNull(data.title) ??
+          stringOrNull(recordOrNull(data.metadata)?.name) ??
+          undefined
+      ) ??
+      id;
+    if (!id || !name) continue;
+    const description =
+      cleanInlineText(
+        stringOrNull(data.description) ??
+          stringOrNull(recordOrNull(data.metadata)?.description) ??
+          undefined
+      ) ?? undefined;
+    const user = recordOrNull(data.user);
+    const author =
+      cleanInlineText(
+        stringOrNull(user?.username) ??
+          stringOrNull(user?.name) ??
+          stringOrNull(data.author) ??
+          undefined
+      ) ?? undefined;
+    const out: EdenCollection = { id, name };
+    if (description !== undefined) out.description = description;
+    if (author !== undefined) out.author = author;
+    return out;
+  }
+  return null;
 }
 
 function parseEdenCreation(raw: unknown): EdenCreation | null {
   const wrapper = recordOrNull(raw);
-  const data = recordOrNull(wrapper?.creation) ?? wrapper;
-  if (!data) return null;
-  const id = stringOrNull(data._id) ?? stringOrNull(data.id);
-  const url = stringOrNull(data.url);
-  if (!id || !url) return null;
-
-  const user = recordOrNull(data.user);
-  const mediaAttributes = recordOrNull(data.mediaAttributes);
-  const out: EdenCreation = {
-    id,
-    url,
+  if (!wrapper) return null;
+  const candidates: Record<string, unknown>[] = [];
+  const pushCandidate = (value: unknown) => {
+    const rec = recordOrNull(value);
+    if (!rec) return;
+    candidates.push(rec);
   };
-  const title =
-    cleanInlineText(
-      stringOrNull(data.name) ??
-        stringOrNull(data.title) ??
-        stringOrNull(data.filename) ??
-        undefined
-    ) ?? undefined;
-  const filename = cleanInlineText(stringOrNull(data.filename) ?? undefined) ?? undefined;
-  const author =
-    cleanInlineText(
-      stringOrNull(user?.username) ?? stringOrNull(user?.name) ?? undefined
-    ) ?? undefined;
-  const mimeType = cleanInlineText(stringOrNull(mediaAttributes?.mimeType) ?? undefined) ?? undefined;
-  if (title !== undefined) out.title = title;
-  if (filename !== undefined) out.filename = filename;
-  if (author !== undefined) out.author = author;
-  if (mimeType !== undefined) out.mimeType = mimeType;
-  return out;
+
+  pushCandidate(wrapper);
+  pushCandidate(wrapper.creation);
+  pushCandidate(wrapper.data);
+  pushCandidate(wrapper.item);
+  pushCandidate(wrapper.doc);
+  const dataObj = recordOrNull(wrapper.data);
+  if (dataObj) {
+    pushCandidate(dataObj.creation);
+    pushCandidate(dataObj.item);
+  }
+
+  for (const data of candidates) {
+    const id = stringOrNull(data._id) ?? stringOrNull(data.id);
+    const mediaAttributes = recordOrNull(data.mediaAttributes);
+    const url =
+      stringOrNull(data.url) ??
+      stringOrNull(recordOrNull(data.media)?.url) ??
+      stringOrNull(recordOrNull(data.asset)?.url);
+    if (!id || !url) continue;
+
+    const user = recordOrNull(data.user);
+    const out: EdenCreation = {
+      id,
+      url,
+    };
+    const title =
+      cleanInlineText(
+        stringOrNull(data.name) ??
+          stringOrNull(data.title) ??
+          stringOrNull(data.filename) ??
+          undefined
+      ) ?? undefined;
+    const filename = cleanInlineText(stringOrNull(data.filename) ?? undefined) ?? undefined;
+    const author =
+      cleanInlineText(
+        stringOrNull(user?.username) ?? stringOrNull(user?.name) ?? undefined
+      ) ?? undefined;
+    const mimeType = cleanInlineText(stringOrNull(mediaAttributes?.mimeType) ?? undefined) ?? undefined;
+    if (title !== undefined) out.title = title;
+    if (filename !== undefined) out.filename = filename;
+    if (author !== undefined) out.author = author;
+    if (mimeType !== undefined) out.mimeType = mimeType;
+    return out;
+  }
+  return null;
+}
+
+function hasNextPageInEdenPayload(raw: Record<string, unknown>): boolean {
+  if (raw.hasNextPage === true || raw.has_more === true || raw.hasMore === true) {
+    return true;
+  }
+  const page = typeof raw.page === "number" ? raw.page : Number(raw.page);
+  const totalPages =
+    typeof raw.totalPages === "number"
+      ? raw.totalPages
+      : typeof raw.pages === "number"
+        ? raw.pages
+        : Number(raw.totalPages ?? raw.pages);
+  if (Number.isFinite(page) && Number.isFinite(totalPages) && page < totalPages) {
+    return true;
+  }
+  const nextPage =
+    typeof raw.nextPage === "number"
+      ? raw.nextPage
+      : Number(raw.nextPage);
+  return Number.isFinite(nextPage) && nextPage > 0;
 }
 
 function extractCreationId(row: unknown): string | null {
@@ -1630,9 +1806,13 @@ async function fetchEdenCollectionData(args: {
     apiKey: args.apiKey,
     endpointPath: `/v2/collections/${args.collectionId}`,
   });
-  const collection = parseEdenCollection(collectionRaw);
+  const collection = parseEdenCollection(collectionRaw, args.collectionId);
   if (!collection) {
-    throw new Error(`Could not parse Eden collection payload for ${args.collectionId}`);
+    const root = recordOrNull(collectionRaw);
+    const rootKeys = root ? Object.keys(root).slice(0, 16).join(",") : typeof collectionRaw;
+    throw new Error(
+      `Could not parse Eden collection payload for ${args.collectionId} (shape=${rootKeys || "unknown"})`
+    );
   }
 
   const creationIds: string[] = [];
@@ -1644,12 +1824,22 @@ async function fetchEdenCollectionData(args: {
       endpointPath: `/v2/collections/${args.collectionId}/creations?page=${page}&limit=100`,
     });
     const pageObj = recordOrNull(pageRaw);
-    const docs = Array.isArray(pageObj?.docs) ? pageObj.docs : [];
+    const docs = Array.isArray(pageObj?.docs)
+      ? pageObj.docs
+      : Array.isArray(pageObj?.items)
+        ? pageObj.items
+        : Array.isArray(recordOrNull(pageObj?.data)?.docs)
+          ? (recordOrNull(pageObj?.data)?.docs as unknown[])
+          : Array.isArray(recordOrNull(pageObj?.data)?.items)
+            ? (recordOrNull(pageObj?.data)?.items as unknown[])
+            : Array.isArray(pageRaw)
+              ? pageRaw
+              : [];
     for (const doc of docs) {
       const id = extractCreationId(doc);
       if (id) creationIds.push(id);
     }
-    const hasNextPage = pageObj?.hasNextPage === true;
+    const hasNextPage = pageObj ? hasNextPageInEdenPayload(pageObj) : false;
     if (!hasNextPage) break;
     page += 1;
     if (page > 2000) {
@@ -2248,6 +2438,7 @@ async function cmdImportEdenCollection(
     options.edenApiKey ??
     process.env.EDEN_API_KEY ??
     process.env.CHIBA_EDEN_API_KEY ??
+    process.env.CHIBA_EDEN_KEY ??
     ""
   ).trim();
   if (!apiKey) {
@@ -2482,6 +2673,14 @@ type PrepareProfileOptions = {
   continueOnError: boolean;
 };
 
+const UNDER_CONSTRUCTION_MEDIA_ID = "m-under-construction-stryve";
+const UNDER_CONSTRUCTION_PLAYLIST_ID = "pl-under-construction";
+const UNDER_CONSTRUCTION_ASSET_FILE =
+  "How to make a fly 90s website A GeoCities tribute  Stryve.gif";
+const UNDER_CONSTRUCTION_ASSET_URL = `http://localhost:8787/assets-local/${encodeURIComponent(
+  UNDER_CONSTRUCTION_ASSET_FILE
+)}`;
+
 function parsePrepareProfileOptions(rest: string[]): PrepareProfileOptions {
   if ((rest[0] ?? "") !== "profile") {
     throw new Error("prepare supports: chiba prepare profile <id> [--write]");
@@ -2508,13 +2707,264 @@ function parsePrepareProfileOptions(rest: string[]): PrepareProfileOptions {
   return { profileId, write, continueOnError };
 }
 
+function parseCompileProfileOptions(rest: string[]): PrepareProfileOptions {
+  if ((rest[0] ?? "") !== "profile") {
+    throw new Error("compile supports: chiba compile profile <id>");
+  }
+  const profileId = (rest[1] ?? "").trim();
+  if (!profileId) {
+    throw new Error("Missing profile id: chiba compile profile <id>");
+  }
+
+  let write = true;
+  let continueOnError = true;
+  for (let i = 2; i < rest.length; i += 1) {
+    const arg = (rest[i] ?? "").trim();
+    if (arg === "--no-write") {
+      write = false;
+      continue;
+    }
+    if (arg === "--write") {
+      write = true;
+      continue;
+    }
+    if (arg === "--stop-on-error") {
+      continueOnError = false;
+      continue;
+    }
+    if (arg === "--continue-on-error") {
+      continueOnError = true;
+      continue;
+    }
+  }
+  return { profileId, write, continueOnError };
+}
+
 function pushImportArg(parts: string[], flag: string, value: string | undefined): void {
   if (!value) return;
   parts.push(flag, value);
 }
 
-async function cmdPrepare(rest: string[], flags: Flags): Promise<void> {
-  const options = parsePrepareProfileOptions(rest);
+function mergeProfileModes(
+  defaults: Record<string, unknown> | undefined,
+  override: Record<string, unknown> | undefined
+): Record<string, unknown> {
+  return { ...(defaults ?? {}), ...(override ?? {}) };
+}
+
+function collectProfilePlaylistTargetIds(profile: {
+  defaults?: Record<string, unknown>;
+  pis?: Record<string, Record<string, unknown>>;
+}): string[] {
+  const out = new Set<string>();
+  const collectFromMode = (mode: Record<string, unknown> | undefined) => {
+    if (!mode) return;
+    const targetKind = typeof mode.target_kind === "string" ? mode.target_kind.trim() : "";
+    const targetId = typeof mode.target_id === "string" ? mode.target_id.trim() : "";
+    if (targetKind === "playlist" && targetId) out.add(targetId);
+    const prefetchTargets = Array.isArray(mode.prefetch_targets) ? mode.prefetch_targets : [];
+    for (const tokenRaw of prefetchTargets) {
+      if (typeof tokenRaw !== "string") continue;
+      const token = tokenRaw.trim();
+      if (!token) continue;
+      const idx = token.indexOf(":");
+      if (idx <= 0) continue;
+      const kind = token.slice(0, idx).trim().toLowerCase();
+      const id = token.slice(idx + 1).trim();
+      if (kind === "playlist" && id) out.add(id);
+    }
+  };
+
+  collectFromMode(profile.defaults);
+  const pis = profile.pis ?? {};
+  for (const override of Object.values(pis)) {
+    collectFromMode(mergeProfileModes(profile.defaults, override));
+  }
+  return Array.from(out).sort();
+}
+
+function playlistHasPlayableContent(
+  store: {
+    playlistsById: Record<string, { items?: Array<{ media?: string; playlist?: string; source?: { value?: string } }> }>;
+    mediaById: Record<string, { source?: { value?: string } }>;
+  },
+  playlistId: string,
+  visiting: Set<string> = new Set<string>()
+): boolean {
+  const id = String(playlistId ?? "").trim();
+  if (!id) return false;
+  if (visiting.has(id)) return false;
+  const playlist = store.playlistsById[id];
+  if (!playlist) return false;
+  const items = Array.isArray(playlist.items) ? playlist.items : [];
+  if (!items.length) return false;
+
+  visiting.add(id);
+  for (const item of items) {
+    if (item?.source?.value && String(item.source.value).trim()) {
+      visiting.delete(id);
+      return true;
+    }
+    const mediaId = typeof item?.media === "string" ? item.media.trim() : "";
+    if (mediaId) {
+      const media = store.mediaById[mediaId];
+      if (media?.source?.value && String(media.source.value).trim()) {
+        visiting.delete(id);
+        return true;
+      }
+    }
+    const nestedPlaylist = typeof item?.playlist === "string" ? item.playlist.trim() : "";
+    if (nestedPlaylist && playlistHasPlayableContent(store, nestedPlaylist, visiting)) {
+      visiting.delete(id);
+      return true;
+    }
+  }
+  visiting.delete(id);
+  return false;
+}
+
+async function ensureUnderConstructionArtifacts(args: {
+  configRoot: string;
+  write: boolean;
+}): Promise<{
+  missingCount: number;
+  writes: number;
+  actions: Array<Record<string, unknown>>;
+}> {
+  const actions: Array<Record<string, unknown>> = [];
+  let missingCount = 0;
+  let writes = 0;
+  const mediaPath = path.join(args.configRoot, "media", `${UNDER_CONSTRUCTION_MEDIA_ID}.toml`);
+  const playlistPath = path.join(args.configRoot, "playlists", `${UNDER_CONSTRUCTION_PLAYLIST_ID}.toml`);
+
+  const mediaExists = await fs
+    .access(mediaPath)
+    .then(() => true)
+    .catch(() => false);
+  if (!mediaExists) {
+    missingCount += 1;
+  }
+  if (args.write) {
+    await fs.mkdir(path.dirname(mediaPath), { recursive: true });
+    await fs.writeFile(
+      mediaPath,
+      buildMediaToml({
+        id: UNDER_CONSTRUCTION_MEDIA_ID,
+        title: "Under Construction",
+        sourceType: "url",
+        sourceValue: UNDER_CONSTRUCTION_ASSET_URL,
+        cache: false,
+        kind: "image",
+        tag: "UNDER-CONSTRUCTION",
+      }),
+      "utf-8"
+    );
+    writes += 1;
+    actions.push({
+      kind: "media",
+      id: UNDER_CONSTRUCTION_MEDIA_ID,
+      action: mediaExists ? "updated" : "created",
+    });
+  } else if (!mediaExists) {
+    actions.push({ kind: "media", id: UNDER_CONSTRUCTION_MEDIA_ID, action: "missing" });
+  }
+
+  const playlistExists = await fs
+    .access(playlistPath)
+    .then(() => true)
+    .catch(() => false);
+  if (!playlistExists) {
+    missingCount += 1;
+  }
+  if (args.write) {
+    await fs.mkdir(path.dirname(playlistPath), { recursive: true });
+    await fs.writeFile(
+      playlistPath,
+      buildPlaylistToml({
+        id: UNDER_CONSTRUCTION_PLAYLIST_ID,
+        title: "Under Construction",
+        items: [{ mediaId: UNDER_CONSTRUCTION_MEDIA_ID, title: "Under Construction" }],
+        tag: "UNDER-CONSTRUCTION",
+      }),
+      "utf-8"
+    );
+    writes += 1;
+    actions.push({
+      kind: "playlist",
+      id: UNDER_CONSTRUCTION_PLAYLIST_ID,
+      action: playlistExists ? "updated" : "created",
+    });
+  } else if (!playlistExists) {
+    actions.push({
+      kind: "playlist",
+      id: UNDER_CONSTRUCTION_PLAYLIST_ID,
+      action: "missing",
+    });
+  }
+
+  return { missingCount, writes, actions };
+}
+
+async function ensureProfileTargetFallbackPlaylists(args: {
+  store: Awaited<ReturnType<typeof loadResourceStore>>;
+  profileId: string;
+  write: boolean;
+}): Promise<{
+  missingCount: number;
+  writes: number;
+  actions: Array<Record<string, unknown>>;
+}> {
+  const profile = args.store.profilesById[args.profileId];
+  if (!profile) throw new Error(`Unknown profile id: ${args.profileId}`);
+
+  const targetPlaylistIds = collectProfilePlaylistTargetIds(profile as any);
+  let missingCount = 0;
+  let writes = 0;
+  const actions: Array<Record<string, unknown>> = [];
+
+  for (const playlistId of targetPlaylistIds) {
+    if (playlistId === UNDER_CONSTRUCTION_PLAYLIST_ID) continue;
+    const playlist = args.store.playlistsById[playlistId];
+    const playable = playlist ? playlistHasPlayableContent(args.store as any, playlistId) : false;
+    if (playlist && playable) continue;
+
+    missingCount += 1;
+    const reason = playlist ? "no_playable_content" : "missing_playlist";
+    actions.push({
+      kind: "playlist",
+      id: playlistId,
+      reason,
+      action: args.write ? "fallback_written" : "needs_fallback",
+    });
+
+    if (!args.write) continue;
+
+    const fallbackPath = path.join(args.store.configRoot, "playlists", `${playlistId}.toml`);
+    const fallbackTitle =
+      (playlist?.title && playlist.title.trim()) ||
+      `Fallback for ${playlistId}`;
+    await fs.mkdir(path.dirname(fallbackPath), { recursive: true });
+    await fs.writeFile(
+      fallbackPath,
+      buildPlaylistToml({
+        id: playlistId,
+        title: fallbackTitle,
+        items: [{ mediaId: UNDER_CONSTRUCTION_MEDIA_ID, title: "Under Construction" }],
+        tag: "UNDER-CONSTRUCTION",
+      }),
+      "utf-8"
+    );
+    writes += 1;
+  }
+
+  return { missingCount, writes, actions };
+}
+
+async function runPrepareProfile(
+  options: PrepareProfileOptions,
+  flags: Flags,
+  behavior: { allowStepFailures: boolean } = { allowStepFailures: false }
+): Promise<void> {
   const store = await loadResourceStore();
   const profile = store.profilesById[options.profileId];
   if (!profile) {
@@ -2522,20 +2972,12 @@ async function cmdPrepare(rest: string[], flags: Flags): Promise<void> {
   }
 
   const prepareSteps = profile.prepare ?? [];
+  const results: Array<Record<string, unknown>> = [];
+  const notes: string[] = [];
   if (prepareSteps.length === 0) {
-    const payload = {
-      ok: true,
-      profileId: options.profileId,
-      write: options.write,
-      stepsDeclared: 0,
-      results: [],
-      notes: ["No [prepare] steps declared in profile."],
-    };
-    printOutput(payload, true);
-    return;
+    notes.push("No [prepare] steps declared in profile.");
   }
 
-  const results: Array<Record<string, unknown>> = [];
   for (const [index, step] of prepareSteps.entries()) {
     const stepBase = {
       index,
@@ -2611,21 +3053,77 @@ async function cmdPrepare(rest: string[], flags: Flags): Promise<void> {
     }
   }
 
+  let refreshed = await loadResourceStore({
+    repoRoot: store.repoRoot,
+    configRoot: store.configRoot,
+  });
+  const placeholder = await ensureUnderConstructionArtifacts({
+    configRoot: refreshed.configRoot,
+    write: options.write,
+  });
+  if (placeholder.writes > 0) {
+    refreshed = await loadResourceStore({
+      repoRoot: store.repoRoot,
+      configRoot: store.configRoot,
+    });
+  }
+
+  const fallbacks = await ensureProfileTargetFallbackPlaylists({
+    store: refreshed,
+    profileId: options.profileId,
+    write: options.write,
+  });
+  if (fallbacks.writes > 0) {
+    refreshed = await loadResourceStore({
+      repoRoot: store.repoRoot,
+      configRoot: store.configRoot,
+    });
+  }
+
   const failed = results.filter((row) => row.ok === false).length;
+  const unresolvedAutofix = !options.write
+    ? placeholder.missingCount + fallbacks.missingCount
+    : 0;
+  if (!options.write && unresolvedAutofix > 0) {
+    notes.push(
+      `Profile has ${unresolvedAutofix} unresolved dependencies. Re-run with --write (or use compile).`
+    );
+  }
+  const runtimeReady = unresolvedAutofix === 0;
   const payload = {
-    ok: failed === 0,
+    ok: behavior.allowStepFailures ? runtimeReady : failed === 0 && runtimeReady,
     profileId: options.profileId,
     write: options.write,
     continueOnError: options.continueOnError,
     stepsDeclared: prepareSteps.length,
     stepsExecuted: results.length,
     failed,
+    unresolvedAutofix,
+    runtimeReady,
     results,
+    notes,
+    autofix: {
+      placeholder,
+      targetFallbacks: fallbacks,
+    },
   };
   printOutput(payload, true);
-  if (failed > 0) {
+  const shouldFail = behavior.allowStepFailures
+    ? unresolvedAutofix > 0
+    : failed > 0 || unresolvedAutofix > 0;
+  if (shouldFail) {
     process.exitCode = 1;
   }
+}
+
+async function cmdPrepare(rest: string[], flags: Flags): Promise<void> {
+  const options = parsePrepareProfileOptions(rest);
+  await runPrepareProfile(options, flags, { allowStepFailures: false });
+}
+
+async function cmdCompile(rest: string[], flags: Flags): Promise<void> {
+  const options = parseCompileProfileOptions(rest);
+  await runPrepareProfile(options, flags, { allowStepFailures: true });
 }
 
 async function cmdBootstrap(rest: string[], flags: Flags): Promise<void> {
@@ -2704,6 +3202,7 @@ async function main(): Promise<void> {
     printHelp();
     return;
   }
+  await loadCliEnv(flags);
 
   switch (command) {
     case "get":
@@ -2726,6 +3225,9 @@ async function main(): Promise<void> {
       break;
     case "prepare":
       await cmdPrepare(rest, flags);
+      break;
+    case "compile":
+      await cmdCompile(rest, flags);
       break;
     case "import":
       await cmdImport(rest, flags);

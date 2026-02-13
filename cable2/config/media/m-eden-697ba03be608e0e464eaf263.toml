@@ -1,0 +1,10 @@
+id = "m-eden-697ba03be608e0e464eaf263"
+title = "A cross-section diagram of a torus field showing the folding topology. The torus is shown in profile (side view, not top-down). Deep lavender glaze with glossy texture. The interior reveals the field structure: bright golden-white field lines enter from the equator on both sides, curve inward through the torus body, and loop back through the central void (the black hole center). The field lines are visible as bright glowing arcs that demonstrate the recycling and inversion—what escapes at the equator gets pulled inward, inverted, and emerges transformed on the opposite side. Lightning bolts follow these same field paths, crackling along the curves. The void at the center is a deep black with a faint purple glow at its edges, emphasizing it as an inversion point rather than empty space. Symmetrical, clean geometry. Purple highlights on the outer edges. Black background. The diagram should make clear that the torus is a perfect recycling machine where outside becomes inside, transformed."
+kind = "image"
+tag = "ANNA"
+artist = "Anna"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/79489d0bed62e9da1e3dbb35adab890cd9c6e9cb90822079e932a36eb165ad65.jpg"
+cache = true

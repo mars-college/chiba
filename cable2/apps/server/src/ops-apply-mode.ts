@@ -951,17 +951,20 @@ export async function applyKioskStateToFleetFromObject(opts: {
         return {
           pi,
           url,
-          ok: res.ok && (urlSync ? urlSync.ok : true),
+          // State apply is the source of truth for active playback.
+          // URL sync is best-effort (used for reboot/startup drift prevention),
+          // so auth failures there should not mark the apply itself as failed.
+          ok: res.ok,
           status: res.status,
           ms: res.ms,
-          error: res.error ?? (urlSync && !urlSync.ok ? `kiosk_url_sync_failed:${urlSync.error ?? 'unknown'}` : undefined),
+          error: res.error ?? undefined,
           state: urlSync
             ? {
-                ok: urlSync.ok,
-                status: urlSync.status,
-                ms: urlSync.ms,
-                error: urlSync.error,
-              }
+              ok: urlSync.ok,
+              status: urlSync.status,
+              ms: urlSync.ms,
+              error: urlSync.ok ? undefined : `kiosk_url_sync_failed:${urlSync.error ?? 'unknown'}`,
+            }
             : undefined,
         } satisfies ApplyModeResult;
       })
