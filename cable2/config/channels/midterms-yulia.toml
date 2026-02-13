@@ -1,0 +1,5 @@
+id = "midterms-yulia"
+number = "M16"
+name = "Midterms Yulia"
+call_sign = "YULIA"
+blocks = [ "blk-midterms-yulia" ]

@@ -1,5 +1,8 @@
 id = "pl-lyosha"
 name = "Lyosha playlist"
+title = "Lyosha's Art"
+artist = "Lyosha"
+description = "Lyosha's Art"
 
 [[item]]
 media = "m-2017-6ed57bd4d1"

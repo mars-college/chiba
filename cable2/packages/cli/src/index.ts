@@ -62,7 +62,7 @@ Usage:
   chiba diff <target> <id> [--nodes a,b] [--fetch] [--timeout-ms N] [--json]
   chiba prepare profile <id> [--write] [--continue-on-error] [--json]
   chiba compile profile <id> [--json]
-  chiba import dir <path> --playlist-id <id> [--playlist-title <title>] [--tag <tag>] [--cache] [--write] [--channel-id <id>] [--channel-name <name>] [--channel-number <num>]
+  chiba import dir <path> --playlist-id <id> [--playlist-title <title>] [--artist <artist>] [--tag <tag>] [--cache] [--write] [--channel-id <id>] [--channel-name <name>] [--channel-number <num>]
   chiba import eden-collection <url-or-id> --playlist-id <id> [--playlist-title <title>] [--tag <tag>] [--db PROD|STAGE] [--cache] [--write] [--channel-id <id>] [--channel-name <name>] [--channel-number <num>]
 
 Resources:
@@ -1412,6 +1412,7 @@ type ImportCommonOptions = {
 type ImportDirOptions = ImportCommonOptions & {
   sourceDir: string;
   playlistTitle: string;
+  artist?: string;
 };
 
 type EdenDb = "PROD" | "STAGE";
@@ -1903,6 +1904,7 @@ function parseImportDirOptions(rest: string[]): ImportDirOptions {
   let configRoot = "cable2/config";
   let playlistId = "";
   let playlistTitle = "";
+  let artist: string | undefined;
   let tag: string | undefined;
   let cache = true;
   let write = false;
@@ -1929,6 +1931,15 @@ function parseImportDirOptions(rest: string[]): ImportDirOptions {
     }
     if (arg.startsWith("--playlist-title=")) {
       playlistTitle = arg.slice("--playlist-title=".length).trim();
+      continue;
+    }
+    if (arg === "--artist") {
+      artist = next.trim() || undefined;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--artist=")) {
+      artist = arg.slice("--artist=".length).trim() || undefined;
       continue;
     }
     if (arg === "--tag") {
@@ -2008,6 +2019,7 @@ function parseImportDirOptions(rest: string[]): ImportDirOptions {
     write,
   };
   if (tag !== undefined) parsed.tag = tag;
+  if (artist !== undefined) parsed.artist = artist;
   if (channelId !== undefined) parsed.channelId = channelId;
   if (channelName !== undefined) parsed.channelName = channelName;
   if (channelNumber !== undefined) parsed.channelNumber = channelNumber;
@@ -2225,13 +2237,17 @@ function buildPlaylistToml(args: {
   id: string;
   title: string;
   items: Array<{ mediaId: string; title: string }>;
+  artist?: string;
   tag?: string;
 }): string {
   const lines: string[] = [
     `id = ${tomlQuote(args.id)}`,
     `name = ${tomlQuote(args.title)}`,
+    `title = ${tomlQuote(args.title)}`,
     "",
   ];
+  if (args.artist) lines.push(`artist = ${tomlQuote(args.artist)}`);
+  if (args.artist) lines.push("");
   for (const item of args.items) {
     lines.push("[[item]]");
     lines.push(`media = ${tomlQuote(item.mediaId)}`);
@@ -2328,6 +2344,7 @@ async function cmdImportDir(
     playlist: {
       id: options.playlistId,
       title: options.playlistTitle,
+      artist: options.artist ?? null,
       filePath: playlistFilePath,
       itemCount: mediaPlan.length,
     },
@@ -2383,6 +2400,7 @@ async function cmdImportDir(
       cache: options.cache,
     };
     if (options.tag !== undefined) mediaArgs.tag = options.tag;
+    if (options.artist !== undefined) mediaArgs.artist = options.artist;
     const content = buildMediaToml(mediaArgs);
     await fs.writeFile(item.filePath, content, "utf-8");
   }
@@ -2391,12 +2409,14 @@ async function cmdImportDir(
     id: string;
     title: string;
     items: Array<{ mediaId: string; title: string }>;
+    artist?: string;
     tag?: string;
   } = {
     id: options.playlistId,
     title: options.playlistTitle,
     items: mediaPlan.map((item) => ({ mediaId: item.id, title: item.title })),
   };
+  if (options.artist !== undefined) playlistArgs.artist = options.artist;
   if (options.tag !== undefined) playlistArgs.tag = options.tag;
   const playlistToml = buildPlaylistToml(playlistArgs);
   await fs.writeFile(playlistFilePath, playlistToml, "utf-8");
@@ -2616,12 +2636,14 @@ async function cmdImportEdenCollection(
     id: string;
     title: string;
     items: Array<{ mediaId: string; title: string }>;
+    artist?: string;
     tag?: string;
   } = {
     id: options.playlistId,
     title: playlistTitle,
     items: mediaPlan.map((item) => ({ mediaId: item.id, title: item.title })),
   };
+  if (options.artist !== undefined) playlistArgs.artist = options.artist;
   if (options.tag !== undefined) playlistArgs.tag = options.tag;
   const playlistToml = buildPlaylistToml(playlistArgs);
   await fs.writeFile(playlistFilePath, playlistToml, "utf-8");
@@ -2752,16 +2774,51 @@ function mergeProfileModes(
   return { ...(defaults ?? {}), ...(override ?? {}) };
 }
 
-function collectProfilePlaylistTargetIds(profile: {
+function collectProfilePlaylistTargetIds(
+  store: {
+    playlistsById: Record<string, unknown>;
+    blocksById: Record<string, { playlist?: string }>;
+    channelsById: Record<string, { blocks?: string[] }>;
+  },
+  profile: {
   defaults?: Record<string, unknown>;
   pis?: Record<string, Record<string, unknown>>;
 }): string[] {
   const out = new Set<string>();
+  const addPlaylist = (idRaw: unknown) => {
+    const id = typeof idRaw === "string" ? idRaw.trim() : "";
+    if (!id) return;
+    out.add(id);
+  };
+  const addFromBlock = (idRaw: unknown) => {
+    const id = typeof idRaw === "string" ? idRaw.trim() : "";
+    if (!id) return;
+    const block = store.blocksById[id];
+    if (!block) return;
+    addPlaylist(block.playlist);
+  };
+  const addFromChannel = (idRaw: unknown) => {
+    const id = typeof idRaw === "string" ? idRaw.trim() : "";
+    if (!id) return;
+    const channel = store.channelsById[id];
+    if (!channel) return;
+    for (const blockId of channel.blocks ?? []) addFromBlock(blockId);
+  };
+  const addByKind = (kindRaw: unknown, idRaw: unknown) => {
+    const kind = typeof kindRaw === "string" ? kindRaw.trim().toLowerCase() : "";
+    if (!kind) return;
+    if (kind === "playlist") addPlaylist(idRaw);
+    if (kind === "block") addFromBlock(idRaw);
+    if (kind === "channel") addFromChannel(idRaw);
+  };
   const collectFromMode = (mode: Record<string, unknown> | undefined) => {
     if (!mode) return;
     const targetKind = typeof mode.target_kind === "string" ? mode.target_kind.trim() : "";
     const targetId = typeof mode.target_id === "string" ? mode.target_id.trim() : "";
-    if (targetKind === "playlist" && targetId) out.add(targetId);
+    addByKind(targetKind, targetId);
+    if ((!targetId || targetKind === "channel") && typeof mode.channel === "string") {
+      addFromChannel(mode.channel);
+    }
     const prefetchTargets = Array.isArray(mode.prefetch_targets) ? mode.prefetch_targets : [];
     for (const tokenRaw of prefetchTargets) {
       if (typeof tokenRaw !== "string") continue;
@@ -2771,7 +2828,7 @@ function collectProfilePlaylistTargetIds(profile: {
       if (idx <= 0) continue;
       const kind = token.slice(0, idx).trim().toLowerCase();
       const id = token.slice(idx + 1).trim();
-      if (kind === "playlist" && id) out.add(id);
+      addByKind(kind, id);
     }
   };
 
@@ -2917,7 +2974,7 @@ async function ensureProfileTargetFallbackPlaylists(args: {
   const profile = args.store.profilesById[args.profileId];
   if (!profile) throw new Error(`Unknown profile id: ${args.profileId}`);
 
-  const targetPlaylistIds = collectProfilePlaylistTargetIds(profile as any);
+  const targetPlaylistIds = collectProfilePlaylistTargetIds(args.store as any, profile as any);
   let missingCount = 0;
   let writes = 0;
   const actions: Array<Record<string, unknown>> = [];
@@ -2987,6 +3044,7 @@ async function runPrepareProfile(
       if (step.kind === "dir") {
         const cmdRest = ["dir", step.path, "--playlist-id", step.playlist_id, "--config-root", store.configRoot];
         pushImportArg(cmdRest, "--playlist-title", step.playlist_title);
+        pushImportArg(cmdRest, "--artist", step.artist);
         pushImportArg(cmdRest, "--tag", step.tag);
         pushImportArg(cmdRest, "--channel-id", step.channel_id);
         pushImportArg(cmdRest, "--channel-name", step.channel_name);

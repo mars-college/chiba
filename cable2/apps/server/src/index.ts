@@ -2552,7 +2552,10 @@ function buildTargetDefaults(args: {
   if (overrides.hours !== undefined) defaults.hours = overrides.hours;
 
   const shouldPrefetchByDefault =
-    resolvedTargetKind === 'playlist' || resolvedTargetKind === 'media' || resolvedTargetKind === 'block';
+    resolvedTargetKind === 'playlist' ||
+    resolvedTargetKind === 'media' ||
+    resolvedTargetKind === 'block' ||
+    resolvedTargetKind === 'channel';
   const shouldPrefetch =
     overrides.prefetch !== undefined ? overrides.prefetch : shouldPrefetchByDefault;
   if (shouldPrefetch && resolvedTargetId) {
@@ -3851,7 +3854,7 @@ async function ensureStashed(sourcePath: string): Promise<string> {
 
     // Copy with a timeout so a dead NAS mount doesn't hang the process forever.
     const timeoutMs =
-      Number(process.env.CHIBA_STASH_COPY_TIMEOUT_MS ?? '') || 120_000;
+      Number(process.env.CHIBA_STASH_COPY_TIMEOUT_MS ?? '') || 1_800_000;
     const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`;
 
     const withTimeout = async <T>(fn: () => Promise<T>): Promise<T> => {

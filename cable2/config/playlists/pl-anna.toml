@@ -1,5 +1,8 @@
 id = "pl-anna"
-name = "Anna playlist"
+name = "The Donut Remembers: Field Topology & Self-Organizing Intelligence"
+title = "The Donut Remembers: Field Topology & Self-Organizing Intelligence"
+artist = "Anna"
+description = "The Donut Remembers: Field Topology & Self-Organizing Intelligence"
 
 [[item]]
 media = "m-eden-698cf9d12b8476db16c2b784"

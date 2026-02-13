@@ -299,6 +299,12 @@ out = {
         or (get_nested_default("nas", "password", "") or "").strip()
         or env_first("CHIBA_NAS_PASSWORD", "NAS_PASSWORD")
     ),
+    "STASH_COPY_TIMEOUT_MS": (
+        ("" if node.get("stash_copy_timeout_ms") is None else str(node.get("stash_copy_timeout_ms")).strip())
+        or ("" if get_default("stash_copy_timeout_ms", "") is None else str(get_default("stash_copy_timeout_ms", "")).strip())
+        or env_first("CHIBA_STASH_COPY_TIMEOUT_MS", "STASH_COPY_TIMEOUT_MS")
+        or "1800000"
+    ),
 }
 
 for key, val in out.items():
@@ -461,6 +467,7 @@ CHIBA_API_KEY=$API_KEY
 CHIBA_CONTROL_PLANE_URL=$CONTROL_PLANE_URL
 CHIBA_CONTROLLER_URL=$CONTROLLER_URL
 EDEN_API_KEY=$EDEN_KEY
+CHIBA_STASH_COPY_TIMEOUT_MS=$STASH_COPY_TIMEOUT_MS
 ENV
 
 echo "Configuring Wi-Fi credentials (if provided)..."
@@ -488,6 +495,9 @@ WPAEOF
 fi
 
 echo "Ensuring base runtime (Node.js + pnpm + dependencies)..."
+# Some Raspberry Pi images end up with malformed NodeSource apt pin files
+# that break *all* apt operations. Remove the known bad files defensively.
+sudo rm -f /etc/apt/preferences.d/nodejs /etc/apt/preferences.d/nsolid >/dev/null 2>&1 || true
 sudo apt-get update -y
 sudo apt-get install -y curl ca-certificates git python3 build-essential rsync jq
 
@@ -497,7 +507,7 @@ if apt-cache policy chromium 2>/dev/null | grep -q "Candidate:"; then
 elif apt-cache policy chromium-browser 2>/dev/null | grep -q "Candidate:"; then
   sudo apt-get install -y chromium-browser
 fi
-sudo apt-get install -y xinit x11-xserver-utils xserver-xorg xdotool unclutter >/dev/null 2>&1 || true
+sudo apt-get install -y xinit x11-xserver-utils x11-utils xserver-xorg xdotool unclutter >/dev/null 2>&1 || true
 sudo apt-get install -y cage wlr-randr seatd >/dev/null 2>&1 || true
 sudo systemctl enable --now seatd >/dev/null 2>&1 || true
 sudo usermod -aG video,audio,input,render "$PI_USER" >/dev/null 2>&1 || true
@@ -863,10 +873,10 @@ launch_with_xinit() {
 #!/bin/bash
 set -euo pipefail
 
-chromium_bin="$1"
-kiosk_url="$2"
+chromium_bin="\$1"
+kiosk_url="\$2"
 shift 2
-chromium_args=("$@")
+chromium_args=("\$@")
 window_size=""
 
 if command -v xset >/dev/null 2>&1; then
@@ -875,15 +885,46 @@ fi
 
 if command -v xrandr >/dev/null 2>&1; then
   while read -r output; do
-    [ -n "$output" ] || continue
-    xrandr --output "$output" --auto >/dev/null 2>&1 || true
-  done < <(xrandr --query 2>/dev/null | awk '/ connected / { print $1 }')
+    [ -n "\$output" ] || continue
+    xrandr --output "\$output" --auto >/dev/null 2>&1 || true
+  done < <(xrandr --query 2>/dev/null | awk '/ connected / { print \$1 }')
 fi
 
-if [ -z "$window_size" ] && command -v xdpyinfo >/dev/null 2>&1; then
-  mode="$(xdpyinfo 2>/dev/null | awk '/dimensions:/ { print $2; exit }')"
-  if [[ "$mode" =~ ^([0-9]+)x([0-9]+)$ ]]; then
-    window_size="${BASH_REMATCH[1]},${BASH_REMATCH[2]}"
+if [ -f "\$ROTATE_CONFIG_FILE" ] && command -v xrandr >/dev/null 2>&1; then
+  rotation="\$(cat "\$ROTATE_CONFIG_FILE" 2>/dev/null || true)"
+  output="\$(xrandr --query 2>/dev/null | awk '/ connected / { print \$1; exit }')"
+  if [ -n "\$output" ]; then
+    case "\$rotation" in
+      90) xrandr --output "\$output" --rotate left >/dev/null 2>&1 || true ;;
+      180) xrandr --output "\$output" --rotate inverted >/dev/null 2>&1 || true ;;
+      270) xrandr --output "\$output" --rotate right >/dev/null 2>&1 || true ;;
+      *) : ;;
+    esac
+  fi
+fi
+
+if [ -z "\$window_size" ] && command -v xrandr >/dev/null 2>&1; then
+  mode="\$(xrandr --query 2>/dev/null | awk '
+    / connected primary / {
+      split(\$4, a, "+");
+      print a[1];
+      exit
+    }
+    / connected / {
+      split(\$3, a, "+");
+      print a[1];
+      exit
+    }'
+  )"
+  if [[ "\$mode" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+    window_size="\${BASH_REMATCH[1]},\${BASH_REMATCH[2]}"
+  fi
+fi
+
+if [ -z "\$window_size" ] && command -v xdpyinfo >/dev/null 2>&1; then
+  mode="\$(xdpyinfo 2>/dev/null | awk '/dimensions:/ { print \$2; exit }')"
+  if [[ "\$mode" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+    window_size="\${BASH_REMATCH[1]},\${BASH_REMATCH[2]}"
   fi
 fi
 
@@ -894,29 +935,29 @@ if command -v unclutter >/dev/null 2>&1; then
   unclutter -idle 0.25 -root >/dev/null 2>&1 &
 fi
 
-echo "[kiosk] launch backend=x11 size=${window_size:-auto}" >&2
-chromium_cmd=("$chromium_bin" "${chromium_args[@]}" --window-position=0,0)
-if [ -n "$window_size" ]; then
-  chromium_cmd+=(--window-size="$window_size")
+echo "[kiosk] launch backend=x11 size=\${window_size:-auto}" >&2
+chromium_cmd=("\$chromium_bin" "\${chromium_args[@]}" --window-position=0,0)
+if [ -n "\$window_size" ]; then
+  chromium_cmd+=(--window-size="\$window_size")
 fi
-chromium_cmd+=("$kiosk_url")
-"${chromium_cmd[@]}" &
-chromium_pid="$!"
+chromium_cmd+=("\$kiosk_url")
+"\${chromium_cmd[@]}" &
+chromium_pid="\$!"
 
-if command -v xdotool >/dev/null 2>&1 && [ -n "$window_size" ]; then
+if command -v xdotool >/dev/null 2>&1 && [ -n "\$window_size" ]; then
   for _i in {1..40}; do
-    win_id="$(xdotool search --onlyvisible --pid "$chromium_pid" 2>/dev/null | head -n 1 || true)"
-    if [ -n "$win_id" ]; then
-      IFS=',' read -r ww hh <<< "$window_size"
-      xdotool windowmove "$win_id" 0 0 >/dev/null 2>&1 || true
-      xdotool windowsize "$win_id" "$ww" "$hh" >/dev/null 2>&1 || true
+    win_id="\$(xdotool search --onlyvisible --pid "\$chromium_pid" 2>/dev/null | head -n 1 || true)"
+    if [ -n "\$win_id" ]; then
+      IFS=',' read -r ww hh <<< "\$window_size"
+      xdotool windowmove "\$win_id" 0 0 >/dev/null 2>&1 || true
+      xdotool windowsize "\$win_id" "\$ww" "\$hh" >/dev/null 2>&1 || true
       break
     fi
     sleep 0.2
   done
 fi
 
-wait "$chromium_pid"
+wait "\$chromium_pid"
 XSESSION
 
   chmod +x "\$xsession"

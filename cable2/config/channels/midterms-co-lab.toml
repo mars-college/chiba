@@ -1,0 +1,5 @@
+id = "midterms-co-lab"
+number = "M04"
+name = "Midterms Community Lab"
+call_sign = "COLAB"
+blocks = [ "blk-midterms-co-lab" ]

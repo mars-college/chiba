@@ -1,0 +1,5 @@
+id = "midterms-seva"
+number = "M13"
+name = "Midterms Seva"
+call_sign = "SEVA"
+blocks = [ "blk-midterms-seva" ]
