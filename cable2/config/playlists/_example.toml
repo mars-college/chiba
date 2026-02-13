@@ -1,0 +1,12 @@
+# Playlist example: composable list of media items.
+#
+# Items can reference `media = "<id>"` (preferred) or inline `source = {...}`.
+# duration_slots matches existing channel manifest semantics.
+
+id = "weatherstar-loop"
+name = "WeatherStar loop"
+
+[[item]]
+media = "weatherstar-live"
+duration_slots = 2
+

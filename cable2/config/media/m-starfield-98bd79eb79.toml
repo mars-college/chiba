@@ -1,0 +1,7 @@
+id = "m-starfield-98bd79eb79"
+title = "Starfield"
+tag = "LIVE"
+
+[source]
+type = "url"
+value = "/ambient/stars"

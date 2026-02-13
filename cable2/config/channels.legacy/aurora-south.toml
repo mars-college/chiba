@@ -1,0 +1,14 @@
+id = "aurora-south"
+number = "183"
+name = "Aurora Forecast (South)"
+call_sign = "AURS"
+accent = "#9fd6a6"
+description = "NOAA SWPC aurora forecast map (southern hemisphere)."
+
+[[program]]
+title = "Aurora Forecast"
+subtitle = "Southern Hemisphere"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/swpc/aurora-south" }
+

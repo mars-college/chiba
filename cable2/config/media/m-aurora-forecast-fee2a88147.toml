@@ -1,0 +1,8 @@
+id = "m-aurora-forecast-fee2a88147"
+title = "Aurora Forecast"
+subtitle = "Southern Hemisphere"
+tag = "LIVE"
+
+[source]
+type = "url"
+value = "/swpc/aurora-south"

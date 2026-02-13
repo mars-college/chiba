@@ -1,0 +1,23 @@
+id = "pl-ai-village-2"
+name = "AI Village Encore playlist"
+
+[[item]]
+media = "m-ai-village-fe27c49fb3"
+duration_slots = 2
+title = "AI Village"
+tag = "LIVE"
+remote_controls = [ "keyboard_mouse" ]
+
+[[item]]
+media = "m-ai-village-fe27c49fb3"
+duration_slots = 2
+title = "AI Village"
+tag = "LIVE"
+remote_controls = [ "keyboard_mouse" ]
+
+[[item]]
+media = "m-ai-village-fe27c49fb3"
+duration_slots = 2
+title = "AI Village"
+tag = "LIVE"
+remote_controls = [ "keyboard_mouse" ]

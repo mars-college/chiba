@@ -1,0 +1,152 @@
+id = "pl-co-lab"
+name = "Co-Lab playlist"
+
+[[item]]
+media = "m-mars-midterm-1-7016708adf"
+duration_slots = 1
+title = "Mars midterm 1"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-2-19c9f36c8a"
+duration_slots = 1
+title = "Mars midterm 2"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-5-810c4b68f0"
+duration_slots = 1
+title = "Mars midterm 5"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-6-cc50d5494b"
+duration_slots = 1
+title = "mars midterm 6"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-7-e507ceafe3"
+duration_slots = 1
+title = "Mars midterm 7"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-8-7cc734ba27"
+duration_slots = 1
+title = "mars midterm 8"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-10-e62ab267de"
+duration_slots = 1
+title = "mars midterm 10"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-11-99d9f30298"
+duration_slots = 1
+title = "mars midterm 11"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-12-d754742fca"
+duration_slots = 1
+title = "Mars Midterm 12"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-13-7e3e055bd2"
+duration_slots = 1
+title = "Mars Midterm 13"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-14-55488539da"
+duration_slots = 1
+title = "Mars Midterm 14"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-15-e993f12ae8"
+duration_slots = 1
+title = "Mars Midterm 15"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-16-74af71ef45"
+duration_slots = 1
+title = "Mars Midterm 16"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-17-96942b80eb"
+duration_slots = 1
+title = "Mars Midterm 17"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-18-9829781059"
+duration_slots = 1
+title = "Mars Midterm 18"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-19-ce2cf663af"
+duration_slots = 1
+title = "Mars Midterm 19"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-20-7aae04d3ff"
+duration_slots = 1
+title = "Mars midterm 20"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-21-626dc78cea"
+duration_slots = 1
+title = "mars midterm 21"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-22-2857fa8844"
+duration_slots = 1
+title = "Mars midterm 22"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-23-4700c1b79e"
+duration_slots = 1
+title = "mars midterm 23"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-24-263bc4563e"
+duration_slots = 1
+title = "mars midterm 24"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-25-c224333561"
+duration_slots = 1
+title = "mars midterm 25"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-26-35cb90e8d2"
+duration_slots = 1
+title = "mars midterm 26"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterm-27-f6d13a374a"
+duration_slots = 1
+title = "mars midterm 27"
+tag = "CO-LAB"
+
+[[item]]
+media = "m-mars-midterms-9-dbb3f2aad1"
+duration_slots = 1
+title = "mars midterms 9"
+tag = "CO-LAB"

@@ -1,12 +1,10 @@
-# Committable Pi registry (no secrets).
-#
-# Secrets are loaded from environment variables (optionally via a local env file),
-# so this file can live in source control.
-#
-# See: ./scripts/pis/pis-secrets.env.example
+# Production inventory for gallery rollout.
+# New-style registry (no per-node secrets).
+
 [defaults]
 user = "pi"
 controller_url = "http://10.10.13.9:24422/"
+control_plane_url = "http://10.10.13.9:8790"
 guide_port = 5173
 node_port = 8080
 server_port = 8787
@@ -14,7 +12,7 @@ server_port = 8787
 [defaults.nas]
 host = "nas.mars.college"
 share = "share"
-mount = "/Volumes/share"
+mount = "/mnt/share"
 
 # ---- Upper East ----
 [pis.upper-east-1]
@@ -70,11 +68,6 @@ ip = "100.128.0.121"
 node_name = "lower-east-1"
 orientation = "portrait"
 
-[pis.lower-east-2]
-# External / not on mars.local network in the current source-of-truth list.
-host = ""
-node_name = "lower-east-2"
-
 [pis.lower-east-3]
 host = "mars10.local"
 ip = "100.128.0.113"
@@ -107,10 +100,3 @@ host = "mars27.local"
 ip = "100.128.0.126"
 node_name = "lower-west-4"
 orientation = "portrait"
-
-# Local dev / commander machine. Useful for testing ops flows against a local
-# cable server instance (port 8787) without targeting a Pi.
-[pis.commander]
-host = "192.168.0.117"
-ip = "192.168.0.117"
-node_name = "commander"

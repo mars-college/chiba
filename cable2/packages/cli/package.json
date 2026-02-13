@@ -1,0 +1,20 @@
+{
+  "name": "@chiba-cable2/cli",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "chiba": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@chiba-cable2/contracts": "workspace:*",
+    "@chiba-cable2/core": "workspace:*"
+  }
+}

@@ -1,0 +1,50 @@
+id = "pl-earl"
+name = "Earl playlist"
+
+[[item]]
+media = "m-ayane-screen-test-c835db0e50"
+duration_slots = 1
+title = "Ayane Screen Test"
+tag = "EARL"
+
+[[item]]
+media = "m-bourbon-screen-test-f2db1ce9d7"
+duration_slots = 1
+title = "Bourbon Screen Test"
+tag = "EARL"
+
+[[item]]
+media = "m-compositestest-d0e5cef319"
+duration_slots = 1
+title = "CompositesTest"
+tag = "EARL"
+
+[[item]]
+media = "m-drumdrops-screen-test-8fa37ef647"
+duration_slots = 1
+title = "Drumdrops Screen Test"
+tag = "EARL"
+
+[[item]]
+media = "m-full-band-screen-test-3fe99868b2"
+duration_slots = 1
+title = "Full Band Screen Test"
+tag = "EARL"
+
+[[item]]
+media = "m-star-motion-graphics-b-roll-test-983fd28be0"
+duration_slots = 1
+title = "Star Motion Graphics B-Roll Test"
+tag = "EARL"
+
+[[item]]
+media = "m-t-mort-screen-test-d7c3ef62ac"
+duration_slots = 1
+title = "T Mort Screen Test"
+tag = "EARL"
+
+[[item]]
+media = "m-wik-screen-test-a88422cb49"
+duration_slots = 1
+title = "Wik Screen Test"
+tag = "EARL"

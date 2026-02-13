@@ -1,0 +1,9 @@
+id = "pl-mallard-mystery-2"
+name = "Mallard Mystery Encore playlist"
+
+[[item]]
+media = "m-secret-life-of-drake-mallard-2b6a194fd1"
+duration_slots = 2
+title = "Secret Life of Drake Mallard"
+subtitle = "Loop"
+tag = "FILM"

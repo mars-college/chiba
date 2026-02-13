@@ -1,0 +1,14 @@
+id = "solar-wind"
+number = "184"
+name = "Solar Wind"
+call_sign = "WIND"
+accent = "#ffb347"
+description = "NOAA SWPC ACE SWEPAM (24h) plot."
+
+[[program]]
+title = "Solar Wind"
+subtitle = "ACE SWEPAM 24h"
+tag = "LIVE"
+duration_slots = 2
+source = { type = "url", value = "/swpc/swepam-24h" }
+

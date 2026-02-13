@@ -1,0 +1,47 @@
+id = "roadmap"
+number = "140"
+name = "Roadmap Channel"
+call_sign = "RMAP"
+accent = "#ffb347"
+description = "Roadmap transmission for dev, curatorial, and physical buildouts."
+audio_volume = 0.35
+audio_offset_min_sec = 11.988
+audio_offset_max_sec = 11.988
+blocks = [ "blk-roadmap" ]
+
+[audio_source]
+type = "path"
+value = "/Volumes/share/chiba-cable/audio/Dainumo, Jeesh, P SUS - 3 Flavors of 8bit - 03 Dainumo - Guiding Her.mp3"
+
+[[program]]
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+duration_slots = 2
+remote_controls = [ "app" ]
+
+  [program.source]
+  type = "url"
+  value = "/roadmap?appId=roadmap"
+
+[[program]]
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+duration_slots = 2
+remote_controls = [ "app" ]
+
+  [program.source]
+  type = "url"
+  value = "/roadmap?appId=roadmap"
+
+[[program]]
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+duration_slots = 2
+remote_controls = [ "app" ]
+
+  [program.source]
+  type = "url"
+  value = "/roadmap?appId=roadmap"

@@ -1,0 +1,8 @@
+id = "m-roadmap-channel-15d0ec0e07"
+title = "Roadmap Channel"
+subtitle = "Live Board"
+tag = "LIVE"
+
+[source]
+type = "url"
+value = "/roadmap?appId=roadmap"

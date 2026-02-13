@@ -1,0 +1,9 @@
+id = "pl-aurora-south"
+name = "Aurora Forecast (South) playlist"
+
+[[item]]
+media = "m-aurora-forecast-fee2a88147"
+duration_slots = 2
+title = "Aurora Forecast"
+subtitle = "Southern Hemisphere"
+tag = "LIVE"

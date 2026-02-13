@@ -12,6 +12,7 @@
     "dev:player": "pnpm --filter @chiba/player dev",
     "dev:dashboard": "pnpm --filter @chiba/dashboard dev",
     "dev:cable": "concurrently -k -n cable-server,cable-guide,cable-genart,cable-ops -c cyan,magenta,green,yellow \"pnpm -C cable/apps/server dev\" \"pnpm -C cable/apps/guide dev\" \"pnpm -C cable/apps/genart dev\" \"pnpm -C cable/apps/ops dev\"",
+    "dev:cable2:local": "pnpm -C cable2 dev:local",
     "dev:cable:server": "pnpm -C cable/apps/server dev",
     "dev:cable:guide": "pnpm -C cable/apps/guide dev",
     "dev:cable:genart": "pnpm -C cable/apps/genart dev",

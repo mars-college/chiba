@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chiba-cable2-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chiba
+      POSTGRES_PASSWORD: chiba
+      POSTGRES_DB: chiba
+    ports:
+      - "54329:5432"
+    volumes:
+      - chiba_cable2_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chiba -d chiba"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  chiba_cable2_postgres_data:

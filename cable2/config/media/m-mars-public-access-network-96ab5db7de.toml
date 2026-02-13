@@ -1,0 +1,7 @@
+id = "m-mars-public-access-network-96ab5db7de"
+title = "Mars Public Access Network"
+tag = "LIVE"
+
+[source]
+type = "url"
+value = "/embed/mars-public-access"
