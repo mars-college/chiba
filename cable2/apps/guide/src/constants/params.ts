@@ -24,6 +24,7 @@ export const PARAM_GALLERY = "gallery";
 export const PARAM_GALLERY_CHANNEL_KEYS = ["channel", "ch", "channelId"] as const;
 export const PARAM_TARGET_KIND_KEYS = ["targetKind", "target_kind"] as const;
 export const PARAM_TARGET_ID_KEYS = ["targetId", "target_id"] as const;
+export const PARAM_ROTATE_KEYS = ["rotate", "rotation", "display_rotate"] as const;
 export const PARAM_PLAYLIST = "playlist";
 export const PARAM_LOCK_KEYS = ["lock", "locked"] as const;
 export const PARAM_QR_KEYS = ["qr", "showQr", "showQR"] as const;

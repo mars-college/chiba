@@ -55,6 +55,7 @@ function rowKind(
 
 type ToggleValue = "inherit" | "on" | "off";
 type HudModeValue = "inherit" | "always" | "start" | "never";
+type DisplayRotateValue = "inherit" | "0" | "90" | "180" | "270";
 type TargetOverrideValue =
   | "inherit"
   | "media"
@@ -89,6 +90,17 @@ function toOptionalNumber(value: string): number | undefined {
   if (!value.trim()) return undefined;
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
+}
+
+function toOptionalDisplayRotate(
+  value: DisplayRotateValue
+): 0 | 90 | 180 | 270 | undefined {
+  if (value === "inherit") return undefined;
+  const parsed = Number(value);
+  if (parsed === 0 || parsed === 90 || parsed === 180 || parsed === 270) {
+    return parsed;
+  }
+  return undefined;
 }
 
 function toOptionalTargetKind(
@@ -292,6 +304,8 @@ export default function App() {
   const [optHudMode, setOptHudMode] = useState<HudModeValue>("inherit");
   const [optHudShowSec, setOptHudShowSec] = useState<string>("");
   const [optTheme, setOptTheme] = useState<string>("");
+  const [optDisplayRotate, setOptDisplayRotate] =
+    useState<DisplayRotateValue>("inherit");
   const [optScale, setOptScale] = useState<string>("");
   const [optTextScale, setOptTextScale] = useState<string>("");
   const [optHours, setOptHours] = useState<string>("");
@@ -686,6 +700,7 @@ export default function App() {
       hudMode: optHudMode === "inherit" ? undefined : optHudMode,
       hudShowSec: toOptionalNumber(optHudShowSec),
       theme: optTheme.trim() || undefined,
+      displayRotate: toOptionalDisplayRotate(optDisplayRotate),
       scale: toOptionalNumber(optScale),
       textScale: toOptionalNumber(optTextScale),
       hours: toOptionalNumber(optHours),
@@ -706,6 +721,7 @@ export default function App() {
     optHudMode,
     optHudShowSec,
     optTheme,
+    optDisplayRotate,
     optScale,
     optTextScale,
     optHours,
@@ -803,6 +819,7 @@ export default function App() {
         hudMode: optHudMode === "inherit" ? undefined : optHudMode,
         hudShowSec: toOptionalNumber(optHudShowSec),
         theme: optTheme.trim() || undefined,
+        displayRotate: toOptionalDisplayRotate(optDisplayRotate),
         scale: toOptionalNumber(optScale),
         textScale: toOptionalNumber(optTextScale),
         hours: toOptionalNumber(optHours),
@@ -1401,6 +1418,25 @@ export default function App() {
                                 placeholder="theme id"
                                 disabled={controlBusy}
                               />
+                            </label>
+                            <label className="field">
+                              <span className="field-label">rotate</span>
+                              <select
+                                className="input"
+                                value={optDisplayRotate}
+                                onChange={(e) =>
+                                  setOptDisplayRotate(
+                                    e.target.value as DisplayRotateValue
+                                  )
+                                }
+                                disabled={controlBusy}
+                              >
+                                <option value="inherit">inherit</option>
+                                <option value="0">0</option>
+                                <option value="90">90</option>
+                                <option value="180">180</option>
+                                <option value="270">270</option>
+                              </select>
                             </label>
                             <label className="field">
                               <span className="field-label">scale</span>

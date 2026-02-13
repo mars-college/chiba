@@ -1,0 +1,8 @@
+id = "m-scan-20220408-190143-2-2453ceb55a"
+title = "Scan 20220408 190143 2"
+tag = "LYOSHA"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/lyosha/Scan_20220408_190143_2.png"
+cache = true

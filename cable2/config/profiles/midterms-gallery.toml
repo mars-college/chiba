@@ -11,21 +11,24 @@
 #     --pi upper-west-4
 #
 # Notes:
-# - Screen orientation is treated as a hardware property and should live in `registry.toml`.
-
+# - Screen orientation should primarily live in `registry.toml`.
+# - Optional per-profile override is available via `display_rotate = 0|90|180|270`.
 [defaults.cable]
 mode = "gallery"
 theme = "gallery"
 nosplash = true
 lock = true
 qr = false
+hud = "always"
 
 # Midterms content assignments:
 # - LW1 -> ria
 # - LW2 -> jordan
 # - LW3 -> alicia
 # - LW4 -> freeman
-# - LE1 -> anna
+# - LE1 -> (unassigned)
+# - LE2-2 -> lyosha
+# - LE3-2 -> anna
 # - LE2 -> yulia
 # - LE3 -> chebel
 # - LE4 -> co-lab
@@ -37,7 +40,6 @@ qr = false
 # - UE2 -> kamau
 # - UE3 -> zayne
 # - UE4 -> tarcila
-
 [pis.lower-west-1.cable]
 target_kind = "playlist"
 target_id = "pl-ria"
@@ -62,17 +64,17 @@ target_id = "pl-freeman"
 playlist = true
 prefetch_targets = ["playlist:pl-freeman"]
 
-[pis.lower-east-1.cable]
+[pis.lower-east-3-2.cable]
 target_kind = "playlist"
 target_id = "pl-anna"
 playlist = true
 prefetch_targets = ["playlist:pl-anna"]
 
-[pis.lower-east-2.cable]
+[pis.lower-east-2-2.cable]
 target_kind = "playlist"
-target_id = "pl-yulia"
+target_id = "pl-lyosha"
 playlist = true
-prefetch_targets = ["playlist:pl-yulia"]
+prefetch_targets = ["playlist:pl-lyosha"]
 
 [pis.lower-east-3.cable]
 target_kind = "playlist"
@@ -85,6 +87,7 @@ target_kind = "playlist"
 target_id = "pl-co-lab"
 playlist = true
 prefetch_targets = ["playlist:pl-co-lab"]
+display_rotate = 90
 
 [pis.upper-west-1.cable]
 target_kind = "playlist"
@@ -142,7 +145,6 @@ prefetch_targets = ["playlist:pl-tarcila"]
 #
 # This generates/updates media + playlists (and optional channel wrappers where configured)
 # needed by this profile so apply/prefetch stays data-driven.
-
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/placeholder"
 playlist_id = "pl-under-construction"
@@ -157,31 +159,36 @@ playlist_title = "Earl playlist"
 tag = "EARL"
 cache = true
 
+# Co-Lab note: includes an audio file intended as ambient background behind the photo carousel.
+# Artist: Community Lab, Eden and Suno
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/co-lab"
 playlist_id = "pl-co-lab"
-playlist_title = "Co-Lab playlist"
+playlist_title = "What Eden Thinks Community Lab Might Look Like"
 tag = "CO-LAB"
 cache = true
 
+# Artist: Ria
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/ria"
 playlist_id = "pl-ria"
-playlist_title = "Ria playlist"
+playlist_title = "Snippets from Drawing Klerb"
 tag = "RIA"
 cache = true
 
+# Artist: Jordan
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/jordan"
 playlist_id = "pl-jordan"
-playlist_title = "Jordan playlist"
+playlist_title = "Across The Void"
 tag = "JORDAN"
 cache = true
 
+# Artist: Alicia
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/alicia"
 playlist_id = "pl-alicia"
-playlist_title = "Alicia playlist"
+playlist_title = "Eden: Make My Art More Trippy"
 tag = "ALICIA"
 cache = true
 
@@ -192,6 +199,7 @@ playlist_title = "Vanessa playlist"
 tag = "VANESSA"
 cache = true
 
+# Artist: Seva
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/seva"
 playlist_id = "pl-seva"
@@ -209,14 +217,23 @@ cache = true
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/kamau"
 playlist_id = "pl-kamau"
-playlist_title = "Kamau playlist"
+playlist_title = "Quantum Poetry by KzA"
 tag = "KAMAU"
 cache = true
 
+# Artist: Lyosha
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/lyosha"
+playlist_id = "pl-lyosha"
+playlist_title = "Lyosha playlist"
+tag = "LYOSHA"
+cache = true
+
+# Artist: Zayne
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/zayne"
 playlist_id = "pl-zayne"
-playlist_title = "Zayne playlist"
+playlist_title = "Eden Art, installation, Luna Concept art, Benjamin Franklin Propaganda"
 tag = "ZAYNE"
 cache = true
 
@@ -227,6 +244,16 @@ playlist_title = "Tarcila playlist"
 tag = "TARCILA"
 cache = true
 
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/chebel"
+playlist_id = "pl-chebel"
+playlist_title = "Early Visions, Ancestresses & Other Stories"
+tag = "CHEBEL"
+cache = true
+
+# Artist: Chebel
+# Links: https://www.youtube.com/watch?v=avAG8Hq-FIc, https://youtu.be/AC7tKelKfL8, https://youtu.be/E_PkHGJH0PA
+# Note: sound would be nice
 [[prepare.eden_collection]]
 source = "https://app.eden.art/collections/697d45a9ef3ab8f5f09ab4c8"
 db = "PROD"
@@ -240,27 +267,9 @@ cache = true
 source = "https://app.eden.art/collections/698e638a0d9043b9594dbb4e"
 db = "PROD"
 playlist_id = "pl-anna"
-playlist_title = "Anna playlist"
+playlist_title = "The Donut Remembers: Field Topology & Self-Organizing Intelligence"
 tag = "ANNA"
 artist = "Anna"
-cache = true
-
-[[prepare.eden_collection]]
-source = "https://app.eden.art/collections/698e2dd60d9043b95945d9de"
-db = "PROD"
-playlist_id = "pl-chebel-a"
-playlist_title = "Chebel playlist A"
-tag = "CHEBEL"
-artist = "Chebel"
-cache = true
-
-[[prepare.eden_collection]]
-source = "https://app.eden.art/collections/65c9acacca4d49603737b42c"
-db = "PROD"
-playlist_id = "pl-chebel-b"
-playlist_title = "Chebel playlist B"
-tag = "CHEBEL"
-artist = "Chebel"
 cache = true
 
 [[prepare.eden_collection]]

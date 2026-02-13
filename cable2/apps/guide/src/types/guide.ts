@@ -81,6 +81,7 @@ export type KioskState = {
   targetKind?: "media" | "playlist" | "block" | "channel";
   targetId?: string;
   channel?: string;
+  rotate?: 0 | 90 | 180 | 270;
   lock?: boolean;
   qr?: boolean;
   playlist?: boolean;

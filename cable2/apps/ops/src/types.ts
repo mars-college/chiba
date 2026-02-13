@@ -87,6 +87,7 @@ export type OpsProfile = {
     prefetch_channels?: string[]
     prefetch_stash?: boolean
     prefetch_cache?: boolean
+    display_rotate?: 0 | 90 | 180 | 270
     scale?: number
     text_scale?: number
     hours?: number
@@ -149,6 +150,7 @@ export type OpsApplyTargetRequest = {
   hudMode?: 'always' | 'start' | 'never'
   hudShowSec?: number
   theme?: string
+  displayRotate?: 0 | 90 | 180 | 270
   scale?: number
   textScale?: number
   hours?: number

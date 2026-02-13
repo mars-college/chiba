@@ -1,5 +1,20 @@
 id = "pl-jordan"
-name = "Jordan playlist"
+name = "Across The Void"
 
 [[item]]
-playlist = "pl-under-construction"
+media = "m-scene-01-cf69e9c089"
+duration_slots = 1
+title = "Scene 01"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-02-b6663d454d"
+duration_slots = 1
+title = "Scene 02"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-03-2bc7f9d633"
+duration_slots = 1
+title = "Scene 03"
+tag = "JORDAN"

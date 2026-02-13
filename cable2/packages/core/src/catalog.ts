@@ -14,6 +14,13 @@ export type LoadCatalogOptions = {
   configRoot?: string;
 };
 
+export type RuntimeCatalog = {
+  media: Record<string, unknown>[];
+  playlists: Record<string, unknown>[];
+  blocks: Record<string, unknown>[];
+  channels: Record<string, unknown>[];
+};
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -67,6 +74,62 @@ async function loadKindFromDir(args: {
   return entries;
 }
 
+async function loadRuntimeKindFromDir(args: {
+  dirPath: string;
+  kind: "media" | "playlist" | "block" | "channel";
+}): Promise<Record<string, unknown>[]> {
+  let files: string[] = [];
+  try {
+    files = (await fs.readdir(args.dirPath))
+      .filter((name) => name.endsWith(".toml"))
+      .map((name) => path.join(args.dirPath, name));
+  } catch {
+    return [];
+  }
+
+  const entries: Record<string, unknown>[] = [];
+  for (const filePath of files) {
+    try {
+      const raw = await fs.readFile(filePath, "utf-8");
+      const parsed = toml.parse(raw) as Record<string, unknown>;
+      const id =
+        isNonEmptyString(parsed.id) ? String(parsed.id).trim() : path.basename(filePath, ".toml");
+      const out: Record<string, unknown> = { ...parsed, id };
+
+      if (args.kind === "playlist") {
+        if (!Array.isArray(out.items) && Array.isArray(out.item)) out.items = out.item;
+      } else if (args.kind === "block") {
+        if (!Array.isArray(out.items) && Array.isArray(out.item)) out.items = out.item;
+        if (!Array.isArray(out.programs) && Array.isArray(out.program)) out.programs = out.program;
+      } else if (args.kind === "channel") {
+        if (!Array.isArray(out.programs) && Array.isArray(out.program)) out.programs = out.program;
+        if (!Array.isArray(out.blocks) && Array.isArray(out.block)) {
+          out.blocks = (out.block as unknown[])
+            .map((entry) => {
+              if (typeof entry === "string") return entry;
+              if (entry && typeof entry === "object" && isNonEmptyString((entry as any).id)) {
+                return String((entry as any).id).trim();
+              }
+              return "";
+            })
+            .filter((entry) => entry.length > 0);
+        }
+      }
+
+      entries.push(out);
+    } catch {
+      // Skip malformed files; summary catalog still surfaces file existence.
+    }
+  }
+
+  entries.sort((a, b) => {
+    const aId = isNonEmptyString(a.id) ? String(a.id) : "";
+    const bId = isNonEmptyString(b.id) ? String(b.id) : "";
+    return aId.localeCompare(bId);
+  });
+  return entries;
+}
+
 export async function loadCatalog(options: LoadCatalogOptions = {}): Promise<Catalog> {
   const repoRoot = options.repoRoot ?? findRepoRoot();
   const defaultConfigRoot = options.configRoot ?? (() => {
@@ -95,4 +158,29 @@ export async function loadCatalog(options: LoadCatalogOptions = {}): Promise<Cat
     channels,
     profiles,
   });
+}
+
+export async function loadRuntimeCatalog(
+  options: LoadCatalogOptions = {},
+): Promise<RuntimeCatalog> {
+  const repoRoot = options.repoRoot ?? findRepoRoot();
+  const defaultConfigRoot = options.configRoot ?? (() => {
+    const candidates = ["config", "cable2/config"];
+    for (const candidate of candidates) {
+      if (fsSync.existsSync(path.join(repoRoot, candidate))) {
+        return candidate;
+      }
+    }
+    return "config";
+  })();
+  const configRoot = path.resolve(repoRoot, defaultConfigRoot);
+
+  const [media, playlists, blocks, channels] = await Promise.all([
+    loadRuntimeKindFromDir({ dirPath: path.join(configRoot, "media"), kind: "media" }),
+    loadRuntimeKindFromDir({ dirPath: path.join(configRoot, "playlists"), kind: "playlist" }),
+    loadRuntimeKindFromDir({ dirPath: path.join(configRoot, "blocks"), kind: "block" }),
+    loadRuntimeKindFromDir({ dirPath: path.join(configRoot, "channels"), kind: "channel" }),
+  ]);
+
+  return { media, playlists, blocks, channels };
 }

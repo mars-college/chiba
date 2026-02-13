@@ -275,14 +275,46 @@ async function fetchRuntimeCatalogFromControlPlane(timeoutMs: number): Promise<R
 }
 
 function toLoadedConfigLikeFromRuntimeCatalog(catalog: RuntimeCatalog): LoadedConfig {
+  const normalizeRow = (kind: 'media' | 'playlist' | 'block' | 'channel', row: any) => {
+    if (!row || typeof row !== 'object') return row;
+    const out: any = { ...row };
+    if (kind === 'playlist') {
+      if (!Array.isArray(out.items) && Array.isArray(out.item)) out.items = out.item;
+      if (!Array.isArray(out.programs) && Array.isArray(out.program)) out.programs = out.program;
+    }
+    if (kind === 'block') {
+      if (!Array.isArray(out.items) && Array.isArray(out.item)) out.items = out.item;
+      if (!Array.isArray(out.programs) && Array.isArray(out.program)) out.programs = out.program;
+    }
+    if (kind === 'channel') {
+      if (!Array.isArray(out.programs) && Array.isArray(out.program)) out.programs = out.program;
+      if (!Array.isArray(out.blocks) && Array.isArray(out.block)) {
+        out.blocks = out.block
+          .map((entry: any) => (typeof entry === 'string' ? entry : String(entry?.id ?? '').trim()))
+          .filter((entry: string) => entry.length > 0);
+      }
+    }
+    return out;
+  };
+
   const byId = (rows: any[]) =>
     Object.fromEntries(
       rows
-        .map((row) => [String((row as any)?.id ?? '').trim(), row] as const)
+        .map((row) => {
+          const normalized =
+            rows === catalog.media
+              ? normalizeRow('media', row)
+              : rows === catalog.playlists
+                ? normalizeRow('playlist', row)
+                : rows === catalog.blocks
+                  ? normalizeRow('block', row)
+                  : normalizeRow('channel', row);
+          return [String((normalized as any)?.id ?? '').trim(), normalized] as const;
+        })
         .filter(([id]) => id.length > 0)
     );
   return {
-    channels: catalog.channels,
+    channels: catalog.channels.map((row) => normalizeRow('channel', row)),
     mediaById: byId(catalog.media),
     playlistsById: byId(catalog.playlists),
     blocksById: byId(catalog.blocks),
@@ -2296,6 +2328,7 @@ type OpsApplyOverrides = {
   targetKind?: 'media' | 'playlist' | 'block' | 'channel';
   targetId?: string;
   channel?: string;
+  displayRotate?: 0 | 90 | 180 | 270;
   lock?: boolean;
   showQr?: boolean;
   playlist?: boolean;
@@ -2373,12 +2406,23 @@ function parseOpsApplyOverrides(body: Record<string, unknown>): OpsApplyOverride
   const hudShowSecRaw = parseOptionalFinite(body.hudShowSec ?? body.hud_sec ?? body.hudSec);
   const hudShowSec =
     typeof hudShowSecRaw === 'number' && hudShowSecRaw >= 0 ? hudShowSecRaw : undefined;
+  const displayRotateRaw = parseOptionalFinite(
+    body.displayRotate ?? body.display_rotate ?? body.rotate ?? body.rotation
+  );
+  const displayRotate =
+    displayRotateRaw === 0 ||
+    displayRotateRaw === 90 ||
+    displayRotateRaw === 180 ||
+    displayRotateRaw === 270
+      ? (displayRotateRaw as 0 | 90 | 180 | 270)
+      : undefined;
 
   return {
     mode,
     targetKind,
     targetId,
     channel,
+    displayRotate,
     lock: parseOptionalBoolean(body.lock),
     showQr: parseOptionalBoolean(body.showQr ?? body.qr),
     playlist: parseOptionalBoolean(body.playlist),
@@ -2410,6 +2454,9 @@ function mergeProfileModeWithOverrides(mode: CableMode, overrides: OpsApplyOverr
     nextDefaults.channel = overrides.channel;
     nextDefaults.target_kind = 'channel';
     nextDefaults.target_id = overrides.channel;
+  }
+  if (overrides.displayRotate !== undefined) {
+    nextDefaults.display_rotate = overrides.displayRotate;
   }
   if (overrides.lock !== undefined) nextDefaults.lock = overrides.lock;
   if (overrides.showQr !== undefined) nextDefaults.qr = overrides.showQr;
@@ -2491,6 +2538,9 @@ function buildTargetDefaults(args: {
     qr: overrides.showQr ?? false,
   };
 
+  if (overrides.displayRotate !== undefined) {
+    defaults.display_rotate = overrides.displayRotate;
+  }
   if (overrides.lock !== undefined) defaults.lock = overrides.lock;
   if (overrides.playlist !== undefined) defaults.playlist = overrides.playlist;
   else if (resolvedTargetKind === 'playlist') defaults.playlist = true;
@@ -2722,6 +2772,39 @@ async function postKioskUrlToNode(args: {
   }
 }
 
+async function postRotateToNode(args: {
+  hostOrIp: string;
+  rotation: 0 | 90 | 180 | 270;
+  apiKey?: string | null;
+  timeoutMs: number;
+}): Promise<{ ok: boolean; status: number | null; ms: number | null; error?: string }> {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), args.timeoutMs);
+  try {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (args.apiKey && args.apiKey.trim().length > 0) {
+      headers.authorization = `Bearer ${args.apiKey.trim()}`;
+    }
+    const response = await fetch(`http://${formatHostForUrl(args.hostOrIp)}:8080/rotate`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers,
+      body: JSON.stringify({ rotation: args.rotation }),
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      ms: Date.now() - started,
+      error: response.ok ? undefined : `http_${response.status}`,
+    };
+  } catch (err) {
+    return { ok: false, status: null, ms: null, error: (err as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function postJsonToNode(args: {
   hostOrIp: string;
   serverPort: number;
@@ -2849,9 +2932,30 @@ async function applyModeViaControlPlane(args: {
         let urlSync:
           | { ok: boolean; status: number | null; ms: number | null; error?: string }
           | null = null;
+        let rotateSync:
+          | { ok: boolean; status: number | null; ms: number | null; error?: string }
+          | null = null;
         let prefetch: OpsApplyResult['prefetch'] | null = null;
         if (posted.ok) {
           const apiKey = getApiKeyForPi(pi.id);
+          const rotateRaw =
+            typeof (cable as any).display_rotate === 'number'
+              ? (cable as any).display_rotate
+              : typeof (cable as any).display_rotate === 'string'
+                ? Number((cable as any).display_rotate)
+                : NaN;
+          const rotation =
+            rotateRaw === 0 || rotateRaw === 90 || rotateRaw === 180 || rotateRaw === 270
+              ? (rotateRaw as 0 | 90 | 180 | 270)
+              : null;
+          if (rotation !== null) {
+            rotateSync = await postRotateToNode({
+              hostOrIp: address,
+              rotation,
+              apiKey,
+              timeoutMs: args.timeoutMs,
+            });
+          }
           urlSync = await postKioskUrlToNode({
             hostOrIp: address,
             url,
@@ -2934,10 +3038,14 @@ async function applyModeViaControlPlane(args: {
           }
         }
         const ok = posted.ok;
-        const warning =
-          posted.ok && urlSync && !urlSync.ok
-            ? `kiosk_url_sync_failed:${urlSync.error ?? 'unknown'}`
-            : null;
+        const warnings: string[] = [];
+        if (posted.ok && rotateSync && !rotateSync.ok) {
+          warnings.push(`rotate_sync_failed:${rotateSync.error ?? 'unknown'}`);
+        }
+        if (posted.ok && urlSync && !urlSync.ok) {
+          warnings.push(`kiosk_url_sync_failed:${urlSync.error ?? 'unknown'}`);
+        }
+        const warning = warnings.length > 0 ? warnings.join(";") : null;
         const error = posted.ok ? null : posted.error ?? 'kiosk_state_failed';
         return {
           id: pi.id,
