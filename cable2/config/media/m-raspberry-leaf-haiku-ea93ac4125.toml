@@ -1,0 +1,9 @@
+id = "m-raspberry-leaf-haiku-ea93ac4125"
+title = "raspberry leaf haiku"
+tag = "GANDALA"
+artist = "Gandala"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/gandala/raspberry leaf haiku.mov"
+cache = true

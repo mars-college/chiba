@@ -1,5 +1,4 @@
 id = "midterms-chebel"
-number = "M03"
 name = "Midterms Chebel"
 call_sign = "CHEBEL"
-blocks = [ "blk-midterms-chebel" ]
+blocks = [ "blk-chebel" ]

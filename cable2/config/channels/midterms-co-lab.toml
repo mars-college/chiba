@@ -1,5 +1,4 @@
 id = "midterms-co-lab"
-number = "M04"
 name = "Midterms Community Lab"
-call_sign = "COLAB"
-blocks = [ "blk-midterms-co-lab" ]
+call_sign = "CO-LAB"
+blocks = [ "blk-co-lab" ]

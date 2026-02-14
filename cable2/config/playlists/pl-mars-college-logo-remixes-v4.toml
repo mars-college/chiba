@@ -1,5 +1,8 @@
 id = "pl-mars-college-logo-remixes-v4"
 name = "Mars College Logo remixes (volume 4)"
+title = "Mars College Logo remixes (volume 4)"
+
+artist = "Marzipan"
 
 [[item]]
 media = "m-eden-6987cd4b16e8bd8d0b0d8e6d"

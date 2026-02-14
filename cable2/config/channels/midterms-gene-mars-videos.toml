@@ -1,0 +1,4 @@
+id = "midterms-gene-mars-videos"
+name = "Midterms Gene Mars Videos"
+call_sign = "GENE"
+blocks = [ "blk-gene-mars-videos" ]

@@ -1,6 +1,7 @@
 id = "m-scan-20220408-190503-2-d0422423e4"
 title = "Scan 20220408 190503 2"
 tag = "LYOSHA"
+artist = "Lyosha"
 
 [source]
 type = "path"

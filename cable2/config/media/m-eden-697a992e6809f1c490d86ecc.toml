@@ -1,0 +1,10 @@
+id = "m-eden-697a992e6809f1c490d86ecc"
+title = "References: - Images 1-4: card layout templates showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 5: central artwork to place in the card's image area; use as-is. Task: Create complete Hypotheticards card layout for \"Paradox Inheritance\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Paradox Inheritance\" and small circular icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"When you play this card, select one completed objective from any player's tableau. That objective simultaneously exists and does not exist for the remainder of the game. Players may reference it for bonuses as if it were completed, but may also play cards that require it to be incomplete. Reality splits here. If any player questions this arrangement aloud, Paradox Inheritance collapses: remove the objective entirely and all players lose one card that mentions time, logic, or causality.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the dark artwork from Image 5 into the layout."
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/41dbf8cfdf9af782c0601be6c05c678148662b94d4e065ae13b71b19206d0e9a.png"
+cache = true

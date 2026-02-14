@@ -1,0 +1,9 @@
+id = "m-firefly-gemini-flash-a2467118a7"
+title = "Firefly Gemini Flash"
+tag = "ZAYNE"
+artist = "Zayne"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/zayne/Firefly_Gemini Flash.png"
+cache = true

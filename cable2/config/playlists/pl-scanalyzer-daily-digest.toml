@@ -1,5 +1,8 @@
 id = "pl-scanalyzer-daily-digest"
 name = "Scanalyzer Daily Digest"
+title = "Scanalyzer Daily Digest"
+
+artist = "Marzipan"
 
 [[item]]
 media = "m-eden-698f2f3add0d02897e798bdb"

@@ -1,0 +1,4 @@
+id = "midterms-jensen"
+name = "Midterms Jensen"
+call_sign = "JENSEN"
+blocks = [ "blk-jensen" ]

@@ -26,12 +26,13 @@ prefetch_cache = true
 # Midterms content assignments:
 # - LW1 -> ria
 # - LW2 -> jordan
+# - LW2-2 -> gandala (placeholder; no media yet)
 # - LW3 -> alicia
+# - LW3-2 -> freeman
 # - LW4 -> freeman
-# - LE1 -> (unassigned)
+# - LE1 -> jmill
 # - LE2-2 -> lyosha
 # - LE3-2 -> anna
-# - LE2 -> yulia
 # - LE3 -> chebel
 # - LE4 -> co-lab
 # - UW1 -> marzipan
@@ -40,8 +41,8 @@ prefetch_cache = true
 # - UW4 -> earl
 # - UE1 -> seva
 # - UE2 -> kamau
-# - UE3 -> zayne
-# - UE4 -> tarcila
+# - UE3 -> tarcila
+# - UE4 -> zayne
 [pis.lower-west-1.cable]
 target_kind = "channel"
 target_id = "midterms-ria"
@@ -54,23 +55,41 @@ target_id = "midterms-jordan"
 channel = "midterms-jordan"
 prefetch_targets = ["channel:midterms-jordan"]
 
+[pis.lower-west-2-2.cable]
+target_kind = "channel"
+target_id = "midterms-gandala"
+channel = "midterms-gandala"
+prefetch_targets = ["channel:midterms-gandala"]
+
 [pis.lower-west-3.cable]
 target_kind = "channel"
 target_id = "midterms-alicia"
 channel = "midterms-alicia"
 prefetch_targets = ["channel:midterms-alicia"]
 
-[pis.lower-west-4.cable]
+[pis.lower-west-3-2.cable]
 target_kind = "channel"
 target_id = "midterms-freeman"
 channel = "midterms-freeman"
 prefetch_targets = ["channel:midterms-freeman"]
 
+[pis.lower-west-4.cable]
+target_kind = "channel"
+target_id = "midterms-jensen"
+channel = "midterms-jensen"
+prefetch_targets = ["channel:midterms-jensen"]
+
 [pis.lower-east-3-2.cable]
 target_kind = "channel"
-target_id = "midterms-anna"
-channel = "midterms-anna"
-prefetch_targets = ["channel:midterms-anna"]
+target_id = "midterms-chebel"
+channel = "midterms-chebel"
+prefetch_targets = ["channel:midterms-chebel"]
+
+[pis.lower-east-1.cable]
+target_kind = "channel"
+target_id = "midterms-jmill"
+channel = "midterms-jmill"
+prefetch_targets = ["channel:midterms-jmill"]
 
 [pis.lower-east-2-2.cable]
 target_kind = "channel"
@@ -80,9 +99,9 @@ prefetch_targets = ["channel:midterms-lyosha"]
 
 [pis.lower-east-3.cable]
 target_kind = "channel"
-target_id = "midterms-chebel"
-channel = "midterms-chebel"
-prefetch_targets = ["channel:midterms-chebel"]
+target_id = "midterms-anna"
+channel = "midterms-anna"
+prefetch_targets = ["channel:midterms-anna"]
 
 [pis.lower-east-4.cable]
 target_kind = "channel"
@@ -128,15 +147,21 @@ prefetch_targets = ["channel:midterms-kamau"]
 
 [pis.upper-east-3.cable]
 target_kind = "channel"
-target_id = "midterms-zayne"
-channel = "midterms-zayne"
-prefetch_targets = ["channel:midterms-zayne"]
-
-[pis.upper-east-4.cable]
-target_kind = "channel"
 target_id = "midterms-tarcila"
 channel = "midterms-tarcila"
 prefetch_targets = ["channel:midterms-tarcila"]
+
+[pis.upper-west-3-2.cable]
+target_kind = "channel"
+target_id = "midterms-gene-mars-videos"
+channel = "midterms-gene-mars-videos"
+prefetch_targets = ["channel:midterms-gene-mars-videos"]
+
+[pis.upper-east-4.cable]
+target_kind = "channel"
+target_id = "midterms-zayne"
+channel = "midterms-zayne"
+prefetch_targets = ["channel:midterms-zayne"]
 
 # ---------------------------------------------------------------------------
 # Preparation steps
@@ -156,7 +181,8 @@ cache = true
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/earl"
 playlist_id = "pl-earl"
-playlist_title = "Earl playlist"
+playlist_title = "Earl"
+artist = "Earl"
 channel_id = "midterms-earl"
 channel_name = "Midterms Earl"
 tag = "EARL"
@@ -175,30 +201,58 @@ tag = "CO-LAB"
 cache = true
 
 # Artist: Ria
+# Link: https://tinyurl.com/5n7eej8p
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/ria"
 playlist_id = "pl-ria"
 playlist_title = "Snippets from Drawing Klerb"
+artist = "Ria"
 channel_id = "midterms-ria"
 channel_name = "Midterms Ria"
 tag = "RIA"
 cache = true
 
 # Artist: Jordan
+# Link: https://drive.google.com/drive/folders/14hmFG7hRVPgVFpyu0hhoted_4VpSNigM
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/jordan"
 playlist_id = "pl-jordan"
 playlist_title = "Across The Void"
+artist = "Jordan"
 channel_id = "midterms-jordan"
 channel_name = "Midterms Jordan"
 tag = "JORDAN"
 cache = true
 
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/jensen"
+playlist_id = "pl-jensen"
+playlist_title = "Jensen"
+artist = "Jensen"
+channel_id = "midterms-jensen"
+channel_name = "Midterms Jensen"
+tag = "JENSEN"
+cache = true
+
+# Artist: Gandala
+# No media submitted yet; use placeholder reel for this node.
+[[prepare.dir]]
+path = "/Volumes/share/chiba-cable/assets/mc26/midterms/gandala"
+playlist_id = "pl-gandala"
+playlist_title = "Gandala"
+artist = "Gandala"
+channel_id = "midterms-gandala"
+channel_name = "Midterms Gandala"
+tag = "GANDALA"
+cache = true
+
 # Artist: Alicia
+# Link: https://drive.google.com/drive/folders/1c3_ghlXCSsIxfRebUITadAEpgl3_zFg6?usp=sharing
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/alicia"
 playlist_id = "pl-alicia"
 playlist_title = "Eden: Make My Art More Trippy"
+artist = "Alicia"
 channel_id = "midterms-alicia"
 channel_name = "Midterms Alicia"
 tag = "ALICIA"
@@ -207,35 +261,30 @@ cache = true
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/vanessa"
 playlist_id = "pl-vanessa"
-playlist_title = "Vanessa playlist"
+playlist_title = "Little Martians"
+artist = "Vanessa"
 channel_id = "midterms-vanessa"
 channel_name = "Midterms Vanessa"
 tag = "VANESSA"
 cache = true
 
 # Artist: Seva
-[[prepare.dir]]
-path = "/Volumes/share/chiba-cable/assets/mc26/midterms/seva"
+[[prepare.eden_collection]]
+source = "https://app.eden.art/collections/698f70c26ec56b95041b79aa"
+db = "PROD"
 playlist_id = "pl-seva"
-playlist_title = "Seva playlist"
+playlist_title = "Seva"
 channel_id = "midterms-seva"
 channel_name = "Midterms Seva"
 tag = "SEVA"
-cache = true
-
-[[prepare.dir]]
-path = "/Volumes/share/chiba-cable/assets/mc26/midterms/yulia"
-playlist_id = "pl-yulia"
-playlist_title = "Yulia playlist"
-channel_id = "midterms-yulia"
-channel_name = "Midterms Yulia"
-tag = "YULIA"
+artist = "Seva"
 cache = true
 
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/kamau"
 playlist_id = "pl-kamau"
-playlist_title = "Quantum Poetry by KzA"
+playlist_title = "Quantum Poetry"
+artist = "KzA"
 channel_id = "midterms-kamau"
 channel_name = "Midterms Kamau"
 tag = "KAMAU"
@@ -245,7 +294,7 @@ cache = true
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/lyosha"
 playlist_id = "pl-lyosha"
-playlist_title = "Lyosha's Art"
+playlist_title = "Lyosha"
 artist = "Lyosha"
 channel_id = "midterms-lyosha"
 channel_name = "Midterms Lyosha"
@@ -257,6 +306,7 @@ cache = true
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/zayne"
 playlist_id = "pl-zayne"
 playlist_title = "Eden Art, installation, Luna Concept art, Benjamin Franklin Propaganda"
+artist = "Zayne"
 channel_id = "midterms-zayne"
 channel_name = "Midterms Zayne"
 tag = "ZAYNE"
@@ -265,7 +315,8 @@ cache = true
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/tarcila"
 playlist_id = "pl-tarcila"
-playlist_title = "Tarcila playlist"
+playlist_title = "Lepus Liturge Antology"
+artist = "Tarcila"
 channel_id = "midterms-tarcila"
 channel_name = "Midterms Tarcila"
 tag = "TARCILA"
@@ -274,7 +325,7 @@ cache = true
 [[prepare.dir]]
 path = "/Volumes/share/chiba-cable/assets/mc26/midterms/chebel"
 playlist_id = "pl-chebel"
-playlist_title = "Early Visions, Ancestresses & Other Stories (3 links)"
+playlist_title = "Early Visions, Ancestresses & Other Stories"
 artist = "Chebel"
 channel_id = "midterms-chebel"
 channel_name = "Midterms Chebel"
@@ -288,11 +339,33 @@ cache = true
 source = "https://app.eden.art/collections/697d45a9ef3ab8f5f09ab4c8"
 db = "PROD"
 playlist_id = "pl-freeman"
-playlist_title = "Freeman playlist"
+playlist_title = "Freeman"
 channel_id = "midterms-freeman"
 channel_name = "Midterms Freeman"
 tag = "FREEMAN"
 artist = "Freeman"
+cache = true
+
+[[prepare.eden_collection]]
+source = "https://app.eden.art/collections/698f9f3a6ec56b9504229033"
+db = "PROD"
+playlist_id = "pl-jmill"
+playlist_title = "Hypotheticards"
+channel_id = "midterms-jmill"
+channel_name = "Midterms Jmill"
+tag = "JMILL"
+artist = "jmill"
+cache = true
+
+[[prepare.eden_collection]]
+source = "https://app.eden.art/collections/698fca586ec56b950426e2fb"
+db = "PROD"
+playlist_id = "pl-gene-mars-videos"
+playlist_title = "Mars Videos"
+channel_id = "midterms-gene-mars-videos"
+channel_name = "Midterms Gene Mars Videos"
+tag = "GENE"
+artist = "Gene"
 cache = true
 
 [[prepare.eden_collection]]

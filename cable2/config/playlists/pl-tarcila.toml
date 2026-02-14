@@ -1,5 +1,11 @@
 id = "pl-tarcila"
-name = "Tarcila playlist"
+name = "Lepus Liturge Antology"
+title = "Lepus Liturge Antology"
+
+artist = "Tarcila"
 
 [[item]]
-playlist = "pl-under-construction"
+media = "m-lepus-liturge-vii-5f442e7ddb"
+duration_slots = 1
+title = "Lepus Liturge VII"
+tag = "TARCILA"

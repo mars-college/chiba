@@ -1,6 +1,7 @@
 id = "m-drumdrops-screen-test-e0cbe3555d"
 title = "Drumdrops Screen Test"
 tag = "EARL"
+artist = "Earl"
 
 [source]
 type = "path"

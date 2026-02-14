@@ -1,0 +1,4 @@
+id = "midterms-gandala"
+name = "Midterms Gandala"
+call_sign = "GANDALA"
+blocks = [ "blk-gandala" ]

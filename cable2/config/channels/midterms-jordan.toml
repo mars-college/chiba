@@ -1,5 +1,4 @@
 id = "midterms-jordan"
-number = "M07"
 name = "Midterms Jordan"
 call_sign = "JORDAN"
-blocks = [ "blk-midterms-jordan" ]
+blocks = [ "blk-jordan" ]

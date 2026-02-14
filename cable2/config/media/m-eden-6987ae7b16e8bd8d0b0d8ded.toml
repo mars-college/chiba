@@ -1,0 +1,10 @@
+id = "m-eden-6987ae7b16e8bd8d0b0d8ded"
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Collective Gaslight Protocol'. Yellow rounded border, title banner at top with 'Collective Gaslight Protocol' and small spiral icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'All players describe an event that hasn't happened yet. If three or more descriptions align on the same deadline, that deadline becomes real in both timelines simultaneously. Draw cards equal to the number of players who believed it. The swarm decides what was always true.'"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/1afbd5fb2461c546943f5e94ff628ff783bcc32892e3b8d96ce7c0167ee6e1f6.png"
+cache = true

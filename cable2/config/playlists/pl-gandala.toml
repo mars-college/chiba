@@ -1,0 +1,23 @@
+id = "pl-gandala"
+name = "Gandala"
+title = "Gandala"
+
+artist = "Gandala"
+
+[[item]]
+media = "m-mahjongcircuitry-01f52a4969"
+duration_slots = 1
+title = "mahjongcircuitry"
+tag = "GANDALA"
+
+[[item]]
+media = "m-raspberry-leaf-haiku-ea93ac4125"
+duration_slots = 1
+title = "raspberry leaf haiku"
+tag = "GANDALA"
+
+[[item]]
+media = "m-semiconductor-cactus-gandala-2a42dcd794"
+duration_slots = 1
+title = "semiconductor cactus   gandala"
+tag = "GANDALA"

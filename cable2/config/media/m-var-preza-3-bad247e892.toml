@@ -1,6 +1,7 @@
 id = "m-var-preza-3-bad247e892"
 title = "var preza 3"
 tag = "LYOSHA"
+artist = "Lyosha"
 
 [source]
 type = "path"

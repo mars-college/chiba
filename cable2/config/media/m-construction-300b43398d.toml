@@ -1,0 +1,9 @@
+id = "m-construction-300b43398d"
+title = "construction"
+tag = "GANDALA"
+artist = "Gandala"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/gandala/construction.gif"
+cache = true

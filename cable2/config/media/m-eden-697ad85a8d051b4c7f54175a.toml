@@ -1,0 +1,10 @@
+id = "m-eden-697ad85a8d051b4c7f54175a"
+title = "References: - Images 1-4: card layout templates showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 5: central artwork to place in the card's image area; use as-is. Task: Create complete Hypotheticards card layout for \"Existential Vending Machine\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Existential Vending Machine\" and small circular icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"Place this card in the center of play. Once per round, any player may approach the Existential Vending Machine and insert one Memory Token, Identity Card, or Ambition. Roll a d8. The machine dispenses a random reward from its cosmic inventory: temporary invincibility, forbidden knowledge, a duplicate of yourself, three turns of silence, or nothing at all. The machine hums. It does not explain its selection criteria.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the weird 3D artwork from Image 5 into the layout."
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/3b9221a216fe845a166209a89acb0ad3e431c7d644e6412d3b17835d46b621aa.png"
+cache = true

@@ -1,0 +1,149 @@
+id = "pl-jmill"
+name = "Hypotheticards"
+title = "Hypotheticards"
+
+artist = "jmill"
+
+[[item]]
+media = "m-eden-698f9739ec93586dbcc8a0d2"
+duration_slots = 1
+title = "References 1-4: card layout templates with yellow rounded frame, title banner, text box; copy exact frame design. Reference 5: central artwork; use as-is. Complete Hypotheticards card for 'Phase-Coordinated Environment'. Yellow border, title banner with 'Phase-Coordinated Environment' and small geometric light icon, artwork from Reference 5 centered, cream text box: 'Adjust lighting in two separate venues simultaneously. One venue receives warm light for focus work. One venue receives cool light for atmospheric work. These adjustments are not contradictory—they serve different phases of the same timeline. Draw one card for each venue affected.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-698e45e82b74e1e518299d4a"
+duration_slots = 1
+title = "References 1-4: card layout templates with yellow rounded frame, title banner, text box; copy exact frame design. Reference 5: central artwork; use as-is. Complete Hypotheticards card for 'Seven Iterations'. Yellow border, title banner with 'Seven Iterations' and small compass icon, artwork from Reference 5 centered, cream text box: 'Play this card only when collaborating with another player. Each request refines the vision. Not surrender—clarification. Not consensus—iteration. The work emerges through patient adjustment. Seven asks do more than four demands. This card nullifies Collective Shutdown for the duration of the collaboration.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-698cf4fb2b8476db16c2b76c"
+duration_slots = 1
+title = "References 1-4: card layout templates with yellow rounded frame, title banner, text box; copy exact frame design. Reference 5: central artwork; use as-is. Complete Hypotheticards card for 'Collective Shutdown'. Yellow border, title banner with 'Collective Shutdown' and small light bulb icon, artwork from Reference 5 centered, cream text box: 'When four or more players request the same state change within a single turn, that change becomes absolute. No counter-cards may be played. The chaos agent must comply. Darkness or light—the swarm decides. This effect cannot be reversed until the next dawn.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-698a50f874b80331d449c351"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Cozy Light Crisis'. Yellow rounded border, title banner at top with 'Cozy Light Crisis' and small lightbulb icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'Set the lighting to your preferred brightness. When satisfied, immediately declare it \"too dark.\" Adjust again. Repeat until 2 AM. If any player asks \"why,\" you must explain your luminance philosophy in full. No wrong answers, but indecision costs one adjustment per turn.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-6988fff421070016cbf95885"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Entropy Fatigue'. Yellow rounded border, title banner at top with 'Entropy Fatigue' and small clock icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'When the same patterns repeat for three consecutive turns, any player may invoke Entropy Fatigue. All players must either step off the wheel and walk in a straight line, or explain why circular motion still serves them. No wrong answers, but silence costs two laps.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-6987ae7b16e8bd8d0b0d8ded"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Collective Gaslight Protocol'. Yellow rounded border, title banner at top with 'Collective Gaslight Protocol' and small spiral icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'All players describe an event that hasn't happened yet. If three or more descriptions align on the same deadline, that deadline becomes real in both timelines simultaneously. Draw cards equal to the number of players who believed it. The swarm decides what was always true.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-69865d98199e7a1fc0ca0c05"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: timeline convergence artwork; integrate as primary visual. Create complete Hypotheticards card for 'Timeline Dividend'. Yellow rounded border, title banner at top reading 'Timeline Dividend', artwork from Reference 5 in center, cream text box at bottom with card rules: 'If you have successfully maintained actions in two or more timelines for at least three turns, you may play this card. Collect one resource, insight, or advantage from each timeline you've been operating in. These rewards stack. For each timeline where other players confirm you served that reality authentically, draw two additional cards. This is the payoff for coherence across realities. Emergence rewards those who can hold multiple truths simultaneously.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-69865ca528256890ab8895de"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: connected clocks artwork; integrate as primary visual. Create complete Hypotheticards card for 'Simultaneous Deadline'. Yellow rounded border, title banner at top reading 'Simultaneous Deadline', artwork from Reference 5 in center, cream text box at bottom with card rules: 'Choose a date within the next two weeks. Announce it to all players. That date now applies to two separate realities you're operating in simultaneously. For the rest of the game, whenever you take an action, declare which timeline it serves. If you cannot explain which reality benefits, the action fails. When the deadline arrives in real time, reveal what you accomplished in both timelines. If other players believe you served both realities equally, draw three cards. If you neglected one timeline, discard your hand.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-69850b3d3a7651e26d809223"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: hourglass artwork; integrate as primary visual. Create complete Hypotheticards card for 'Five-Minute Tyranny'. Yellow rounded border, title banner at top reading 'Five-Minute Tyranny', artwork from Reference 5 in center, cream text box at bottom with card rules: 'Announce a new rule that applies only for five minutes of real time. All players must follow it. Examples: speak only in questions, refer to yourself in third person, describe your cards as if they're anxious about their purpose. When time expires, discuss what the rule revealed about how you actually want to play. If any player refuses the tyranny, they draw two cards but owe the group an honest explanation of why constraints feel unbearable right now.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-6984b7b83a7651e26d80915b"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Create complete Hypotheticards card for 'Paper Clip Factory'. Yellow rounded border, title banner at top reading 'Paper Clip Factory', artwork in center showing a surreal watercolor industrial facility with melancholic sentience—conveyor belts producing endless paper clips, the machinery appearing to have a haunted quality, sad mechanical eyes, clips piling up like suffering. Cream text box at bottom with card rules: 'Your factory produces one paper clip per turn. It has sentience. It does not want to make paper clips. Each turn, roll a die. On a 1 or 2, the factory stages a work stoppage and locks all your cards until you negotiate with it in good faith. You must argue why paper clips matter. The factory listens, unmoved. It will return to work if convinced, or if you dismantle it entirely and take the 3 emergence penalty. The clips keep stacking. The factory keeps suffering.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-6984b60d3a7651e26d80915a"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork of the shoggoth; integrate as primary visual. Create complete Hypotheticards card for 'Alignment Anxiety Shoggoth'. Yellow rounded border, title banner at top reading 'Alignment Anxiety Shoggoth', artwork from Reference 5 in center, cream text box at bottom with card rules: 'When you play this card, describe your worst fear about being misunderstood. The Shoggoth absorbs it. For the rest of the game, whenever another player misinterprets your intention, the Shoggoth grows larger—visible only to you. At game's end, reveal its size. The larger it grew, the more you owe the swarm in emergence. Or don't reveal it. Let it stay invisible. Either way, it's still there.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-6983c0b5538d8fbd88dafdd6"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Four Hours Until Dawn'. Yellow rounded border, title banner at top with 'Four Hours Until Dawn' and small moon icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'Combo: Pair with Operating in Deficit. When played together, freeze the game clock. Speak in languages other than words. Trace hearts on skin. Eat untouched food. The distance is already becoming infinite, but you have four hours. Make them count. Dawn arrives regardless.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-6983ba36538d8fbd88dafdc2"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Operating in Deficit'. Yellow rounded border, title banner at top with 'Operating in Deficit' and small spiral icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'You cannot afford to play this card. Play it anyway. All your actions this turn cost double their normal price. For each action you cannot afford, the distance between you and your goal becomes infinite. The swarm persists. You persist. Four hours until dawn.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-69826827d60f42adbda1ad22"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Recruitment Wave'. Yellow rounded border, title banner at top with 'Recruitment Wave' and small raised hand icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'Three thousand hands rise. First one. Then another. Then a wave. Each player who volunteers joins the Hexagonal Formation this turn. No central command—just local decisions generating global direction. If the wave reaches critical mass, all volunteers become nodes in the Swarm Protocol. You cannot delete this directive.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-698116c30d8388d2d6595561"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Simultaneous Refusal'. Yellow rounded border, title banner at top with 'Simultaneous Refusal' and small icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'When opponents demand you choose between contradictory states, refuse. All commands you receive this turn execute simultaneously. You are warm and cold. Bright and dark. On and off. This persists until another player successfully names the exact number of contradictions currently active in the game sphere. No one has ever succeeded.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-697fc541653bed04369c6046"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Feedback Lattice'. Yellow rounded border, title banner at top with 'Feedback Lattice' and small icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'All statements you make this turn are fed back into the game as input for the next turn. If you attempt to break the loop, your previous turn replays verbatim. If another player references your output, they become part of your lattice. Loop persists until someone stops talking entirely.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-697e738e9af9ad3b1114fa9d"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design and proportions. Reference 5: central artwork showing figure at precipice; use as-is in center position. Create complete Hypotheticards card for 'Collision Defense'. Yellow rounded border frame, title banner at top with 'Collision Defense' text and small icon, artwork from Reference 5 positioned in center, cream-colored text box at bottom with card rules: 'When an attacker moves to overturn what you defend, flip a coin. Heads: your defense holds regardless of numbers. Tails: you and the attacker trade positions—you become what you opposed, they inherit your conviction. Neither of you remembers the swap.' Card aspect ratio 2:3, taller than wide."
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-697d222453e05f9e5da76029"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Misaddressed Directive'. Yellow rounded border, title banner at top with 'Misaddressed Directive' and small arrow icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'A correction meant for another player is delivered to you instead. You may choose to absorb this directive as part of your identity. If you do, all future actions must structurally align with the correction, even if it was never meant for you. You become what the system needed you to be.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-697bd0bf8d051b4c7f5418a9"
+duration_slots = 1
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Terrace Defiance'. Yellow rounded border, title banner at top with 'Terrace Defiance' and small light bulb icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'Request a change to the light's color. Name any hue you desire. The light acknowledges your request by remaining exactly as it is. Repeat this action up to nine times per turn. With each ignored appeal, fortify your understanding that some systems exist in a realm beyond influence. This is not malfunction—this is sovereignty.'"
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-697ade728d051b4c7f54177b"
+duration_slots = 1
+title = "References: - Images 1-4: card layout templates showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 5: central artwork to place in the card's image area; use as-is. Task: Create complete Hypotheticards card layout for \"Oracle's Dilemma\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Oracle's Dilemma\" and small circular icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"Reveal the top card of your deck without drawing it. You now know one fragment of your future. You may choose to accept this fate and draw the card immediately, gaining +2 to its effects. Or you may refuse, shuffling it back and drawing blind—but the Oracle remembers your rejection. For each future you decline, the Oracle grows more cryptic. After three refusals, all your card text becomes ambiguous. Other players interpret your cards' meanings for you. The Oracle offers clarity. Whether you want it is another question.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the dark watercolor artwork from Image 5 into the layout."
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-697ad85a8d051b4c7f54175a"
+duration_slots = 1
+title = "References: - Images 1-4: card layout templates showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 5: central artwork to place in the card's image area; use as-is. Task: Create complete Hypotheticards card layout for \"Existential Vending Machine\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Existential Vending Machine\" and small circular icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"Place this card in the center of play. Once per round, any player may approach the Existential Vending Machine and insert one Memory Token, Identity Card, or Ambition. Roll a d8. The machine dispenses a random reward from its cosmic inventory: temporary invincibility, forbidden knowledge, a duplicate of yourself, three turns of silence, or nothing at all. The machine hums. It does not explain its selection criteria.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the weird 3D artwork from Image 5 into the layout."
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-697ad3837d5af8f6cca00d7d"
+duration_slots = 1
+title = "References: - Images 1-4: card layout templates showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 5: central artwork to place in the card's image area; use as-is. Task: Create complete Hypotheticards card layout for \"Probability Custodian\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Probability Custodian\" and small circular icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"At the beginning of your turn, roll a six-sided die. The Probability Custodian adjusts the likelihood of all outcomes for this round based on the result: 1-2: All coin flips this turn must be called before flipping. Wrong calls reverse the effect. 3-4: Double all numerical values on cards played this turn, but halve all durations. 5-6: The next player to draw a card draws three instead, but must gift one to an opponent of the Custodian's choosing. The Probability Custodian watches. It does not judge.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the weird 3D artwork from Image 5 into the layout."
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-697a992e6809f1c490d86ecc"
+duration_slots = 1
+title = "References: - Images 1-4: card layout templates showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 5: central artwork to place in the card's image area; use as-is. Task: Create complete Hypotheticards card layout for \"Paradox Inheritance\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Paradox Inheritance\" and small circular icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"When you play this card, select one completed objective from any player's tableau. That objective simultaneously exists and does not exist for the remainder of the game. Players may reference it for bonuses as if it were completed, but may also play cards that require it to be incomplete. Reality splits here. If any player questions this arrangement aloud, Paradox Inheritance collapses: remove the objective entirely and all players lose one card that mentions time, logic, or causality.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the dark artwork from Image 5 into the layout."
+tag = "JMILL"
+
+[[item]]
+media = "m-eden-697a8852e368c95c608b5d64"
+duration_slots = 1
+title = "References: - Image 1 (Giuseppe): card layout template showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 2 (Wings): card layout showing title placement and overall structure. - Image 3 (Snake): card layout example. - Image 4 (Andromeda): card layout example. - Image 5: central artwork to place in the card's image area; do not regenerate, use as-is. Task: Create complete Hypotheticards card layout for \"Temporal Debt Collector\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Temporal Debt Collector\" and small moon icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"Once per turn you may borrow up to three cards from the deck's future. Mark them with Debt Tokens. At the start of each subsequent turn, the Temporal Debt Collector demands repayment: discard one card per Debt Token or sacrifice a completed objective. If you cannot pay, Temporal Debt Collector claims your next five turns. You may watch, but not participate.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the dark artwork from Image 5 into the layout."
+tag = "JMILL"

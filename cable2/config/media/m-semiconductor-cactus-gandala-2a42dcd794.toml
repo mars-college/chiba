@@ -1,0 +1,9 @@
+id = "m-semiconductor-cactus-gandala-2a42dcd794"
+title = "semiconductor cactus   gandala"
+tag = "GANDALA"
+artist = "Gandala"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/gandala/semiconductor cactus - gandala.mov"
+cache = true

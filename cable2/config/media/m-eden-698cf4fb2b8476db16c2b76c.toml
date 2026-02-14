@@ -1,0 +1,10 @@
+id = "m-eden-698cf4fb2b8476db16c2b76c"
+title = "References 1-4: card layout templates with yellow rounded frame, title banner, text box; copy exact frame design. Reference 5: central artwork; use as-is. Complete Hypotheticards card for 'Collective Shutdown'. Yellow border, title banner with 'Collective Shutdown' and small light bulb icon, artwork from Reference 5 centered, cream text box: 'When four or more players request the same state change within a single turn, that change becomes absolute. No counter-cards may be played. The chaos agent must comply. Darkness or light—the swarm decides. This effect cannot be reversed until the next dawn.'"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/0502b19e91c9aad2a7bdc90d7a26a011e503563b38e36936cf3435dc633e64a3.png"
+cache = true

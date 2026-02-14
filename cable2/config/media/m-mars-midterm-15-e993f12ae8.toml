@@ -1,6 +1,7 @@
 id = "m-mars-midterm-15-e993f12ae8"
 title = "Mars Midterm 15"
 tag = "CO-LAB"
+artist = "Community Lab"
 
 [source]
 type = "path"

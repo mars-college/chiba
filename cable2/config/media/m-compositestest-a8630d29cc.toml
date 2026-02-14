@@ -1,6 +1,7 @@
 id = "m-compositestest-a8630d29cc"
 title = "CompositesTest"
 tag = "EARL"
+artist = "Earl"
 
 [source]
 type = "path"

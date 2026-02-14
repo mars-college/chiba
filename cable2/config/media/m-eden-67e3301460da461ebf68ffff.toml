@@ -1,0 +1,10 @@
+id = "m-eden-67e3301460da461ebf68ffff"
+title = "A verdant, lush, green, hotel atrium with a pool"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/b035b7cad544fa9202ae5497961caaca26d1bb88f270a6aae9620029545a4a4f.png"
+cache = true

@@ -1,0 +1,10 @@
+id = "m-eden-698f76acb323ac6f0ff5ca7a"
+title = "008b45d49152bb4742ba8ff95026d1e9e9f4c68a383421dec28783b0925ea904.mp4"
+kind = "video"
+tag = "SEVA"
+artist = "Seva"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/008b45d49152bb4742ba8ff95026d1e9e9f4c68a383421dec28783b0925ea904.mp4"
+cache = true

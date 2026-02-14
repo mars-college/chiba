@@ -1,5 +1,8 @@
 id = "pl-kamau"
-name = "Quantum Poetry by KzA"
+name = "Quantum Poetry"
+title = "Quantum Poetry"
+
+artist = "KzA"
 
 [[item]]
 media = "m-quantum-poetry-by-kza-2-f317e21a13"

@@ -1,5 +1,4 @@
 id = "midterms-scanalyzer-daily-digest"
-number = "M12"
 name = "Midterms Scanalyzer Daily Digest"
-call_sign = "SCANAL"
-blocks = [ "blk-midterms-scanalyzer-daily-digest" ]
+call_sign = "MARZIPAN"
+blocks = [ "blk-scanalyzer-daily-digest" ]

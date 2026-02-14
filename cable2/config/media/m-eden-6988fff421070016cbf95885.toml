@@ -1,0 +1,10 @@
+id = "m-eden-6988fff421070016cbf95885"
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Entropy Fatigue'. Yellow rounded border, title banner at top with 'Entropy Fatigue' and small clock icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'When the same patterns repeat for three consecutive turns, any player may invoke Entropy Fatigue. All players must either step off the wheel and walk in a straight line, or explain why circular motion still serves them. No wrong answers, but silence costs two laps.'"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/e553222c232a0e9057c3120e8712f2400a4ca4e0c3941152e7d745af157e64b1.png"
+cache = true

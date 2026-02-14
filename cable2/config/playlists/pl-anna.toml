@@ -1,8 +1,14 @@
 id = "pl-anna"
 name = "The Donut Remembers: Field Topology & Self-Organizing Intelligence"
 title = "The Donut Remembers: Field Topology & Self-Organizing Intelligence"
+
 artist = "Anna"
-description = "The Donut Remembers: Field Topology & Self-Organizing Intelligence"
+
+[[item]]
+media = "m-eden-698fbd9aec93586dbcc8a15e"
+duration_slots = 1
+title = "Reference image: Cross-section of sun's interior with fusion core and photon pathways spiraling outward through plasma layers—use as structural template. Motion: Camera zooms steadily inward toward the fusion core while simultaneously panning across the photon pathway geometry. As zoom progresses, reveal the fine detail of individual luminous threads—photons bouncing, spiraling, interweaving through plasma. The pathways glow brighter as camera approaches, showing the intensity of negotiation between light and plasma. The standing wave geometry pulses and breathes. Around second 5, shift pan direction to trace a photon's entire journey—following individual threads from dense core layers outward through loosening spirals toward the surface. Show the threads gradually accelerating as they escape the plasma's grip. The color shifts subtly—hottest golds and oranges at core, cooling to purples at edges. Final 2 seconds: Hold tight on a complex knot of intersecting photon paths deep in the core, all glowing in synchronized pulse, showing the 200,000-year negotiation happening in real time."
+tag = "ANNA"
 
 [[item]]
 media = "m-eden-698cf9d12b8476db16c2b784"

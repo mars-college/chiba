@@ -1,6 +1,7 @@
 id = "m-bourbon-screen-test-aa49cf63b4"
 title = "Bourbon Screen Test"
 tag = "EARL"
+artist = "Earl"
 
 [source]
 type = "path"

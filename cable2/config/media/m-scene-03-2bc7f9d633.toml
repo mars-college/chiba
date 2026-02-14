@@ -1,6 +1,7 @@
 id = "m-scene-03-2bc7f9d633"
 title = "Scene 03"
 tag = "JORDAN"
+artist = "Jordan"
 
 [source]
 type = "path"

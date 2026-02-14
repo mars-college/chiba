@@ -1,5 +1,11 @@
 id = "pl-seva"
-name = "Seva playlist"
+name = "Seva"
+title = "Seva"
+
+artist = "Seva"
 
 [[item]]
-playlist = "pl-under-construction"
+media = "m-eden-698f76acb323ac6f0ff5ca7a"
+duration_slots = 1
+title = "008b45d49152bb4742ba8ff95026d1e9e9f4c68a383421dec28783b0925ea904.mp4"
+tag = "SEVA"

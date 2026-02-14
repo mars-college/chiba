@@ -1,0 +1,10 @@
+id = "m-eden-67947f210b8a55d962e8ab0e"
+title = "an extremely rich mechanical duck showing off its gainz, candle chart in the background"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/0611e2d27bee4d68025e409a6995d16e35ba01c42fd5b4dccec1a2b78b8210ee.png"
+cache = true

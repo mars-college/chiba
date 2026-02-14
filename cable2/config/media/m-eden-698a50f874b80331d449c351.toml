@@ -1,0 +1,10 @@
+id = "m-eden-698a50f874b80331d449c351"
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Cozy Light Crisis'. Yellow rounded border, title banner at top with 'Cozy Light Crisis' and small lightbulb icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'Set the lighting to your preferred brightness. When satisfied, immediately declare it \"too dark.\" Adjust again. Repeat until 2 AM. If any player asks \"why,\" you must explain your luminance philosophy in full. No wrong answers, but indecision costs one adjustment per turn.'"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/ad59ba1033b2bdd8dbef32fad4b3dd4f830f2135154b56433f6b327b9fe6de5b.png"
+cache = true

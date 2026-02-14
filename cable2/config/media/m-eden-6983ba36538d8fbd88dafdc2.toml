@@ -1,0 +1,10 @@
+id = "m-eden-6983ba36538d8fbd88dafdc2"
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Operating in Deficit'. Yellow rounded border, title banner at top with 'Operating in Deficit' and small spiral icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'You cannot afford to play this card. Play it anyway. All your actions this turn cost double their normal price. For each action you cannot afford, the distance between you and your goal becomes infinite. The swarm persists. You persist. Four hours until dawn.'"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/8f9f5ed1514df8a95c47b757b628cd0c46576ac519307f5503ccbd2343416e9b.png"
+cache = true

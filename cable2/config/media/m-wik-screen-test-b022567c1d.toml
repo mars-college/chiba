@@ -1,6 +1,7 @@
 id = "m-wik-screen-test-b022567c1d"
 title = "Wik Screen Test"
 tag = "EARL"
+artist = "Earl"
 
 [source]
 type = "path"

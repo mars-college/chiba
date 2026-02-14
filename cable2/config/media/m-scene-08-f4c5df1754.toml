@@ -1,0 +1,9 @@
+id = "m-scene-08-f4c5df1754"
+title = "Scene 08"
+tag = "JORDAN"
+artist = "Jordan"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/jordan/Scene_08.mp4"
+cache = true

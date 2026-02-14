@@ -1,0 +1,9 @@
+id = "m-2026-02-13-15-02-04-d9b0e80c53"
+title = "2026 02 13 15 02 04"
+tag = "JENSEN"
+artist = "Jensen"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/jensen/2026-02-13 15-02-04.mkv"
+cache = true

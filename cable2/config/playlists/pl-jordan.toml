@@ -1,5 +1,8 @@
 id = "pl-jordan"
 name = "Across The Void"
+title = "Across The Void"
+
+artist = "Jordan"
 
 [[item]]
 media = "m-scene-01-cf69e9c089"
@@ -17,4 +20,64 @@ tag = "JORDAN"
 media = "m-scene-03-2bc7f9d633"
 duration_slots = 1
 title = "Scene 03"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-04-2a61687bac"
+duration_slots = 1
+title = "Scene 04"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-05-95fad5b4e4"
+duration_slots = 1
+title = "Scene 05"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-06-3f8223296e"
+duration_slots = 1
+title = "Scene 06"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-07-bfce2f4ac6"
+duration_slots = 1
+title = "Scene 07"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-08-f4c5df1754"
+duration_slots = 1
+title = "Scene 08"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-09-460c593eb9"
+duration_slots = 1
+title = "Scene 09"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-10-2d8adf5e57"
+duration_slots = 1
+title = "Scene 10"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-11-e535f9b22c"
+duration_slots = 1
+title = "Scene 11"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-12-6c76ac7932"
+duration_slots = 1
+title = "Scene 12"
+tag = "JORDAN"
+
+[[item]]
+media = "m-scene-13-206b60abe5"
+duration_slots = 1
+title = "Scene 13"
 tag = "JORDAN"

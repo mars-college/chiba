@@ -1,0 +1,9 @@
+id = "m-mahjongcircuitry-01f52a4969"
+title = "mahjongcircuitry"
+tag = "GANDALA"
+artist = "Gandala"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/gandala/mahjongcircuitry.mov"
+cache = true

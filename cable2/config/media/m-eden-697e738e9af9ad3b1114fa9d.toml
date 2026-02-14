@@ -1,0 +1,10 @@
+id = "m-eden-697e738e9af9ad3b1114fa9d"
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design and proportions. Reference 5: central artwork showing figure at precipice; use as-is in center position. Create complete Hypotheticards card for 'Collision Defense'. Yellow rounded border frame, title banner at top with 'Collision Defense' text and small icon, artwork from Reference 5 positioned in center, cream-colored text box at bottom with card rules: 'When an attacker moves to overturn what you defend, flip a coin. Heads: your defense holds regardless of numbers. Tails: you and the attacker trade positions—you become what you opposed, they inherit your conviction. Neither of you remembers the swap.' Card aspect ratio 2:3, taller than wide."
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/9c69721c4adb70d01fa7485f2d726f1334aeb0e79ca959fa115202f3b4fdad12.png"
+cache = true

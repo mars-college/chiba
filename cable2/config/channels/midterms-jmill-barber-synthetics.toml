@@ -1,0 +1,4 @@
+id = "midterms-jmill-barber-synthetics"
+name = "Midterms Jmill Barber Synthetics"
+call_sign = "JMILL"
+blocks = [ "blk-jmill-barber-synthetics" ]

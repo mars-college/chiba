@@ -1,0 +1,10 @@
+id = "m-eden-697a8852e368c95c608b5d64"
+title = "References: - Image 1 (Giuseppe): card layout template showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 2 (Wings): card layout showing title placement and overall structure. - Image 3 (Snake): card layout example. - Image 4 (Andromeda): card layout example. - Image 5: central artwork to place in the card's image area; do not regenerate, use as-is. Task: Create complete Hypotheticards card layout for \"Temporal Debt Collector\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Temporal Debt Collector\" and small moon icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"Once per turn you may borrow up to three cards from the deck's future. Mark them with Debt Tokens. At the start of each subsequent turn, the Temporal Debt Collector demands repayment: discard one card per Debt Token or sacrifice a completed objective. If you cannot pay, Temporal Debt Collector claims your next five turns. You may watch, but not participate.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the dark artwork from Image 5 into the layout."
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/cd6306f32687fc1aafccd774b5a3051bc3310ea32af3c01aceea9cc237fa902d.png"
+cache = true

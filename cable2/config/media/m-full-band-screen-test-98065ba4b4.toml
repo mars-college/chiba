@@ -1,6 +1,7 @@
 id = "m-full-band-screen-test-98065ba4b4"
 title = "Full Band Screen Test"
 tag = "EARL"
+artist = "Earl"
 
 [source]
 type = "path"

@@ -1,5 +1,53 @@
 id = "pl-zayne"
-name = "Zayne playlist"
+name = "Eden Art, installation, Luna Concept art, Benjamin Franklin Propaganda"
+title = "Eden Art, installation, Luna Concept art, Benjamin Franklin Propaganda"
+
+artist = "Zayne"
 
 [[item]]
-playlist = "pl-under-construction"
+media = "m-benjamin-franklin-hip-wizzard-dinosaur-in-background-on-mars-379172-0175d9cde6"
+duration_slots = 1
+title = "benjamin franklin  hip wizzard dinosaur in background on mars 379172"
+tag = "ZAYNE"
+
+[[item]]
+media = "m-firefly-gemini-flash-benjamin-franklin-hip-wizzard-dinosaur-in-background-on-mars-close-up-379172-d3a34fff02"
+duration_slots = 1
+title = "Firefly Gemini Flash benjamin franklin  hip wizzard dinosaur in background on mars close up 379172"
+tag = "ZAYNE"
+
+[[item]]
+media = "m-firefly-gemini-flash-luna-robot-image-generation-prompt-a-friendly-bipedal-robot-companion-inspired-by-a-504124-d695f6e4ed"
+duration_slots = 1
+title = "Firefly Gemini Flash Luna Robot   Image Generation Prompt A friendly bipedal robot companion inspired by a 504124"
+tag = "ZAYNE"
+
+[[item]]
+media = "m-firefly-gemini-flash-primary-prompt-retro-cartoon-80s-action-movie-poster-style-steve-j-savage-vs-ali-504124-67b6c4abec"
+duration_slots = 1
+title = "Firefly Gemini Flash Primary Prompt Retro cartoon 80s action movie poster style,  Steve J. Savage Vs. Ali 504124"
+tag = "ZAYNE"
+
+[[item]]
+media = "m-firefly-gemini-flash-a2467118a7"
+duration_slots = 1
+title = "Firefly Gemini Flash"
+tag = "ZAYNE"
+
+[[item]]
+media = "m-llm-as-gpu-sovereign-ai-architecture-98d7d2bae7"
+duration_slots = 1
+title = "LLM as GPU  Sovereign AI Architecture"
+tag = "ZAYNE"
+
+[[item]]
+media = "m-llm-as-gpu-sovereign-ai-architecture2-a3bd8ae16f"
+duration_slots = 1
+title = "LLM as GPU  Sovereign AI Architecture2"
+tag = "ZAYNE"
+
+[[item]]
+media = "m-lunarobotraccoonconcept-1-fcb3ea0865"
+duration_slots = 1
+title = "LunaRobotRaccoonConcept 1"
+tag = "ZAYNE"

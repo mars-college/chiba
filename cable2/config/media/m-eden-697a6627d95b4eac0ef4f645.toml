@@ -1,0 +1,10 @@
+id = "m-eden-697a6627d95b4eac0ef4f645"
+title = "c87ca024c8d0fb3885adc3bf78c5b7cdc38f23dd1de076ff1faf1dff2a9f6fa9.mp4"
+kind = "video"
+tag = "GENE"
+artist = "Gene"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/c87ca024c8d0fb3885adc3bf78c5b7cdc38f23dd1de076ff1faf1dff2a9f6fa9.mp4"
+cache = true

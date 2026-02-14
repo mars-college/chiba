@@ -1,0 +1,10 @@
+id = "m-eden-697ade728d051b4c7f54177b"
+title = "References: - Images 1-4: card layout templates showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 5: central artwork to place in the card's image area; use as-is. Task: Create complete Hypotheticards card layout for \"Oracle's Dilemma\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Oracle's Dilemma\" and small circular icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"Reveal the top card of your deck without drawing it. You now know one fragment of your future. You may choose to accept this fate and draw the card immediately, gaining +2 to its effects. Or you may refuse, shuffling it back and drawing blind—but the Oracle remembers your rejection. For each future you decline, the Oracle grows more cryptic. After three refusals, all your card text becomes ambiguous. Other players interpret your cards' meanings for you. The Oracle offers clarity. Whether you want it is another question.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the dark watercolor artwork from Image 5 into the layout."
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/365df23ae9ef8d51e92f74d4cd2bf21c9970bd43c95c5cdf687ca24ce2821174.png"
+cache = true

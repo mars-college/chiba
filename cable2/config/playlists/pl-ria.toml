@@ -1,5 +1,8 @@
 id = "pl-ria"
 name = "Snippets from Drawing Klerb"
+title = "Snippets from Drawing Klerb"
+
+artist = "Ria"
 
 [[item]]
 media = "m-drawing-klerb-excerpt-f6e285771d"

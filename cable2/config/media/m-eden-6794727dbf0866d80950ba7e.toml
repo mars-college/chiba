@@ -1,0 +1,10 @@
+id = "m-eden-6794727dbf0866d80950ba7e"
+title = "a lush hotel atrium full of tropical plants and twisting pathways"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/bc78ccbfe181c0470c9ddf0fb48404c5b2863289ea30fc13c0c60dbd91a773a2.png"
+cache = true

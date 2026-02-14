@@ -1,0 +1,3 @@
+id = "blk-scanalyzer-daily-digest"
+mode = "loop"
+playlist = "pl-scanalyzer-daily-digest"

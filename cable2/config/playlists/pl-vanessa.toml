@@ -1,5 +1,83 @@
 id = "pl-vanessa"
-name = "Vanessa playlist"
+name = "Little Martians"
+title = "Little Martians"
+
+artist = "Vanessa"
 
 [[item]]
-playlist = "pl-under-construction"
+media = "m-1b7adfe59d8b7628cabe987fdd66f792a5838d91069f54ec5d6228ebc7318748-a9fc2e42d9"
+duration_slots = 1
+title = "1b7adfe59d8b7628cabe987fdd66f792a5838d91069f54ec5d6228ebc7318748"
+tag = "VANESSA"
+
+[[item]]
+media = "m-4bef87fe2f0d16c2195e82e3f1a20cea1c5e153369854eafe1da70e386e559eb-2eb46e0578"
+duration_slots = 1
+title = "4bef87fe2f0d16c2195e82e3f1a20cea1c5e153369854eafe1da70e386e559eb"
+tag = "VANESSA"
+
+[[item]]
+media = "m-086ae0ca9d8b8f3f4be5c4ba815c3d2ee65e5c8f35aebcea391b4211e42662b5-7f913c1eb3"
+duration_slots = 1
+title = "086ae0ca9d8b8f3f4be5c4ba815c3d2ee65e5c8f35aebcea391b4211e42662b5"
+tag = "VANESSA"
+
+[[item]]
+media = "m-131f6b32c2522e8c32e88d45cc3566c5db4d7006c565a01e05dd3fa6757fe17b-4066c39a20"
+duration_slots = 1
+title = "131f6b32c2522e8c32e88d45cc3566c5db4d7006c565a01e05dd3fa6757fe17b"
+tag = "VANESSA"
+
+[[item]]
+media = "m-31676e769cee841b14325a9e3df390f533c7ae249fc0eb495fc012688712928e-4df748af11"
+duration_slots = 1
+title = "31676e769cee841b14325a9e3df390f533c7ae249fc0eb495fc012688712928e"
+tag = "VANESSA"
+
+[[item]]
+media = "m-71701e9cacd3a6695a672f9489f850fad0764918b642880e8caab7163e688178-7c47decdad"
+duration_slots = 1
+title = "71701e9cacd3a6695a672f9489f850fad0764918b642880e8caab7163e688178"
+tag = "VANESSA"
+
+[[item]]
+media = "m-1003689bcb8514130312aecf143b90c86618ca7e0c6c2d73b51850f7a446406f-b40a520c6e"
+duration_slots = 1
+title = "1003689bcb8514130312aecf143b90c86618ca7e0c6c2d73b51850f7a446406f"
+tag = "VANESSA"
+
+[[item]]
+media = "m-2531870565c4344713106dc9226f6e19c19fac017a25c3fc04c5417783d845e3-c89eaa55ce"
+duration_slots = 1
+title = "2531870565c4344713106dc9226f6e19c19fac017a25c3fc04c5417783d845e3"
+tag = "VANESSA"
+
+[[item]]
+media = "m-a2e7810119221018591ea96d50d1d786a3d8593c6588b624ee3d20d4e2d87e1b-94781bffa3"
+duration_slots = 1
+title = "a2e7810119221018591ea96d50d1d786a3d8593c6588b624ee3d20d4e2d87e1b"
+tag = "VANESSA"
+
+[[item]]
+media = "m-a7871627afac7654390c398233cee6e836dfe1ee592d9a1f1df61c2bad91bb74-0caa06fac8"
+duration_slots = 1
+title = "a7871627afac7654390c398233cee6e836dfe1ee592d9a1f1df61c2bad91bb74"
+tag = "VANESSA"
+
+[[item]]
+media = "m-b12e97afb4ab3fde0fe709eff64e23e85634dd5a83413d5f29736deacb749398-e6ba96f8b6"
+duration_slots = 1
+title = "b12e97afb4ab3fde0fe709eff64e23e85634dd5a83413d5f29736deacb749398"
+tag = "VANESSA"
+
+[[item]]
+media = "m-c0dcc3778d43d6aa106c1d06369ecd068e80bf82dadf45204cc741dc4ca8df17-cab6875a6d"
+duration_slots = 1
+title = "c0dcc3778d43d6aa106c1d06369ecd068e80bf82dadf45204cc741dc4ca8df17"
+tag = "VANESSA"
+
+[[item]]
+media = "m-fc26d27df9aad816324ee8548412a14e2737ab68c736b6c9df17acc690b31579-57056bcf8d"
+duration_slots = 1
+title = "fc26d27df9aad816324ee8548412a14e2737ab68c736b6c9df17acc690b31579"
+tag = "VANESSA"

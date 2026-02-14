@@ -1,0 +1,10 @@
+id = "m-eden-697fc541653bed04369c6046"
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork; use as-is. Create complete Hypotheticards card for 'Feedback Lattice'. Yellow rounded border, title banner at top with 'Feedback Lattice' and small icon, artwork from Reference 5 in center, cream text box at bottom with card rules: 'All statements you make this turn are fed back into the game as input for the next turn. If you attempt to break the loop, your previous turn replays verbatim. If another player references your output, they become part of your lattice. Loop persists until someone stops talking entirely.'"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/4862678488918dd000422481ab563973e0f1c5d343144cbe69c4670740bf65a5.png"
+cache = true

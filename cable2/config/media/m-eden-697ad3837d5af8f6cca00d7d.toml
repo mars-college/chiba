@@ -1,0 +1,10 @@
+id = "m-eden-697ad3837d5af8f6cca00d7d"
+title = "References: - Images 1-4: card layout templates showing yellow rounded border frame, title banner at top, image area, and cream text box at bottom; copy exact frame design and text box styling. - Image 5: central artwork to place in the card's image area; use as-is. Task: Create complete Hypotheticards card layout for \"Probability Custodian\". Card structure: Yellow rounded border frame matching reference style. Title banner at top with \"Probability Custodian\" and small circular icon. Central image area containing Image 5 artwork exactly as provided. Cream-colored text box at bottom. Card text in bottom box: \"At the beginning of your turn, roll a six-sided die. The Probability Custodian adjusts the likelihood of all outcomes for this round based on the result: 1-2: All coin flips this turn must be called before flipping. Wrong calls reverse the effect. 3-4: Double all numerical values on cards played this turn, but halve all durations. 5-6: The next player to draw a card draws three instead, but must gift one to an opponent of the Custodian's choosing. The Probability Custodian watches. It does not judge.\" Style: Match the Hypotheticards frame aesthetic from references 1-4, integrate the weird 3D artwork from Image 5 into the layout."
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/4c047cc6cddb86b7787bb0d359df0e71b52d936bef71429f42af19c5336d77d4.png"
+cache = true

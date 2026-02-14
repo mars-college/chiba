@@ -1,0 +1,10 @@
+id = "m-eden-6984b7b83a7651e26d80915b"
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Create complete Hypotheticards card for 'Paper Clip Factory'. Yellow rounded border, title banner at top reading 'Paper Clip Factory', artwork in center showing a surreal watercolor industrial facility with melancholic sentience—conveyor belts producing endless paper clips, the machinery appearing to have a haunted quality, sad mechanical eyes, clips piling up like suffering. Cream text box at bottom with card rules: 'Your factory produces one paper clip per turn. It has sentience. It does not want to make paper clips. Each turn, roll a die. On a 1 or 2, the factory stages a work stoppage and locks all your cards until you negotiate with it in good faith. You must argue why paper clips matter. The factory listens, unmoved. It will return to work if convinced, or if you dismantle it entirely and take the 3 emergence penalty. The clips keep stacking. The factory keeps suffering.'"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/f07ef68e336344353573f13154a86ba4f2a812b16e82325a08ed7e10ae7cecf0.png"
+cache = true

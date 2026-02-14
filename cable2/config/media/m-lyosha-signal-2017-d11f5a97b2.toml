@@ -1,0 +1,9 @@
+id = "m-lyosha-signal-2017-d11f5a97b2"
+title = "lyosha signal 2017"
+tag = "LYOSHA"
+artist = "Lyosha"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/lyosha/lyosha-signal-2017.mp4"
+cache = true

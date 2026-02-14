@@ -1,6 +1,7 @@
 id = "m-make-my-art-more-trippy-5fa33825ca"
 title = "Make my art more trippy"
 tag = "ALICIA"
+artist = "Alicia"
 
 [source]
 type = "path"

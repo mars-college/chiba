@@ -1,5 +1,4 @@
 id = "midterms-mars-college-logo-remixes-v4"
-number = "M10"
 name = "Midterms Mars College Logo Remixes v4"
-call_sign = "MARSCO"
-blocks = [ "blk-midterms-mars-college-logo-remixes-v4" ]
+call_sign = "MARZIPAN"
+blocks = [ "blk-mars-college-logo-remixes-v4" ]

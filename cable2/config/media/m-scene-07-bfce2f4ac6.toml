@@ -1,0 +1,9 @@
+id = "m-scene-07-bfce2f4ac6"
+title = "Scene 07"
+tag = "JORDAN"
+artist = "Jordan"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/jordan/Scene_07.mp4"
+cache = true

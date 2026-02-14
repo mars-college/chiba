@@ -1,0 +1,9 @@
+id = "m-1b7adfe59d8b7628cabe987fdd66f792a5838d91069f54ec5d6228ebc7318748-a9fc2e42d9"
+title = "1b7adfe59d8b7628cabe987fdd66f792a5838d91069f54ec5d6228ebc7318748"
+tag = "VANESSA"
+artist = "Vanessa"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/vanessa/1b7adfe59d8b7628cabe987fdd66f792a5838d91069f54ec5d6228ebc7318748.mp4"
+cache = true

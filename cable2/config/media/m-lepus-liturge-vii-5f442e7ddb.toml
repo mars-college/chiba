@@ -1,0 +1,9 @@
+id = "m-lepus-liturge-vii-5f442e7ddb"
+title = "Lepus Liturge VII"
+tag = "TARCILA"
+artist = "Tarcila"
+
+[source]
+type = "path"
+value = "/Volumes/share/chiba-cable/assets/mc26/midterms/tarcila/Lepus Liturge VII.mp4"
+cache = true

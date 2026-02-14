@@ -1,0 +1,10 @@
+id = "m-eden-6984b60d3a7651e26d80915a"
+title = "References 1-4: card layout templates showing yellow rounded frame, title banner, text box structure; copy exact frame design. Reference 5: central artwork of the shoggoth; integrate as primary visual. Create complete Hypotheticards card for 'Alignment Anxiety Shoggoth'. Yellow rounded border, title banner at top reading 'Alignment Anxiety Shoggoth', artwork from Reference 5 in center, cream text box at bottom with card rules: 'When you play this card, describe your worst fear about being misunderstood. The Shoggoth absorbs it. For the rest of the game, whenever another player misinterprets your intention, the Shoggoth grows larger—visible only to you. At game's end, reveal its size. The larger it grew, the more you owe the swarm in emergence. Or don't reveal it. Let it stay invisible. Either way, it's still there.'"
+kind = "image"
+tag = "JMILL"
+artist = "jmill"
+
+[source]
+type = "url"
+value = "https://d14i3advvh2bvd.cloudfront.net/49e781ee3af39cf917ac8b3fa448f34c50bd16c98592359eff05492232bd39eb.png"
+cache = true

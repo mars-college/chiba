@@ -1,6 +1,7 @@
 id = "m-untitled-artwork-c5b6f08b97"
 title = "Untitled Artwork"
 tag = "LYOSHA"
+artist = "Lyosha"
 
 [source]
 type = "path"

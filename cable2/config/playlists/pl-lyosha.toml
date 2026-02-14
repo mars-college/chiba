@@ -1,8 +1,8 @@
 id = "pl-lyosha"
-name = "Lyosha playlist"
-title = "Lyosha's Art"
+name = "Lyosha"
+title = "Lyosha"
+
 artist = "Lyosha"
-description = "Lyosha's Art"
 
 [[item]]
 media = "m-2017-6ed57bd4d1"
@@ -512,6 +512,12 @@ tag = "LYOSHA"
 media = "m-lesha-fedorov-grace-42383173ba"
 duration_slots = 1
 title = "Lesha Fedorov   Grace"
+tag = "LYOSHA"
+
+[[item]]
+media = "m-lyosha-signal-2017-d11f5a97b2"
+duration_slots = 1
+title = "lyosha signal 2017"
 tag = "LYOSHA"
 
 [[item]]

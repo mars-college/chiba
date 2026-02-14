@@ -1,5 +1,8 @@
 id = "pl-earl"
-name = "Earl playlist"
+name = "Earl"
+title = "Earl"
+
+artist = "Earl"
 
 [[item]]
 media = "m-ayane-screen-test-61c2f7f01b"
