@@ -11,11 +11,15 @@ import type {
   OpsProfilesResponse,
 } from '../types'
 import {
+  NodeRuntimeInputActionSchema,
   OpsNodeCacheClearResponseSchema,
   OpsNodeCacheInspectResponseSchema,
+  OpsNodeInputResponseSchema,
   OpsNodeRuntimeStatusResponseSchema,
+  type NodeRuntimeInputAction,
   type OpsNodeCacheClearResponse,
   type OpsNodeCacheInspectResponse,
+  type OpsNodeInputResponse,
   type OpsNodeRuntimeStatusResponse,
 } from '@chiba-cable3/contracts'
 
@@ -139,6 +143,25 @@ export async function fetchOpsNodeRuntimeStatus(
     res,
     schema: OpsNodeRuntimeStatusResponseSchema,
     errorPrefix: 'node_runtime_status_fetch_failed',
+  })
+}
+
+export async function sendOpsNodeInput(
+  nodeId: string,
+  payload: { action: NodeRuntimeInputAction }
+): Promise<OpsNodeInputResponse> {
+  const id = nodeId.trim()
+  if (!id) throw new Error('node_input_failed:400:node_id_required')
+  const action = NodeRuntimeInputActionSchema.parse(payload.action)
+  const res = await fetch(`/api/ops/nodes/${encodeURIComponent(id)}/input`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action }),
+  })
+  return parseJsonResponseOrThrow({
+    res,
+    schema: OpsNodeInputResponseSchema,
+    errorPrefix: 'node_input_failed',
   })
 }
 

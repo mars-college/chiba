@@ -1,0 +1,139 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chiba-cable3-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chiba
+      POSTGRES_PASSWORD: chiba
+      POSTGRES_DB: chiba3
+    ports:
+      - "54339:5432"
+    volumes:
+      - chiba_cable3_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chiba -d chiba3"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: chiba-cable3-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - chiba_cable3_minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: /bin/sh -c
+    command: >
+      "until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done
+      && mc mb --ignore-existing local/chiba-cable3
+      && mc anonymous set download local/chiba-cable3
+      && exit 0"
+
+  db-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CHIBA3_DB_URL: postgresql://chiba:chiba@postgres:5432/chiba3
+    command: ["pnpm", "-C", "packages/db", "migrate"]
+    restart: "no"
+
+  control-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8795
+      CHIBA3_DB_URL: postgresql://chiba:chiba@postgres:5432/chiba3
+      SHARE_ROOT: /share
+      CHIBA3_THUMBNAIL_BACKEND: minio
+      CHIBA3_S3_ENDPOINT_URL: http://minio:9000
+      CHIBA3_S3_BUCKET: chiba-cable3
+      CHIBA3_S3_PUBLIC_BASE_URL: http://127.0.0.1:9000
+      CHIBA3_S3_ACCESS_KEY: minioadmin
+      CHIBA3_S3_SECRET_KEY: minioadmin
+    command: ["pnpm", "-C", "apps/control-api", "dev"]
+    ports:
+      - "8795:8795"
+    volumes:
+      - chiba_cable3_share_root:/share
+
+  ops:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - control-api
+    command: ["pnpm", "-C", "apps/ops", "dev"]
+    ports:
+      - "8792:8792"
+
+  guide:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - control-api
+    command: ["pnpm", "-C", "apps/guide", "dev", "--", "--port", "5173"]
+    ports:
+      - "5173:5173"
+
+  node-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["node"]
+    depends_on:
+      - control-api
+    environment:
+      CHIBA3_CONTROL_API_URL: http://control-api:8795
+      CHIBA3_NODE_ID: pi-local
+      CHIBA3_NAMESPACE: local
+      SHARE_ROOT: /share
+    command: ["pnpm", "-C", "packages/node-runtime", "local-node"]
+    ports:
+      - "8080:8080"
+      - "8787:8787"
+    volumes:
+      - chiba_cable3_share_root:/share
+
+  control-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["mcp"]
+    depends_on:
+      - control-api
+    environment:
+      CHIBA3_CONTROL_API_URL: http://control-api:8795
+    command: ["pnpm", "-C", "apps/control-mcp", "dev"]
+    stdin_open: true
+    tty: true
+
+volumes:
+  chiba_cable3_postgres_data:
+  chiba_cable3_minio_data:
+  chiba_cable3_share_root:

@@ -1,0 +1,35 @@
+{
+  "name": "@chiba/cable3",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "contracts:build": "pnpm -C packages/contracts build",
+    "dev:control-api": "pnpm contracts:build && pnpm -C apps/control-api dev",
+    "dev:control-mcp": "pnpm contracts:build && pnpm -C apps/control-mcp dev",
+    "dev:ops": "pnpm contracts:build && pnpm -C apps/ops dev",
+    "dev:guide": "pnpm contracts:build && pnpm -C apps/guide dev",
+    "dev:node:local": "CHIBA3_NODE_ID=commander CHIBA3_NAMESPACE=local pnpm -C packages/node-runtime local-node",
+    "bootstrap:node-runtime": "bash ./scripts/pis/bootstrap-node-runtime.sh",
+    "dev:stack": "pnpm contracts:build && pnpm --parallel --filter @chiba-cable3/control-api --filter @chiba-cable3/control-mcp --filter @chiba-cable3/ops --filter @chiba-cable3/guide dev",
+    "dev:stack:prod": "pnpm contracts:build && CHIBA3_NAMESPACE=prod CHIBA3_REGISTRY_ID=prod pnpm --parallel --filter @chiba-cable3/control-api --filter @chiba-cable3/control-mcp --filter @chiba-cable3/ops --filter @chiba-cable3/guide dev",
+    "dev:stack:with-node": "pnpm contracts:build && pnpm --parallel --filter @chiba-cable3/control-api --filter @chiba-cable3/control-mcp --filter @chiba-cable3/ops --filter @chiba-cable3/guide --filter @chiba-cable3/node-runtime dev",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:reset": "pnpm db:down && pnpm db:up && pnpm db:migrate && pnpm db:import:registries",
+    "db:logs": "docker compose logs -f postgres",
+    "db:migrate": "pnpm -C packages/db migrate",
+    "db:import:registry": "pnpm -C packages/db import-registry",
+    "db:import:registries": "pnpm db:import:registry -- --registry ./config/registry.local.toml --registry-id local && pnpm db:import:registry -- --registry ./config/registry.prod.toml --registry-id prod",
+    "db:import:resources": "pnpm -C packages/db import-resources",
+    "db:import:cable2-channels": "pnpm -C packages/db import-cable2-channels",
+    "db:snapshot:resources": "pnpm -C packages/db snapshot-resources"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

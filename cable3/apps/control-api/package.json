@@ -1,0 +1,27 @@
+{
+  "name": "@chiba-cable3/control-api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx test/**/*.test.ts"
+  },
+  "dependencies": {
+    "@chiba-cable3/contracts": "workspace:*",
+    "@chiba-cable3/db": "workspace:*",
+    "drizzle-orm": "^0.44.5",
+    "fastify": "^5.6.2",
+    "mime-types": "^2.1.35",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.23",
+    "@types/mime-types": "^2.1.4",
+    "express": "^4.21.2"
+  }
+}

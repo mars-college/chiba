@@ -1,0 +1,21 @@
+[defaults]
+guide_port = 5173
+node_port = 8080
+server_port = 8787
+control_plane_url = "http://192.168.0.117:8790"
+
+[pis.commander]
+host = "127.0.0.1"
+ip = "127.0.0.1"
+node_name = "commander"
+guide_port = 5173
+node_port = 8080
+server_port = 8787
+
+[pis.pi-local]
+host = "192.168.0.4"
+ip = "192.168.0.4"
+node_name = "pi-local"
+guide_port = 5173
+node_port = 8080
+server_port = 8787

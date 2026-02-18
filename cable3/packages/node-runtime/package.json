@@ -1,0 +1,20 @@
+{
+  "name": "@chiba-cable3/node-runtime",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx src/local-node.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx test/**/*.test.ts",
+    "scenario": "tsx src/scenario-runner.ts",
+    "local-node": "tsx src/local-node.ts"
+  },
+  "dependencies": {
+    "@chiba-cable3/contracts": "workspace:*",
+    "zod": "^3.24.2"
+  }
+}

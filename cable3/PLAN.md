@@ -108,6 +108,37 @@ Conflict handling:
 - Node rejects conflicting writes with structured conflict error and current
   revision metadata.
 
+### 4.4 Registry and Namespace Mapping (explicit)
+
+Given current workflow with:
+
+- `cable3/config/registry.local.toml`
+- `cable3/config/registry.prod.toml`
+
+`cable3` maps these to first-class registry records in Postgres.
+
+Rules:
+
+- Registry file is bootstrap/input metadata, not runtime truth.
+- Importing a registry creates/updates a DB `registry` snapshot and its node rows.
+- Assignments and desired state are namespace-scoped and reference node ids from
+  an imported registry snapshot.
+- Controllers choose namespace explicitly (`local`, `prod`, or custom).
+
+Practical interpretation:
+
+- Your laptop controller can target `namespace=local` (or `namespace=prod`) with
+  the same physical nodes if needed.
+- Prod server can target `namespace=prod`.
+- Nodes do not "prefer" one controller address; they reconcile per namespace and
+  active namespace policy.
+
+DB strategy options:
+
+- Preferred now: one DB with registry + namespace columns (simpler ops).
+- Optional later: one DB per registry/environment if operational isolation is
+  required.
+
 ### 4.2 Runtime Backends
 
 Node runtime supports two renderer backends:
@@ -530,6 +561,9 @@ After runtime stabilization:
 
 8. Implement namespace-aware node state store and controller identity metadata
    on all mutating operations.
+
+9. Use typed Postgres access (Drizzle ORM + migrations) for all control-plane
+   persistence paths; avoid untyped query code in app runtime.
 
 ---
 

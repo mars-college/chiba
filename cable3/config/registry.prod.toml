@@ -1,0 +1,136 @@
+# Production inventory for gallery rollout.
+# New-style registry (no per-node secrets).
+
+[defaults]
+user = "pi"
+controller_url = "http://10.10.13.9:24422/"
+control_plane_url = "http://10.10.13.9:8790"
+guide_port = 5173
+node_port = 8080
+server_port = 8787
+
+[defaults.nas]
+host = "nas.mars.college"
+share = "share"
+mount = "/mnt/share"
+
+# ---- Upper East ----
+[pis.upper-east-1]
+host = "mars32.local"
+ip = "100.128.0.120"
+node_name = "upper-east-1"
+orientation = "portrait"
+display_rotate = 270
+infobox_rotate_ccw = 90
+
+[pis.upper-east-2]
+host = "mars31.local"
+ip = "100.128.0.119"
+node_name = "upper-east-2"
+
+[pis.upper-east-3]
+host = "mars29.local"
+ip = "100.128.0.118"
+node_name = "upper-east-3"
+
+[pis.upper-west-3-2]
+host = "100.128.1.85"
+ip = "100.128.1.85"
+node_name = "upper-west-3-2"
+# Planned static IP: 100.128.0.106
+
+[pis.upper-east-4]
+host = "mars07.local"
+ip = "100.128.0.112"
+node_name = "upper-east-4"
+orientation = "portrait"
+display_rotate = 90
+infobox_rotate_ccw = 270
+
+# ---- Upper West ----
+[pis.upper-west-1]
+host = "mars15.local"
+ip = "100.128.0.114"
+node_name = "upper-west-1"
+orientation = "portrait"
+display_rotate = 90
+infobox_rotate_ccw = 270
+
+[pis.upper-west-2]
+host = "mars19.local"
+ip = "100.128.0.115"
+node_name = "upper-west-2"
+
+[pis.upper-west-3]
+host = "mars23.local"
+ip = "100.128.0.117"
+node_name = "upper-west-3"
+
+[pis.upper-west-4]
+host = "mars03.local"
+ip = "100.128.0.111"
+node_name = "upper-west-4"
+
+# ---- Lower East ----
+[pis.lower-east-1]
+host = "mars26.local"
+ip = "100.128.0.121"
+node_name = "lower-east-1"
+orientation = "portrait"
+display_rotate = 270
+infobox_rotate_ccw = 90
+
+[pis.lower-east-2-2]
+host = "100.128.0.109"
+ip = "100.128.0.109"
+node_name = "lower-east-2-2"
+
+[pis.lower-east-3]
+host = "mars10.local"
+ip = "100.128.0.113"
+node_name = "lower-east-3"
+
+[pis.lower-east-3-2]
+host = "100.128.0.110"
+ip = "100.128.0.110"
+node_name = "lower-east-3-2"
+
+[pis.lower-east-4]
+host = "mars16.local"
+ip = "100.128.0.122"
+node_name = "lower-east-4"
+orientation = "portrait"
+display_rotate = 270
+infobox_rotate_ccw = 90
+
+# ---- Lower West ----
+[pis.lower-west-1]
+host = "mars21.local"
+ip = "100.128.0.123"
+node_name = "lower-west-1"
+
+[pis.lower-west-2]
+host = "mars22.local"
+ip = "100.128.0.124"
+node_name = "lower-west-2"
+
+[pis.lower-west-2-2]
+host = "100.128.0.107"
+ip = "100.128.0.107"
+node_name = "lower-west-2-2"
+
+[pis.lower-west-3]
+host = "mars18.local"
+ip = "100.128.0.125"
+node_name = "lower-west-3"
+
+[pis.lower-west-3-2]
+host = "100.128.0.108"
+ip = "100.128.0.108"
+node_name = "lower-west-3-2"
+
+[pis.lower-west-4]
+host = "mars27.local"
+ip = "100.128.0.126"
+node_name = "lower-west-4"
+display_rotate = 0

@@ -1,0 +1,29 @@
+{
+  "name": "playlist-switch-local",
+  "apiBaseUrl": "http://127.0.0.1:8795",
+  "apply": {
+    "screenId": "pi-local",
+    "namespace": "local",
+    "controllerId": "laptop-dev",
+    "target": {
+      "kind": "playlist",
+      "id": "pl-co-lab"
+    },
+    "launch": {
+      "mode": "gallery",
+      "nosplash": true,
+      "qr": false
+    },
+    "operationIdPrefix": "scenario-playlist-switch"
+  },
+  "expectations": [
+    {
+      "condition": "Accepted",
+      "timeoutMs": 3000
+    },
+    {
+      "condition": "Activated",
+      "timeoutMs": 90000
+    }
+  ]
+}
