@@ -102,11 +102,15 @@ cp .env.prod.example .env.prod
 Start/stop:
 
 ```bash
-pnpm prod:up
-pnpm prod:status
-pnpm prod:logs
-pnpm prod:down
+bash ./scripts/prod/start-stack.sh start
+bash ./scripts/prod/start-stack.sh status
+bash ./scripts/prod/start-stack.sh logs
+bash ./scripts/prod/start-stack.sh stop
 ```
+
+`pnpm` on the host is optional. The script runs only `docker compose` commands.
+If the user cannot access `/var/run/docker.sock`, it automatically falls back to
+`sudo docker`.
 
 Optional profiles:
 

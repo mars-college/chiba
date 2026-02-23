@@ -130,7 +130,19 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker compose version >/dev/null 2>&1; then
+DOCKER_CMD=(docker)
+if ! docker info >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1; then
+    DOCKER_CMD=(sudo -E docker)
+    echo "Docker socket is not accessible for this user; using sudo docker."
+  else
+    echo "Cannot access Docker daemon (permission denied on /var/run/docker.sock)." >&2
+    echo "Install sudo or grant this user Docker group access." >&2
+    exit 1
+  fi
+fi
+
+if ! "${DOCKER_CMD[@]}" compose version >/dev/null 2>&1; then
   echo "docker compose (plugin) is required but not available." >&2
   exit 1
 fi
@@ -155,7 +167,7 @@ if [[ "${WITH_MCP}" -eq 1 ]]; then
 fi
 
 compose_cmd() {
-  docker compose \
+  "${DOCKER_CMD[@]}" compose \
     --project-name "${PROJECT_NAME}" \
     --env-file "${ENV_FILE}" \
     -f "${COMPOSE_FILE}" \
@@ -171,6 +183,10 @@ if [[ "${USE_TMUX}" -eq 1 ]]; then
   if [[ "${ACTION}" == "start" && "${DETACH}" -eq 1 ]]; then
     # In tmux mode, keep compose attached so the session remains useful.
     DETACH=0
+  fi
+  if [[ "${DOCKER_CMD[*]}" == "sudo -E docker" ]]; then
+    echo "Refreshing sudo credentials before launching tmux..."
+    sudo -v
   fi
   if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
     echo "tmux session already exists: ${TMUX_SESSION}" >&2
