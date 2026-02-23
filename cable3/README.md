@@ -83,6 +83,53 @@ docker compose --profile node up --build
 docker compose --profile mcp up --build
 ```
 
+## Docker (Production Stack, stay-on defaults)
+
+Use the production compose file + launcher script. Services are configured with:
+
+- `restart: unless-stopped` for long-running services
+- healthchecks + dependency gating
+- one-shot DB migration/registry import init jobs before `control-api` starts
+
+Setup:
+
+```bash
+cd /Users/jmill/projects/chiba/cable3
+cp .env.prod.example .env.prod
+# edit .env.prod for real hostnames/passwords
+```
+
+Start/stop:
+
+```bash
+pnpm prod:up
+pnpm prod:status
+pnpm prod:logs
+pnpm prod:down
+```
+
+Optional profiles:
+
+```bash
+bash ./scripts/prod/start-stack.sh start --with-node
+bash ./scripts/prod/start-stack.sh start --with-mcp
+```
+
+Run under tmux:
+
+```bash
+bash ./scripts/prod/start-stack.sh start --tmux --session cable3-prod
+```
+
+`--tmux` runs compose in foreground mode inside that session so logs stay attached.
+
+Main files:
+
+- `cable3/docker-compose.prod.yml`
+- `cable3/Dockerfile.prod`
+- `cable3/.env.prod.example`
+- `cable3/scripts/prod/start-stack.sh`
+
 Default service URLs:
 
 - control-api: `http://127.0.0.1:8795`
@@ -100,6 +147,7 @@ Shared asset storage inside the stack:
 Implemented now:
 
 - Postgres docker stack (`cable3/docker-compose.yml`)
+- Production compose stack (`cable3/docker-compose.prod.yml`)
 - SQL migration runner (`cable3/packages/db/src/migrate.ts`)
 - Initial schema (`cable3/packages/db/migrations/001_init.sql`)
 - Registry import from TOML into DB (`cable3/packages/db/src/registry-import.ts`)

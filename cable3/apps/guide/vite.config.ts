@@ -1,55 +1,59 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const controlApiTarget =
+  process.env.CHIBA3_CONTROL_API_PROXY_TARGET ?? "http://localhost:8795";
+const controlApiWsTarget = controlApiTarget.replace(/^http/i, "ws");
+
 // https://vite.dev/config/
 // We serve the Guide from Vite (dev + preview) on port 5173, while the backend
 // control API runs separately on 8795. In dev, `server.proxy` handles this, but in
 // production on Pis we run `vite preview`, so we must also configure `preview.proxy`.
 const proxy = {
   "/api": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
   "/media": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
   "/cache": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
   "/stash": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
   "/village": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
   "/village.jpg": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
   "/weatherstar": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
   "/home-assistant": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
   "/weatherstar.jpg": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
-      "/mars": {
-        target: "http://localhost:8795",
-      },
-      "/swpc": {
-        target: "http://localhost:8795",
-      },
-      "/ambient": {
-        target: "http://localhost:8795",
-      },
-      "/embed": {
-        target: "http://localhost:8795",
-      },
+  "/mars": {
+    target: controlApiTarget,
+  },
+  "/swpc": {
+    target: controlApiTarget,
+  },
+  "/ambient": {
+    target: controlApiTarget,
+  },
+  "/embed": {
+    target: controlApiTarget,
+  },
   "/roadmap": {
-    target: "http://localhost:8795",
+    target: controlApiTarget,
   },
   "/ws": {
-    target: "ws://localhost:8795",
+    target: controlApiWsTarget,
     ws: true,
   },
 } as const;
