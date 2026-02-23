@@ -5,10 +5,30 @@ const QR_BASE =
 
 const WS_STORAGE_KEY = "chiba:ws";
 
+function readScreenId(params: URLSearchParams): string {
+  const raw = params.get("screenId") ?? params.get("screen") ?? "";
+  return raw.trim();
+}
+
+function withScreenId(wsUrl: string, screenId: string): string {
+  if (!screenId) return wsUrl;
+  try {
+    const parsed = new URL(wsUrl);
+    if (!parsed.searchParams.get("screenId")) {
+      parsed.searchParams.set("screenId", screenId);
+    }
+    return parsed.toString();
+  } catch {
+    const join = wsUrl.includes("?") ? "&" : "?";
+    return `${wsUrl}${join}screenId=${encodeURIComponent(screenId)}`;
+  }
+}
+
 export function getWsUrl(): string {
   const params = new URLSearchParams(window.location.search);
+  const screenId = readScreenId(params);
   const wsParam = params.get(PARAM_WS);
-  if (wsParam) return wsParam;
+  if (wsParam) return withScreenId(wsParam, screenId);
   // In kiosk/gallery mode, ignore persisted WS targets. These are usually set
   // during debugging and can cause a kiosk to "stick" to a stale LAN host.
   const gallery = (params.get("gallery") ?? "").trim().toLowerCase();
@@ -17,13 +37,16 @@ export function getWsUrl(): string {
   if (!isGallery) {
     try {
       const stored = window.localStorage.getItem(WS_STORAGE_KEY);
-      if (stored && stored.trim().length > 0) return stored.trim();
+      if (stored && stored.trim().length > 0) {
+        return withScreenId(stored.trim(), screenId);
+      }
     } catch {
       // ignore storage errors
     }
   }
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/ws`;
+  const base = `${protocol}//${window.location.host}/ws`;
+  return withScreenId(base, screenId);
 }
 
 type RemoteUrlOptions = {

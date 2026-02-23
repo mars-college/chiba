@@ -202,3 +202,51 @@ blocks = [ "blk-nebula" ]
     "http://192.168.0.117:8790/?ws=ws%3A%2F%2F192.168.0.117%3A8787%2Fws&appId=gen-art"
   );
 });
+
+test("buildCable2ChannelImportPayload repairs malformed http// URL scheme", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "c3-c2-scheme-"));
+  const configRoot = path.join(root, "config");
+
+  await writeTomlFile(
+    path.join(configRoot, "media", "m-weather.toml"),
+    `
+id = "m-weather"
+title = "Weather"
+[source]
+type = "url"
+value = "http//100.72.1.58:5173/weatherstar"
+`
+  );
+
+  await writeTomlFile(
+    path.join(configRoot, "playlists", "pl-weather.toml"),
+    `
+id = "pl-weather"
+[[item]]
+media = "m-weather"
+`
+  );
+
+  await writeTomlFile(
+    path.join(configRoot, "blocks", "blk-weather.toml"),
+    `
+id = "blk-weather"
+playlist = "pl-weather"
+`
+  );
+
+  await writeTomlFile(
+    path.join(configRoot, "channels", "weatherstar.toml"),
+    `
+id = "weatherstar"
+blocks = [ "blk-weather" ]
+`
+  );
+
+  const built = await buildCable2ChannelImportPayload({
+    configRoot,
+    channelIds: ["weatherstar"],
+  });
+
+  assert.equal(built.payload.media[0]?.sourceValue, "http://100.72.1.58:5173/weatherstar");
+});

@@ -8,6 +8,7 @@ import { runMigrations } from "./migrate.js";
 import { importRegistrySnapshot, parseRegistrySnapshot } from "./registry-import.js";
 import { getResourceSnapshot, importResources } from "./resource-store.js";
 import { importCable2Channels } from "./cable2-channel-import.js";
+import { resolveDefaultSeedPaths, seedLocalCatalog } from "./seed-local.js";
 
 function usage(): never {
   console.error(
@@ -17,6 +18,7 @@ function usage(): never {
       "  chiba3-db import-registry --registry <path> --registry-id <id>",
       "  chiba3-db import-resources --file <path>",
       "  chiba3-db import-cable2-channels [--config-root <path>] [--channels <id,id,...>] [--guide-base-url <url>] [--slot-duration-sec <n>]",
+      "  chiba3-db seed-local [--assets-root <path>] [--config-root <path>] [--channels <id,id,...>] [--guide-base-url <url>] [--slot-duration-sec <n>]",
       "  chiba3-db snapshot-resources",
       "",
       "Env:",
@@ -151,6 +153,55 @@ async function main(): Promise<void> {
             ...(slotDurationSec ? { slotDurationSec } : {}),
             counts: result.counts,
             warnings: result.warnings,
+          },
+          null,
+          2
+        )
+      );
+      return;
+    }
+
+    if (cmd === "seed-local") {
+      const defaults = resolveDefaultSeedPaths();
+      const assetsRootRaw = readArg("--assets-root");
+      const configRootRaw = readArg("--config-root");
+      const channelsArg = readArg("--channels");
+      const channelIds = channelsArg
+        ? channelsArg
+            .split(",")
+            .map((id) => id.trim())
+            .filter((id) => id.length > 0)
+        : undefined;
+      const guideBaseUrl = readArg("--guide-base-url");
+      const slotDurationSecRaw = readArg("--slot-duration-sec");
+      const slotDurationSec = slotDurationSecRaw
+        ? Math.max(1, Math.floor(Number(slotDurationSecRaw) || 15))
+        : undefined;
+
+      const result = await seedLocalCatalog({
+        db,
+        assetsRoot: assetsRootRaw
+          ? resolveUserPath(assetsRootRaw)
+          : defaults.assetsRoot,
+        cable2ConfigRoot: configRootRaw
+          ? resolveUserPath(configRootRaw)
+          : defaults.cable2ConfigRoot,
+        ...(channelIds ? { channelIds } : {}),
+        ...(guideBaseUrl ? { guideBaseUrl } : {}),
+        ...(slotDurationSec ? { slotDurationSec } : {}),
+      });
+
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            command: "seed-local",
+            channels: result.channels,
+            counts: {
+              local: result.localCounts,
+              cable2: result.cable2Counts,
+            },
+            warnings: result.cable2Warnings,
           },
           null,
           2

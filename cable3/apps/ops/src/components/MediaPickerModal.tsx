@@ -17,7 +17,7 @@ import {
 } from '@mantine/core'
 import { useDebouncedValue } from '@mantine/hooks'
 import { IconSearch } from '@tabler/icons-react'
-import type { Media } from '../lib/controlApi'
+import { mediaStreamUrl, type Media } from '../lib/controlApi'
 
 type Props = {
   opened: boolean
@@ -67,6 +67,15 @@ function isLikelyImageSource(value: string): boolean {
   } catch {
     return /\.(jpg|jpeg|png|gif|webp|bmp|avif|tif|tiff)$/i.test(raw)
   }
+}
+
+function previewSource(media: Media): string | null {
+  if (media.thumbnailUrl?.trim()) return media.thumbnailUrl
+  if (isLikelyImageSource(media.sourceValue)) {
+    if (media.sourceType === 'url') return media.sourceValue
+    return mediaStreamUrl(media.id)
+  }
+  return null
 }
 
 export function MediaPickerModal(props: Props) {
@@ -180,6 +189,7 @@ export function MediaPickerModal(props: Props) {
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 3, xl: 4 }} spacing="sm">
             {visibleRows.map((row) => {
               const selected = selectedSet.has(row.id)
+              const previewUrl = previewSource(row)
               return (
                 <Card
                   key={row.id}
@@ -205,9 +215,9 @@ export function MediaPickerModal(props: Props) {
                         onChange={() => toggleSelection(row.id)}
                       />
                     </Group>
-                    {row.thumbnailUrl ? (
+                    {previewUrl ? (
                       <Image
-                        src={row.thumbnailUrl}
+                        src={previewUrl}
                         alt={row.title || row.id}
                         h={180}
                         radius="sm"

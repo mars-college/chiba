@@ -29,6 +29,7 @@ export type MediaDetailViewVm = {
   ) => void;
   selectedMediaDetail: Media | null;
   selectedMediaDetailPreviewSrc: string | null;
+  selectedMediaDetailIsVideo: boolean;
   openQuickSend: (target: QuickSendTarget) => void;
   mediaDeleteBusy: boolean;
   deleteMediaItem: (mediaId: string) => Promise<void>;
@@ -48,6 +49,7 @@ export function MediaDetailView({ vm }: { vm: MediaDetailViewVm }) {
     setMediaLibrarySection,
     selectedMediaDetail,
     selectedMediaDetailPreviewSrc,
+    selectedMediaDetailIsVideo,
     openQuickSend,
     mediaDeleteBusy,
     deleteMediaItem,
@@ -143,7 +145,7 @@ export function MediaDetailView({ vm }: { vm: MediaDetailViewVm }) {
       {selectedMediaDetail ? (
         <Card withBorder p="md">
           <Stack>
-            {selectedMediaDetailPreviewSrc ? (
+            {selectedMediaDetailPreviewSrc && selectedMediaDetailIsVideo ? (
               <video
                 className="ops-media-detail-video"
                 controls
@@ -153,6 +155,14 @@ export function MediaDetailView({ vm }: { vm: MediaDetailViewVm }) {
                 preload="metadata"
                 poster={selectedMediaDetail.thumbnailUrl}
                 src={selectedMediaDetailPreviewSrc}
+              />
+            ) : selectedMediaDetailPreviewSrc ? (
+              <Image
+                src={selectedMediaDetailPreviewSrc}
+                alt={selectedMediaDetail.title || selectedMediaDetail.id}
+                radius="sm"
+                h={isMobile ? 240 : 520}
+                fit="cover"
               />
             ) : selectedMediaDetail.thumbnailUrl ? (
               <Image

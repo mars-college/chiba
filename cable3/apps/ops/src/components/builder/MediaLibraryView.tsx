@@ -275,7 +275,7 @@ export function MediaLibraryView({ vm }: { vm: MediaLibraryViewVm }) {
                                           }}
                                         >
                                           <Stack gap={8}>
-                                            {previewSrc ? (
+                                            {previewSrc && isVideo ? (
                                               <video
                                                 className="ops-media-thumb-video"
                                                 muted
@@ -294,6 +294,14 @@ export function MediaLibraryView({ vm }: { vm: MediaLibraryViewVm }) {
                                                   e.currentTarget.currentTime = 0;
                                                 }}
                                               />
+                                            ) : previewSrc ? (
+                                              <Image
+                                                src={previewSrc}
+                                                alt={row.title || row.id}
+                                                radius="sm"
+                                                h={120}
+                                                fit="cover"
+                                              />
                                             ) : row.thumbnailUrl ? (
                                               <Image
                                                 src={row.thumbnailUrl}
@@ -302,7 +310,26 @@ export function MediaLibraryView({ vm }: { vm: MediaLibraryViewVm }) {
                                                 h={120}
                                                 fit="cover"
                                               />
-                                            ) : null}
+                                            ) : (
+                                              <Paper
+                                                withBorder
+                                                radius="sm"
+                                                h={120}
+                                                p="xs"
+                                                className="ops-media-thumb-fallback"
+                                              >
+                                                <Stack gap={2} justify="center" h="100%">
+                                                  <Text size="xs" fw={700}>
+                                                    {row.sourceType === "url" ? "WEB" : "MEDIA"}
+                                                  </Text>
+                                                  <Text size="xs" c="dimmed" lineClamp={2}>
+                                                    {row.sourceType === "url"
+                                                      ? row.sourceValue
+                                                      : "No thumbnail generated yet"}
+                                                  </Text>
+                                                </Stack>
+                                              </Paper>
+                                            )}
                                             <Group
                                               justify="space-between"
                                               align="flex-start"

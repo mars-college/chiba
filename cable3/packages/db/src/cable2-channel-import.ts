@@ -127,7 +127,7 @@ async function readTomlDir(dirPath: string): Promise<Array<{ filePath: string; p
 }
 
 function normalizeGuideUrl(baseUrlRaw: string | undefined): string | null {
-  const raw = (baseUrlRaw ?? "").trim();
+  const raw = repairMissingScheme((baseUrlRaw ?? "").trim());
   if (!raw) return null;
   try {
     const parsed = new URL(raw);
@@ -135,6 +135,12 @@ function normalizeGuideUrl(baseUrlRaw: string | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+function repairMissingScheme(value: string): string {
+  const raw = value.trim();
+  if (!raw) return "";
+  return raw.replace(/^([a-z][a-z0-9+.-]*)\/\//i, "$1://");
 }
 
 function isLoopbackHost(hostname: string): boolean {
@@ -145,7 +151,7 @@ function rewriteLoopbackUrl(baseUrl: string | null, sourceValue: string): string
   if (!baseUrl) return sourceValue;
   try {
     const guide = new URL(baseUrl);
-    const source = new URL(sourceValue);
+    const source = new URL(repairMissingScheme(sourceValue));
     if (!isLoopbackHost(source.hostname)) return sourceValue;
     source.hostname = guide.hostname;
 
@@ -166,11 +172,12 @@ function rewriteLoopbackUrl(baseUrl: string | null, sourceValue: string): string
 }
 
 function toAbsoluteUrl(baseUrl: string | null, sourceValue: string): string {
-  if (sourceValue.startsWith("http://") || sourceValue.startsWith("https://")) {
-    return sourceValue;
+  const normalized = repairMissingScheme(sourceValue);
+  if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
+    return normalized;
   }
-  if (!baseUrl || !sourceValue.startsWith("/")) return sourceValue;
-  return new URL(sourceValue, baseUrl).toString();
+  if (!baseUrl || !normalized.startsWith("/")) return normalized;
+  return new URL(normalized, baseUrl).toString();
 }
 
 async function parseCable2Catalog(configRoot: string): Promise<Cable2ParsedCatalog> {
@@ -383,7 +390,7 @@ function collectLinkedResources(args: {
       warnings.push(`missing_media:${mediaId}`);
       continue;
     }
-    let sourceValue = mediaDef.sourceValue;
+    let sourceValue = repairMissingScheme(mediaDef.sourceValue);
     if (mediaDef.sourceType === "url") {
       sourceValue = embedUrlBySource.get(sourceValue) ?? sourceValue;
       sourceValue = toAbsoluteUrl(args.guideBaseUrl, sourceValue);

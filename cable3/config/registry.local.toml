@@ -2,7 +2,7 @@
 guide_port = 5173
 node_port = 8080
 server_port = 8787
-control_plane_url = "http://192.168.0.117:8790"
+control_plane_url = "http://127.0.0.1:8795"
 
 [pis.commander]
 host = "127.0.0.1"
@@ -16,6 +16,22 @@ server_port = 8787
 host = "192.168.0.4"
 ip = "192.168.0.4"
 node_name = "pi-local"
+guide_port = 5173
+node_port = 8080
+server_port = 8787
+
+[pis.pluto-local]
+host = "mars26.local"
+ip = "192.168.0.172"
+node_name = "Pluto Local"
+guide_port = 5173
+node_port = 8080
+server_port = 8787
+
+[pis.lower-east-2-2]
+host = "mars36.local"
+ip = "100.128.0.109"
+node_name = "Lower East 2-2"
 guide_port = 5173
 node_port = 8080
 server_port = 8787

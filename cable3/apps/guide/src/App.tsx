@@ -1078,8 +1078,7 @@ function App() {
           );
           const idx = currentIdx >= 0 ? currentIdx : 0;
           const nextIdx = Math.max(idx - 1, 0);
-          const target = schedule[nextIdx]?.start ?? prev;
-          return Math.max(target, currentSlotIndex);
+          return schedule[nextIdx]?.start ?? prev;
         });
       }
       if (dir === "right") {
@@ -1096,7 +1095,7 @@ function App() {
         });
       }
     },
-    [channelLocked, channels, currentSlotIndex, selectedRow, viewMode]
+    [channelLocked, channels, selectedRow, viewMode]
   );
 
   const [isPaused, setIsPaused] = useState(false);
@@ -2991,10 +2990,8 @@ function App() {
   useEffect(() => {
     if (!channels.length) return;
     setSelectedRow((prev) => clamp(prev, 0, channels.length - 1));
-    setSelectedCol((prev) =>
-      clamp(Math.max(prev, currentSlotIndex), 0, Math.max(0, slotCount - 1))
-    );
-  }, [channels.length, slotCount, currentSlotIndex]);
+    setSelectedCol((prev) => clamp(prev, 0, Math.max(0, slotCount - 1)));
+  }, [channels.length, slotCount]);
 
   useEffect(() => {
     const maxStart = Math.max(0, slotCount - visibleSlotCount);
@@ -3007,7 +3004,7 @@ function App() {
       return;
     }
     const prevSlot = lastCurrentSlotRef.current;
-    if (currentSlotIndex !== prevSlot && selectedCol <= prevSlot) {
+    if (currentSlotIndex !== prevSlot && selectedCol === prevSlot) {
       setSelectedCol(currentSlotIndex);
     }
     lastCurrentSlotRef.current = currentSlotIndex;
@@ -3397,7 +3394,15 @@ function App() {
         wsUrl: data.wsUrl as string | undefined,
       });
     };
-    const query = `guide_port=${guidePort}&scheme=${scheme}`;
+    const remoteScreenId = (screenId ?? "").trim();
+    const queryParts = [
+      `guide_port=${encodeURIComponent(guidePort)}`,
+      `scheme=${encodeURIComponent(scheme)}`,
+    ];
+    if (remoteScreenId) {
+      queryParts.push(`screen_id=${encodeURIComponent(remoteScreenId)}`);
+    }
+    const query = queryParts.join("&");
     const primaryUrl = `/api/remote?${query}`;
     const fallbackOrigin = `${window.location.protocol}//${window.location.hostname}:8787`;
     const fallbackUrl = `${fallbackOrigin}/api/remote?${query}`;
@@ -3426,13 +3431,16 @@ function App() {
     return () => {
       alive = false;
     };
-  }, [channelLocked, galleryEnabledEffective]);
+  }, [channelLocked, galleryEnabledEffective, screenId]);
   const fallbackRemote = buildRemoteUrls({
     hostOverride,
     forceHttps,
     metaRemote: remoteOverride?.baseUrl ?? metaRemote,
   });
   let fallbackRemoteUrl = fallbackRemote.remoteUrl;
+  if (screenId) {
+    fallbackRemoteUrl = appendQueryParam(fallbackRemoteUrl, "screenId", screenId);
+  }
   if (galleryEnabledEffective) {
     fallbackRemoteUrl = appendQueryParam(fallbackRemoteUrl, PARAM_GALLERY, "1");
     fallbackRemoteUrl = appendQueryParam(fallbackRemoteUrl, "lock", channelLocked ? "1" : "0");

@@ -25,6 +25,12 @@ Options:
   --mpv-bin <bin>             mpv binary (default: mpv)
   --mpv-max-height <pixels>   Optional max output height cap for mpv (default: node-runtime auto)
   --switch-overlap-ms <ms>    Keep previous fullscreen backend alive during handoff (default: runtime default)
+  --ha-automation <bool>      Enable/disable HA login automation (default: $CHIBA3_HOME_ASSISTANT_AUTOMATION or true)
+  --ha-user <user>            HA login username (default: $CHIBA3_HOME_ASSISTANT_USER)
+  --ha-pass <pass>            HA login password (default: $CHIBA3_HOME_ASSISTANT_PASS)
+  --ha-url <url>              HA URL/route matcher (default: $CHIBA3_HOME_ASSISTANT_URL)
+  --ha-start-delay-ms <ms>    Delay before HA login input sequence (default: $CHIBA3_HOME_ASSISTANT_START_DELAY_MS or 1800)
+  --ha-step-delay-ms <ms>     Delay between HA login key steps (default: $CHIBA3_HOME_ASSISTANT_STEP_DELAY_MS or 180)
 USAGE
   exit 1
 fi
@@ -49,6 +55,12 @@ GUIDE_BASE_URL="${CHIBA3_GUIDE_BASE_URL:-}"
 MPV_BIN="mpv"
 MPV_MAX_HEIGHT="${CHIBA3_MPV_MAX_HEIGHT:-}"
 SWITCH_OVERLAP_MS="${CHIBA3_SWITCH_OVERLAP_MS:-}"
+HOME_ASSISTANT_AUTOMATION="${CHIBA3_HOME_ASSISTANT_AUTOMATION:-true}"
+HOME_ASSISTANT_USER="${CHIBA3_HOME_ASSISTANT_USER:-}"
+HOME_ASSISTANT_PASS="${CHIBA3_HOME_ASSISTANT_PASS:-}"
+HOME_ASSISTANT_URL="${CHIBA3_HOME_ASSISTANT_URL:-${CHIBA_HOME_ASSISTANT_URL:-}}"
+HOME_ASSISTANT_START_DELAY_MS="${CHIBA3_HOME_ASSISTANT_START_DELAY_MS:-1800}"
+HOME_ASSISTANT_STEP_DELAY_MS="${CHIBA3_HOME_ASSISTANT_STEP_DELAY_MS:-180}"
 ENDPOINTS_ONLY=0
 NODE_PORT_SET=0
 SERVER_PORT_SET=0
@@ -136,6 +148,30 @@ while [[ $# -gt 0 ]]; do
       ;;
     --switch-overlap-ms)
       SWITCH_OVERLAP_MS="$2"
+      shift 2
+      ;;
+    --ha-automation)
+      HOME_ASSISTANT_AUTOMATION="$2"
+      shift 2
+      ;;
+    --ha-user)
+      HOME_ASSISTANT_USER="$2"
+      shift 2
+      ;;
+    --ha-pass)
+      HOME_ASSISTANT_PASS="$2"
+      shift 2
+      ;;
+    --ha-url)
+      HOME_ASSISTANT_URL="$2"
+      shift 2
+      ;;
+    --ha-start-delay-ms)
+      HOME_ASSISTANT_START_DELAY_MS="$2"
+      shift 2
+      ;;
+    --ha-step-delay-ms)
+      HOME_ASSISTANT_STEP_DELAY_MS="$2"
       shift 2
       ;;
     *)
@@ -379,27 +415,52 @@ fi
 echo "Bootstrapping node-runtime for ${NODE_ID} (${SSH_TARGET})..."
 echo "Resolved: namespace=${NAMESPACE} registryId=${REGISTRY_ID:-unknown} ports(node=${NODE_PORT},server=${SERVER_PORT},guide=${GUIDE_PORT})"
 echo "Runtime endpoints: controlApi=${NODE_CONTROL_API_URL} guideBase=${GUIDE_BASE_URL} switchOverlapMs=${SWITCH_OVERLAP_MS:-runtime-default}"
+echo "HA automation: enabled=${HOME_ASSISTANT_AUTOMATION} url=${HOME_ASSISTANT_URL:-auto} startDelayMs=${HOME_ASSISTANT_START_DELAY_MS} stepDelayMs=${HOME_ASSISTANT_STEP_DELAY_MS}"
 
 if [[ "$ENDPOINTS_ONLY" -eq 1 ]]; then
   ssh_cmd "$SSH_TARGET" bash -s -- \
     "$NODE_CONTROL_API_URL" \
     "$GUIDE_PORT" \
     "$GUIDE_BASE_URL" \
-    "$SWITCH_OVERLAP_MS" <<'REMOTE_ENDPOINTS_ONLY'
+    "$SWITCH_OVERLAP_MS" \
+    "$HOME_ASSISTANT_AUTOMATION" \
+    "$HOME_ASSISTANT_USER" \
+    "$HOME_ASSISTANT_PASS" \
+    "$HOME_ASSISTANT_URL" \
+    "$HOME_ASSISTANT_START_DELAY_MS" \
+    "$HOME_ASSISTANT_STEP_DELAY_MS" <<'REMOTE_ENDPOINTS_ONLY'
 set -euo pipefail
 
 NODE_CONTROL_API_URL="$1"
 GUIDE_PORT="$2"
 GUIDE_BASE_URL="$3"
 SWITCH_OVERLAP_MS="${4:-}"
+HOME_ASSISTANT_AUTOMATION="${5:-true}"
+HOME_ASSISTANT_USER="${6:-}"
+HOME_ASSISTANT_PASS="${7:-}"
+HOME_ASSISTANT_URL="${8:-}"
+HOME_ASSISTANT_START_DELAY_MS="${9:-1800}"
+HOME_ASSISTANT_STEP_DELAY_MS="${10:-180}"
 
+tmp_env="$(mktemp)"
+{
+  printf 'CHIBA3_CONTROL_API_URL=%q\n' "${NODE_CONTROL_API_URL}"
+  printf 'CHIBA3_GUIDE_PORT=%q\n' "${GUIDE_PORT}"
+  printf 'CHIBA3_GUIDE_BASE_URL=%q\n' "${GUIDE_BASE_URL}"
+  printf 'CHIBA3_SWITCH_OVERLAP_MS=%q\n' "${SWITCH_OVERLAP_MS}"
+  printf 'CHIBA3_HOME_ASSISTANT_AUTOMATION=%q\n' "${HOME_ASSISTANT_AUTOMATION}"
+  printf 'CHIBA3_HOME_ASSISTANT_USER=%q\n' "${HOME_ASSISTANT_USER}"
+  printf 'CHIBA3_HOME_ASSISTANT_PASS=%q\n' "${HOME_ASSISTANT_PASS}"
+  printf 'CHIBA3_HOME_ASSISTANT_URL=%q\n' "${HOME_ASSISTANT_URL}"
+  printf 'CHIBA3_HOME_ASSISTANT_START_DELAY_MS=%q\n' "${HOME_ASSISTANT_START_DELAY_MS}"
+  printf 'CHIBA3_HOME_ASSISTANT_STEP_DELAY_MS=%q\n' "${HOME_ASSISTANT_STEP_DELAY_MS}"
+} > "${tmp_env}"
+sudo install -m 0600 "${tmp_env}" /etc/default/cable3-node-runtime
+rm -f "${tmp_env}"
 sudo install -d -m 0755 /etc/systemd/system/cable3-node-runtime.service.d
-sudo tee /etc/systemd/system/cable3-node-runtime.service.d/10-endpoints.conf >/dev/null <<EOF
+sudo tee /etc/systemd/system/cable3-node-runtime.service.d/10-endpoints.conf >/dev/null <<'EOF'
 [Service]
-Environment=CHIBA3_CONTROL_API_URL=${NODE_CONTROL_API_URL}
-Environment=CHIBA3_GUIDE_PORT=${GUIDE_PORT}
-Environment=CHIBA3_GUIDE_BASE_URL=${GUIDE_BASE_URL}
-Environment=CHIBA3_SWITCH_OVERLAP_MS=${SWITCH_OVERLAP_MS}
+EnvironmentFile=-/etc/default/cable3-node-runtime
 EOF
 
 sudo systemctl daemon-reload
@@ -454,7 +515,13 @@ ssh_cmd "$SSH_TARGET" bash -s -- \
   "$GUIDE_BASE_URL" \
   "$MPV_BIN" \
   "$MPV_MAX_HEIGHT" \
-  "$SWITCH_OVERLAP_MS" <<'REMOTE_SCRIPT'
+  "$SWITCH_OVERLAP_MS" \
+  "$HOME_ASSISTANT_AUTOMATION" \
+  "$HOME_ASSISTANT_USER" \
+  "$HOME_ASSISTANT_PASS" \
+  "$HOME_ASSISTANT_URL" \
+  "$HOME_ASSISTANT_START_DELAY_MS" \
+  "$HOME_ASSISTANT_STEP_DELAY_MS" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 REMOTE_DIR="$1"
@@ -469,6 +536,12 @@ GUIDE_BASE_URL="$9"
 MPV_BIN="${10}"
 MPV_MAX_HEIGHT="${11:-}"
 SWITCH_OVERLAP_MS="${12:-}"
+HOME_ASSISTANT_AUTOMATION="${13:-true}"
+HOME_ASSISTANT_USER="${14:-}"
+HOME_ASSISTANT_PASS="${15:-}"
+HOME_ASSISTANT_URL="${16:-}"
+HOME_ASSISTANT_START_DELAY_MS="${17:-1800}"
+HOME_ASSISTANT_STEP_DELAY_MS="${18:-180}"
 
 WATCHDOG_SCRIPT="${REMOTE_DIR}/scripts/pis/network-watchdog.sh"
 
@@ -600,6 +673,28 @@ PING_TIMEOUT=2
 EOF
   fi
 
+  tmp_env="$(mktemp)"
+  {
+    printf 'CHIBA3_CONTROL_API_URL=%q\n' "${NODE_CONTROL_API_URL}"
+    printf 'CHIBA3_NODE_ID=%q\n' "${NODE_ID}"
+    printf 'CHIBA3_NAMESPACE=%q\n' "${NAMESPACE}"
+    printf 'CHIBA3_NODE_PORT=%q\n' "${NODE_PORT}"
+    printf 'CHIBA3_SERVER_PORT=%q\n' "${SERVER_PORT}"
+    printf 'CHIBA3_GUIDE_PORT=%q\n' "${GUIDE_PORT}"
+    printf 'CHIBA3_GUIDE_BASE_URL=%q\n' "${GUIDE_BASE_URL}"
+    printf 'CHIBA3_MPV_BIN=%q\n' "${MPV_BIN}"
+    printf 'CHIBA3_MPV_MAX_HEIGHT=%q\n' "${MPV_MAX_HEIGHT}"
+    printf 'CHIBA3_SWITCH_OVERLAP_MS=%q\n' "${SWITCH_OVERLAP_MS}"
+    printf 'CHIBA3_HOME_ASSISTANT_AUTOMATION=%q\n' "${HOME_ASSISTANT_AUTOMATION}"
+    printf 'CHIBA3_HOME_ASSISTANT_USER=%q\n' "${HOME_ASSISTANT_USER}"
+    printf 'CHIBA3_HOME_ASSISTANT_PASS=%q\n' "${HOME_ASSISTANT_PASS}"
+    printf 'CHIBA3_HOME_ASSISTANT_URL=%q\n' "${HOME_ASSISTANT_URL}"
+    printf 'CHIBA3_HOME_ASSISTANT_START_DELAY_MS=%q\n' "${HOME_ASSISTANT_START_DELAY_MS}"
+    printf 'CHIBA3_HOME_ASSISTANT_STEP_DELAY_MS=%q\n' "${HOME_ASSISTANT_STEP_DELAY_MS}"
+  } > "${tmp_env}"
+  sudo install -m 0600 "${tmp_env}" /etc/default/cable3-node-runtime
+  rm -f "${tmp_env}"
+
   sudo tee /etc/systemd/system/cable3-node-runtime.service >/dev/null <<EOF
 [Unit]
 Description=Cable3 Node Runtime
@@ -611,16 +706,7 @@ StartLimitIntervalSec=0
 Type=simple
 User=${SSH_USER}
 WorkingDirectory=${REMOTE_DIR}
-Environment=CHIBA3_CONTROL_API_URL=${NODE_CONTROL_API_URL}
-Environment=CHIBA3_NODE_ID=${NODE_ID}
-Environment=CHIBA3_NAMESPACE=${NAMESPACE}
-Environment=CHIBA3_NODE_PORT=${NODE_PORT}
-Environment=CHIBA3_SERVER_PORT=${SERVER_PORT}
-Environment=CHIBA3_GUIDE_PORT=${GUIDE_PORT}
-Environment=CHIBA3_GUIDE_BASE_URL=${GUIDE_BASE_URL}
-Environment=CHIBA3_MPV_BIN=${MPV_BIN}
-Environment=CHIBA3_MPV_MAX_HEIGHT=${MPV_MAX_HEIGHT}
-Environment=CHIBA3_SWITCH_OVERLAP_MS=${SWITCH_OVERLAP_MS}
+EnvironmentFile=-/etc/default/cable3-node-runtime
 Environment=CHIBA3_CHROMIUM_BIN=/home/${SSH_USER}/bin/chromium-kiosk
 Environment=CHIBA3_INPUT_BIN=xdotool
 Environment=DISPLAY=:0

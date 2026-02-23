@@ -27,6 +27,9 @@ const proxy = {
   "/weatherstar": {
     target: "http://localhost:8795",
   },
+  "/home-assistant": {
+    target: "http://localhost:8795",
+  },
   "/weatherstar.jpg": {
     target: "http://localhost:8795",
   },

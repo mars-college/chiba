@@ -42,6 +42,15 @@ pnpm db:import:cable2-channels -- \
   --channels ai-village,ai-village-2,mars-public-access \
   --guide-base-url http://192.168.0.117:5173
 
+# deterministic local seed:
+# - cable3/assets as path media + playlist/block/channel loop
+# - Jensen Art (3 replit programs) as 30-minute blocks + channel
+# - cable2 channels: weatherstar, ai-village, roadmap, mars-public-access
+pnpm db:seed:local -- --guide-base-url http://192.168.0.117:5173
+
+# full reset + seed
+pnpm db:reset:seed:local -- --guide-base-url http://192.168.0.117:5173
+
 # run full local stack (control-api + ops + guide)
 pnpm dev:stack
 
@@ -170,14 +179,31 @@ pnpm -C cable3 bootstrap:node-runtime <node-id> \
   --switch-overlap-ms 900
 ```
 
+For Home Assistant login automation via runtime env creds:
+
+```bash
+cd /Users/jmill/projects/chiba
+pnpm -C cable3 bootstrap:node-runtime <node-id> \
+  --node-control-api-url http://<control-plane-host>:8795 \
+  --guide-base-url http://<control-plane-host>:5173 \
+  --ha-automation true \
+  --ha-user '<ha-username>' \
+  --ha-pass '<ha-password>' \
+  --ha-url http://<ha-host>:8123 \
+  --ha-start-delay-ms 1800 \
+  --ha-step-delay-ms 180
+```
+
 Notes:
 - `--control-api-url` is used by the bootstrap command on the control machine for DB/API lookup.
 - `--node-control-api-url` is what gets written into the node runtime service.
 - `--guide-base-url` is what nodes use to build guide kiosk URLs.
 - `--switch-overlap-ms` delays teardown of the prior fullscreen backend during guide/media handoff to reduce desktop flicker.
+- HA automation flags write runtime env used by `node-runtime` when a target resolves to Home Assistant.
 - If `--guide-base-url` is omitted, it is derived from `--node-control-api-url` host + resolved `guidePort`.
 - For password-based SSH nodes, set `CHIBA3_SSH_PASSWORD` (or pass `--ssh-password`).
 - To retarget a deployed node without redeploy/build, run bootstrap with `--endpoints-only`.
+- Runtime env is persisted on-node at `/etc/default/cable3-node-runtime` (mode `0600`).
 
 Bootstrap also installs a fresh `cable3-network-watchdog` timer/service pair.
 It intentionally removes legacy `chiba-*` runtime/watchdog services and old kiosk
@@ -190,6 +216,25 @@ auto-trying `local` and `prod` registry ids when not specified.
 By default, watchdog health requires local route + gateway reachability only
 (`CHECK_INTERNET=0`) to support static-IP nodes during WAN outages. Optional
 overrides can be set in `/etc/default/cable3-network-watchdog`.
+
+## Local Topology (what talks to what)
+
+When running `pnpm dev:cable3`:
+
+- Guide app: `http://<laptop-ip>:5173`
+- Ops app: `http://<laptop-ip>:8792/ops/`
+- Control API: `http://<laptop-ip>:8795`
+
+Node-runtime behavior:
+
+- Polls Control API (`CHIBA3_CONTROL_API_URL`) for resolved runtime target.
+- Launches Guide/Chromium against `CHIBA3_GUIDE_BASE_URL`.
+- For local laptop testing, both URLs must use a LAN-reachable host/IP, never `localhost`.
+
+Practical rule:
+
+- If your laptop IP changes, rerun bootstrap with `--endpoints-only` and updated
+  `--node-control-api-url` + `--guide-base-url`.
 
 ## Scope Notes
 

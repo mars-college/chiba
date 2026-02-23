@@ -141,6 +141,14 @@ function parseNonNegativeInt(value: string | undefined, fallback: number): numbe
   return Math.floor(parsed);
 }
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (!value) return fallback;
+  const raw = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return fallback;
+}
+
 function toNonNegativeNumber(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
   return value;
@@ -170,6 +178,17 @@ function normalizeGuideBaseUrl(value: string | undefined, guidePort: number): st
     }
   }
   return `http://localhost:${guidePort}`;
+}
+
+function normalizeUrlHost(value: string | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    return parsed.host.toLowerCase();
+  } catch {
+    return raw.toLowerCase();
+  }
 }
 
 function toLog(level: "info" | "warn" | "error", event: string, data: Record<string, unknown>): void {
@@ -378,6 +397,15 @@ async function terminateChild(child: ChildProcess | null, name: string): Promise
     }),
   ]);
   toLog("info", "child_stopped", { name });
+}
+
+async function cleanupProfileDir(profileDir: string | null): Promise<void> {
+  if (!profileDir) return;
+  try {
+    await fs.rm(profileDir, { recursive: true, force: true });
+  } catch {
+    // best-effort cleanup
+  }
 }
 
 async function runInputCommand(args: {
@@ -730,6 +758,7 @@ async function spawnChromium(args: {
   binary: string;
   url: string;
   explicitBinary: string | null;
+  profileDir: string | null;
 }): Promise<ChildProcess> {
   if (process.platform === "darwin" && !args.explicitBinary) {
     const child = spawn(args.binary, ["-a", "Google Chrome", "--args", "--kiosk", args.url], {
@@ -746,7 +775,14 @@ async function spawnChromium(args: {
     return child;
   }
 
-  const child = spawn(args.binary, ["--kiosk", "--start-fullscreen", args.url], {
+  const launchArgs = ["--kiosk", "--start-fullscreen", "--new-window"];
+  if (args.profileDir) {
+    await ensureDir(args.profileDir);
+    launchArgs.push(`--user-data-dir=${args.profileDir}`);
+  }
+  launchArgs.push(args.url);
+
+  const child = spawn(args.binary, launchArgs, {
     stdio: ["ignore", "ignore", "pipe"],
   });
   child.stderr?.on("data", (chunk) => {
@@ -758,6 +794,93 @@ async function spawnChromium(args: {
   });
   await waitForSpawn(child, "chromium");
   return child;
+}
+
+function shouldRunHomeAssistantAutomation(args: {
+  chromiumUrl: string;
+  targetHost: string | null;
+}): boolean {
+  const raw = args.chromiumUrl.trim().toLowerCase();
+  if (!raw) return false;
+  if (raw.includes("/home-assistant")) return true;
+  try {
+    const parsed = new URL(raw);
+    if (args.targetHost && parsed.host.toLowerCase() === args.targetHost) return true;
+    if (parsed.port === "8123") return true;
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+async function runHomeAssistantAutomation(args: {
+  chromiumUrl: string;
+  enabled: boolean;
+  username: string;
+  password: string;
+  targetHost: string | null;
+  startDelayMs: number;
+  stepDelayMs: number;
+  inputBinary: string;
+  allowInputAnyPlatform: boolean;
+}): Promise<void> {
+  if (!args.enabled) return;
+  if (!shouldRunHomeAssistantAutomation({ chromiumUrl: args.chromiumUrl, targetHost: args.targetHost })) {
+    return;
+  }
+  if (!args.username || !args.password) {
+    toLog("warn", "ha_automation_skipped_missing_creds", {
+      hasUser: Boolean(args.username),
+      hasPassword: Boolean(args.password),
+      url: args.chromiumUrl,
+    });
+    return;
+  }
+  if (process.platform !== "linux" && !args.allowInputAnyPlatform) {
+    toLog("warn", "ha_automation_skipped_platform", {
+      platform: process.platform,
+      url: args.chromiumUrl,
+    });
+    return;
+  }
+
+  if (args.startDelayMs > 0) await sleep(args.startDelayMs);
+  const actions: NodeRuntimeInputAction[] = [
+    { kind: "key", key: "Escape" },
+    { kind: "key", key: "Tab" },
+    { kind: "text", text: args.username },
+    { kind: "key", key: "Tab" },
+    { kind: "text", text: args.password },
+    { kind: "key", key: "Return" },
+  ];
+  const failures: string[] = [];
+  for (const action of actions) {
+    const result = await runInputCommand({
+      binary: args.inputBinary,
+      action,
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(message);
+      return null;
+    });
+    if (result && result.code !== 0) {
+      failures.push(
+        `${action.kind}:code=${result.code}:${result.stderr || "command_failed"}`
+      );
+    }
+    if (args.stepDelayMs > 0) await sleep(args.stepDelayMs);
+  }
+
+  if (failures.length > 0) {
+    toLog("warn", "ha_automation_partial_failure", {
+      url: args.chromiumUrl,
+      failures,
+    });
+    return;
+  }
+  toLog("info", "ha_automation_applied", {
+    url: args.chromiumUrl,
+  });
 }
 
 async function postRuntimeReport(args: {
@@ -779,12 +902,14 @@ async function fetchResolved(args: {
   apiBase: string;
   nodeId: string;
   namespace: string;
+  guideBaseUrl: string;
 }): Promise<ResolveResponse> {
   const url = new URL(
     `/api/v1/runtime/resolve/${encodeURIComponent(args.nodeId)}`,
     args.apiBase
   );
   url.searchParams.set("namespace", args.namespace);
+  url.searchParams.set("guideBaseUrl", args.guideBaseUrl);
   const res = await fetch(url, { headers: { accept: "application/json" } });
   if (!res.ok) {
     throw new Error(`resolve_fetch_failed:${res.status}`);
@@ -1147,6 +1272,38 @@ async function main(): Promise<void> {
   const allowInputAnyPlatform =
     readArg("--allow-input-any-platform") === "1" ||
     process.env.CHIBA3_INPUT_ALLOW_ANY_PLATFORM === "1";
+  const homeAssistantAutomationEnabled = parseBoolean(
+    readArg("--ha-automation") ?? process.env.CHIBA3_HOME_ASSISTANT_AUTOMATION,
+    true
+  );
+  const homeAssistantUser = (
+    readArg("--ha-user") ??
+    process.env.CHIBA3_HOME_ASSISTANT_USER ??
+    process.env.CHIBA_HOME_ASSISTANT_USER ??
+    ""
+  ).trim();
+  const homeAssistantPass = (
+    readArg("--ha-pass") ??
+    process.env.CHIBA3_HOME_ASSISTANT_PASS ??
+    process.env.CHIBA_HOME_ASSISTANT_PASS ??
+    ""
+  ).trim();
+  const homeAssistantHost = normalizeUrlHost(
+    readArg("--ha-url") ??
+      process.env.CHIBA3_HOME_ASSISTANT_URL ??
+      process.env.CHIBA_HOME_ASSISTANT_URL ??
+      ""
+  );
+  const homeAssistantStartDelayMs = parseNonNegativeInt(
+    readArg("--ha-start-delay-ms") ??
+      process.env.CHIBA3_HOME_ASSISTANT_START_DELAY_MS,
+    1_800
+  );
+  const homeAssistantStepDelayMs = parseNonNegativeInt(
+    readArg("--ha-step-delay-ms") ??
+      process.env.CHIBA3_HOME_ASSISTANT_STEP_DELAY_MS,
+    180
+  );
 
   await ensureDir(cacheDir);
   await ensureDir(runtimeDir);
@@ -1177,8 +1334,16 @@ async function main(): Promise<void> {
 
   let mpvChild: ChildProcess | null = null;
   let chromiumChild: ChildProcess | null = null;
+  let chromiumProfileDir: string | null = null;
+  let chromiumSessionCounter = 0;
   const mpvIpcPath = path.join(runtimeDir, "mpv.sock");
   let playbackMetaBySource = new Map<string, ActivePlaybackMeta>();
+
+  const allocateChromiumProfileDir = (): string | null => {
+    if (process.platform === "darwin" && !chromiumExplicit) return null;
+    chromiumSessionCounter += 1;
+    return path.join(runtimeDir, "chromium", `session-${chromiumSessionCounter}`);
+  };
 
   const refreshCacheSummary = async () => {
     const summary = await readCacheSummary(cacheDir);
@@ -1247,6 +1412,12 @@ async function main(): Promise<void> {
     chromiumBin,
     inputBinary,
     allowInputAnyPlatform,
+    homeAssistantAutomationEnabled,
+    homeAssistantHost,
+    homeAssistantStartDelayMs,
+    homeAssistantStepDelayMs,
+    homeAssistantCredsConfigured:
+      Boolean(homeAssistantUser) && Boolean(homeAssistantPass),
   });
 
   let stopped = false;
@@ -1255,6 +1426,8 @@ async function main(): Promise<void> {
     stopped = true;
     await terminateChild(mpvChild, "mpv");
     await terminateChild(chromiumChild, "chromium");
+    await cleanupProfileDir(chromiumProfileDir);
+    chromiumProfileDir = null;
     nodeApi.close();
     serverApi.close();
   };
@@ -1268,7 +1441,12 @@ async function main(): Promise<void> {
 
   while (!stopped) {
     try {
-      const resolved = await fetchResolved({ apiBase, nodeId, namespace });
+      const resolved = await fetchResolved({
+        apiBase,
+        nodeId,
+        namespace,
+        guideBaseUrl,
+      });
       runtimeState.lastWarnings = resolved.resolved.warnings;
       runtimeState.lastError = null;
       runtimeState.launch = resolved.desired?.launch ?? {};
@@ -1294,6 +1472,8 @@ async function main(): Promise<void> {
         mpvChild = null;
         await terminateChild(chromiumChild, "chromium");
         chromiumChild = null;
+        await cleanupProfileDir(chromiumProfileDir);
+        chromiumProfileDir = null;
         await refreshCacheSummary();
         await emitRuntime({});
         await sleep(pollMs);
@@ -1319,6 +1499,7 @@ async function main(): Promise<void> {
         const wantsChromium = useGuideChromium || hasWebOnlyItems;
         const previousMpv: ChildProcess | null = mpvChild;
         const previousChromium: ChildProcess | null = chromiumChild;
+        const previousChromiumProfileDir = chromiumProfileDir;
 
         if (wantsChromium) {
           const chromiumUrl = useGuideChromium
@@ -1336,26 +1517,27 @@ async function main(): Promise<void> {
             url: chromiumUrl,
             ...(webReady.error ? { error: webReady.error } : {}),
           });
-          if (previousMpv && !previousChromium) {
-            // Keep prior fullscreen visible briefly while Chromium maps to avoid desktop flashes.
-            chromiumChild = await spawnChromium({
-              binary: chromiumBin,
-              url: chromiumUrl,
-              explicitBinary: chromiumExplicit,
-            });
-            if (!webReady.ready && switchOverlapMs > 0) await sleep(switchOverlapMs);
+          const stagedChromiumProfileDir = allocateChromiumProfileDir();
+          // Stage next Chromium first so current fullscreen (guide/mpv) can stay visible until handoff.
+          const nextChromium = await spawnChromium({
+            binary: chromiumBin,
+            url: chromiumUrl,
+            explicitBinary: chromiumExplicit,
+            profileDir: stagedChromiumProfileDir,
+          });
+          chromiumChild = nextChromium;
+          chromiumProfileDir = stagedChromiumProfileDir;
+          const hadVisibleFullscreen = Boolean(previousMpv || previousChromium);
+          if (switchOverlapMs > 0 && (hadVisibleFullscreen || !webReady.ready)) {
+            await sleep(switchOverlapMs);
+          }
+          if (previousMpv && previousMpv !== nextChromium) {
             await terminateChild(previousMpv, "mpv");
             if (mpvChild === previousMpv) mpvChild = null;
-          } else {
-            await terminateChild(previousMpv, "mpv");
-            mpvChild = null;
+          }
+          if (previousChromium && previousChromium !== nextChromium) {
             await terminateChild(previousChromium, "chromium");
-            chromiumChild = null;
-            chromiumChild = await spawnChromium({
-              binary: chromiumBin,
-              url: chromiumUrl,
-              explicitBinary: chromiumExplicit,
-            });
+            await cleanupProfileDir(previousChromiumProfileDir);
           }
           runtimeState.backend = "chromium";
           runtimeState.phase = "ready";
@@ -1364,6 +1546,17 @@ async function main(): Promise<void> {
           await emitRuntime({
             phase: "ready",
             desiredRevision: runtimeState.desiredRevision,
+          });
+          await runHomeAssistantAutomation({
+            chromiumUrl,
+            enabled: homeAssistantAutomationEnabled,
+            username: homeAssistantUser,
+            password: homeAssistantPass,
+            targetHost: homeAssistantHost,
+            startDelayMs: homeAssistantStartDelayMs,
+            stepDelayMs: homeAssistantStepDelayMs,
+            inputBinary,
+            allowInputAnyPlatform,
           });
           if (activateDelayMs > 0) await sleep(activateDelayMs);
         } else {
@@ -1436,7 +1629,9 @@ async function main(): Promise<void> {
           }
           if (previousChromium) {
             await terminateChild(previousChromium, "chromium");
+            await cleanupProfileDir(previousChromiumProfileDir);
             if (chromiumChild === previousChromium) chromiumChild = null;
+            if (chromiumChild === null) chromiumProfileDir = null;
           }
           runtimeState.backend = "mpv";
           runtimeState.phase = "ready";

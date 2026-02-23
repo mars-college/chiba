@@ -13,6 +13,7 @@
     "import-registry": "tsx src/cli.ts import-registry",
     "import-resources": "tsx src/cli.ts import-resources",
     "import-cable2-channels": "tsx src/cli.ts import-cable2-channels",
+    "seed-local": "tsx src/cli.ts seed-local",
     "snapshot-resources": "tsx src/cli.ts snapshot-resources",
     "drizzle:generate": "drizzle-kit generate",
     "drizzle:push": "drizzle-kit push"

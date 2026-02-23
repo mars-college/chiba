@@ -215,14 +215,40 @@ export function isLikelyVideoSource(value: string): boolean {
   }
 }
 
+export function isLikelyImageSource(value: string): boolean {
+  const raw = value.trim();
+  if (!raw) return false;
+  try {
+    const pathname = new URL(raw).pathname || "";
+    return /\.(jpg|jpeg|png|gif|webp|bmp|avif|tif|tiff)$/i.test(pathname);
+  } catch {
+    return /\.(jpg|jpeg|png|gif|webp|bmp|avif|tif|tiff)$/i.test(raw);
+  }
+}
+
 export function isVideoMedia(media: Media): boolean {
   return isLikelyVideoSource(media.sourceValue);
 }
 
+function fallbackPreviewDataUrl(media: Media): string {
+  const title = (media.title || media.id).trim() || "Web Content";
+  const subtitle = (media.artist || "preview unavailable").trim();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0b1f49"/><stop offset="100%" stop-color="#123268"/></linearGradient></defs><rect width="1280" height="720" rx="28" fill="url(#bg)"/><rect x="44" y="44" width="1192" height="632" rx="22" fill="#061126" stroke="#2d61aa" stroke-opacity=".6"/><text x="84" y="338" fill="#dce9ff" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="66" font-weight="700">${title}</text><text x="84" y="402" fill="#8eb2e7" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="34">${subtitle}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 export function mediaPreviewSource(media: Media): string | null {
-  if (!isVideoMedia(media)) return null;
-  if (media.sourceType === "url") return media.sourceValue;
-  return mediaStreamUrl(media.id);
+  if (isVideoMedia(media)) {
+    if (media.sourceType === "url") return media.sourceValue;
+    return mediaStreamUrl(media.id);
+  }
+  if (media.thumbnailUrl?.trim()) return media.thumbnailUrl;
+  if (isLikelyImageSource(media.sourceValue)) {
+    if (media.sourceType === "url") return media.sourceValue;
+    return mediaStreamUrl(media.id);
+  }
+  if (media.sourceType === "url") return fallbackPreviewDataUrl(media);
+  return null;
 }
 
 export function playlistMediaIdsFromSnapshot(

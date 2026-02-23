@@ -1,1976 +1,1419 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ActionIcon,
+  AppShell,
+  Badge,
+  Box,
+  Button,
+  Card,
+  Checkbox,
+  Code,
+  Divider,
+  Drawer,
+  Group,
+  JsonInput,
+  Loader,
+  Modal,
+  NumberInput,
+  Paper,
+  ScrollArea,
+  SegmentedControl,
+  Select,
+  SimpleGrid,
+  Stack,
+  Table,
+  Tabs,
+  Text,
+  TextInput,
+  Title,
+  Tooltip,
+} from '@mantine/core'
+import { notifications } from '@mantine/notifications'
+import {
+  IconAdjustments,
+  IconArrowsShuffle,
+  IconBroadcast,
+  IconChecklist,
+  IconDatabase,
+  IconDeviceDesktopAnalytics,
+  IconDownload,
+  IconRefresh,
+  IconSearch,
+  IconServerCog,
+} from '@tabler/icons-react'
 import {
   applyTarget,
   fetchCatalog,
-  fetchFleet,
-  fetchGuideIndex,
-  fetchPiHealth,
   fetchProfiles,
   openFleetStream,
   openGuide,
-  type FleetStreamMeta,
-} from "./lib/api";
+} from './lib/api'
+import {
+  fetchC3Snapshot,
+  importC3Resources,
+  type C3ResourcePayload,
+} from './lib/cable3api'
 import type {
-  FleetPi,
   FleetPiHealth,
-  GuideIndex,
+  OpsApplyResponse,
   OpsApplyTarget,
+  OpsCatalogResponse,
   OpsProfile,
-} from "./types";
+} from './types'
 
-function fmtAge(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  return `${h}h`;
+type OptionBool = 'inherit' | 'on' | 'off'
+type OptionMode = 'inherit' | 'guide' | 'gallery'
+type OptionHud = 'inherit' | 'always' | 'start' | 'never'
+type OptionRotate = 'inherit' | '0' | '90' | '180' | '270'
+
+type CatalogOption = { value: string; label: string }
+
+type DraftMedia = {
+  id: string
+  title: string
+  artist: string
+  sourceType: 'path' | 'url'
+  sourceValue: string
+  cache: boolean
 }
 
-function Pill({
-  kind,
-  label,
-}: {
-  kind: "ok" | "warn" | "bad" | "muted";
-  label: string;
-}) {
-  return <span className={`pill pill-${kind}`}>{label}</span>;
+type DraftPlaylist = {
+  id: string
+  title: string
+  artist: string
+  mediaIds: string[]
 }
 
-function rowKind(
-  pi: FleetPi | FleetPiHealth | null
-): "ok" | "warn" | "bad" | "muted" {
-  if (!pi) return "muted";
-  // Registry can contain external/unaddressable nodes with host="".
-  // When static IPs are configured, `ip` may be present even if `host` is empty.
-  const addr = (pi as any).ip || (pi as any).host;
-  if (!addr) return "muted";
-  if (!("dnsOk" in pi)) return "muted";
-  if (!pi.dnsOk) return "bad";
-  const anyTcpOk = pi.tcp.ssh22.ok || pi.tcp.node8080.ok || pi.tcp.cable8787.ok;
-  if (!anyTcpOk && !pi.ping.ok) return "bad";
-  if (pi.needsUpdate === true) return "warn";
-  return "ok";
+type DraftBlock = {
+  id: string
+  title: string
+  playlistIds: string[]
 }
 
-type ToggleValue = "inherit" | "on" | "off";
-type HudModeValue = "inherit" | "always" | "start" | "never";
-type DisplayRotateValue = "inherit" | "0" | "90" | "180" | "270";
-type TargetOverrideValue =
-  | "inherit"
-  | "media"
-  | "playlist"
-  | "block"
-  | "channel";
-type TargetKind = "media" | "playlist" | "block" | "channel";
-
-type CatalogMaps = {
-  channelsById: Map<string, any>;
-  blocksById: Map<string, any>;
-  playlistsById: Map<string, any>;
-  mediaById: Map<string, any>;
-  mediaBySource: Map<string, string>;
-};
-
-type ResolvedTargetDeps = {
-  targetKind: TargetKind;
-  targetId: string;
-  channelIds: string[];
-  blockIds: string[];
-  playlistIds: string[];
-  mediaIds: string[];
-};
-
-function toOptionalBool(value: ToggleValue): boolean | undefined {
-  if (value === "inherit") return undefined;
-  return value === "on";
+type DraftChannel = {
+  id: string
+  title: string
+  blockIds: string[]
 }
 
-function toOptionalNumber(value: string): number | undefined {
-  if (!value.trim()) return undefined;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
+type DraftProfile = {
+  id: string
+  title: string
+  defaultTargetKind: 'media' | 'playlist' | 'block' | 'channel'
+  defaultTargetId: string
 }
 
-function toOptionalDisplayRotate(
-  value: DisplayRotateValue
-): 0 | 90 | 180 | 270 | undefined {
-  if (value === "inherit") return undefined;
-  const parsed = Number(value);
-  if (parsed === 0 || parsed === 90 || parsed === 180 || parsed === 270) {
-    return parsed;
+type DraftStore = {
+  media: DraftMedia[]
+  playlists: DraftPlaylist[]
+  blocks: DraftBlock[]
+  channels: DraftChannel[]
+  profiles: DraftProfile[]
+}
+
+const EMPTY_DRAFTS: DraftStore = {
+  media: [],
+  playlists: [],
+  blocks: [],
+  channels: [],
+  profiles: [],
+}
+
+const DRAFT_STORAGE_KEY = 'chiba-controller-drafts-v1'
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function toOptionBool(value: OptionBool): boolean | undefined {
+  if (value === 'inherit') return undefined
+  return value === 'on'
+}
+
+function statusBadge(ok: boolean, labelOk: string, labelFail: string) {
+  return ok ? (
+    <Badge color="teal" variant="light">
+      {labelOk}
+    </Badge>
+  ) : (
+    <Badge color="red" variant="light">
+      {labelFail}
+    </Badge>
+  )
+}
+
+function parseCatalogOptions(rows: unknown, fallbackLabel: string): CatalogOption[] {
+  if (!Array.isArray(rows)) return []
+  return rows
+    .map((row) => {
+      if (!row || typeof row !== 'object') return null
+      const rec = row as Record<string, unknown>
+      const id = readString(rec.id)
+      if (!id) return null
+      const number = readString(rec.number)
+      const name = readString(rec.name || rec.title)
+      const label = [number, name, id].filter(Boolean).join(' • ')
+      return { value: id, label: label || `${fallbackLabel} • ${id}` }
+    })
+    .filter((row): row is CatalogOption => row !== null)
+}
+
+function parseTargetFromKioskUrl(rawUrl: string | null | undefined): string {
+  if (!rawUrl) return '—'
+  try {
+    const url = new URL(rawUrl)
+    const targetKind =
+      url.searchParams.get('targetKind') || url.searchParams.get('target_kind') || ''
+    const targetId =
+      url.searchParams.get('targetId') || url.searchParams.get('target_id') || ''
+    const channel = url.searchParams.get('channel') || ''
+    if (targetKind && targetId) return `${targetKind}:${targetId}`
+    if (channel) return `channel:${channel}`
+    return 'guide/default'
+  } catch {
+    return 'invalid-url'
   }
-  return undefined;
 }
 
-function toOptionalTargetKind(
-  value: TargetOverrideValue
-): "media" | "playlist" | "block" | "channel" | undefined {
-  if (value === "inherit") return undefined;
-  return value;
+function summarizeApplyResult(result: OpsApplyResponse): string {
+  const total = result.results.length
+  const ok = result.results.filter((r) => r.ok).length
+  if (ok === total) return `Applied to ${ok}/${total}`
+  const firstError = result.results.find((r) => !r.ok)?.error || 'unknown_error'
+  return `Applied to ${ok}/${total}. Failures: ${total - ok}. First error: ${firstError}`
 }
 
-function compactRecord(
-  input: Record<string, unknown>
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(input)) {
-    if (v === undefined || v === null) continue;
-    if (typeof v === "string" && v.trim().length === 0) continue;
-    out[k] = v;
-  }
-  return out;
-}
-
-function toCatalogMaps(catalog: any): CatalogMaps {
-  const channelsById = new Map<string, any>();
-  const blocksById = new Map<string, any>();
-  const playlistsById = new Map<string, any>();
-  const mediaById = new Map<string, any>();
-  const mediaBySource = new Map<string, string>();
-
-  for (const channel of Array.isArray(catalog?.channels)
-    ? catalog.channels
-    : []) {
-    const id = String(channel?.id ?? "").trim();
-    if (id) channelsById.set(id, channel);
-  }
-  for (const block of Array.isArray(catalog?.blocks) ? catalog.blocks : []) {
-    const id = String(block?.id ?? "").trim();
-    if (id) blocksById.set(id, block);
-  }
-  for (const playlist of Array.isArray(catalog?.playlists)
-    ? catalog.playlists
-    : []) {
-    const id = String(playlist?.id ?? "").trim();
-    if (id) playlistsById.set(id, playlist);
-  }
-  for (const media of Array.isArray(catalog?.media) ? catalog.media : []) {
-    const id = String(media?.id ?? "").trim();
-    if (!id) continue;
-    mediaById.set(id, media);
-    const source = String(media?.source ?? "").trim();
-    if (source && !mediaBySource.has(source)) mediaBySource.set(source, id);
-  }
-
-  return { channelsById, blocksById, playlistsById, mediaById, mediaBySource };
-}
-
-function parseKioskTarget(params: Array<[string, string]> | null): {
-  kind?: TargetKind;
-  id?: string;
-} {
-  if (!params) return {};
-  const get = (k: string) => params.find(([kk]) => kk === k)?.[1]?.trim() ?? "";
-  const rawKind = get("targetKind") || get("target_kind");
-  const kind =
-    rawKind === "media" ||
-    rawKind === "playlist" ||
-    rawKind === "block" ||
-    rawKind === "channel"
-      ? rawKind
-      : undefined;
-  const id =
-    get("targetId") ||
-    get("target_id") ||
-    (kind === "channel" ? get("channel") : "");
-  if (kind && id) return { kind, id };
-  const channel = get("channel");
-  if (channel) return { kind: "channel", id: channel };
-  return {};
-}
-
-function resolveTargetDeps(
-  maps: CatalogMaps | null,
-  target: { kind?: TargetKind; id?: string }
-): ResolvedTargetDeps | null {
-  if (!maps || !target.kind || !target.id) return null;
-
-  const channelIds = new Set<string>();
-  const blockIds = new Set<string>();
-  const playlistIds = new Set<string>();
-  const mediaIds = new Set<string>();
-  const visitedPlaylists = new Set<string>();
-  const visitedBlocks = new Set<string>();
-  const visitedChannels = new Set<string>();
-
-  const addMedia = (id: unknown) => {
-    const mediaId = String(id ?? "").trim();
-    if (!mediaId) return;
-    mediaIds.add(mediaId);
-  };
-  const addMediaFromSource = (source: unknown) => {
-    const src = String(source ?? "").trim();
-    if (!src) return;
-    const mediaId = maps.mediaBySource.get(src);
-    if (mediaId) mediaIds.add(mediaId);
-  };
-  const visitPlaylist = (playlistId: unknown) => {
-    const id = String(playlistId ?? "").trim();
-    if (!id || visitedPlaylists.has(id)) return;
-    visitedPlaylists.add(id);
-    playlistIds.add(id);
-    const playlist = maps.playlistsById.get(id);
-    if (!playlist) return;
-    for (const item of Array.isArray(playlist?.items) ? playlist.items : []) {
-      addMedia(item?.media);
-      addMediaFromSource(item?.source);
-      visitPlaylist(item?.playlist);
+function loadDraftStore(): DraftStore {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+    if (!raw) return EMPTY_DRAFTS
+    const parsed = JSON.parse(raw) as Partial<DraftStore>
+    return {
+      media: Array.isArray(parsed.media) ? parsed.media : [],
+      playlists: Array.isArray(parsed.playlists) ? parsed.playlists : [],
+      blocks: Array.isArray(parsed.blocks) ? parsed.blocks : [],
+      channels: Array.isArray(parsed.channels) ? parsed.channels : [],
+      profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
     }
-  };
-  const visitBlock = (blockId: unknown) => {
-    const id = String(blockId ?? "").trim();
-    if (!id || visitedBlocks.has(id)) return;
-    visitedBlocks.add(id);
-    blockIds.add(id);
-    const block = maps.blocksById.get(id);
-    if (!block) return;
-    visitPlaylist(block?.playlist);
-    addMedia(block?.media);
-    addMediaFromSource(block?.source);
-    for (const item of Array.isArray(block?.items) ? block.items : []) {
-      addMedia(item?.media);
-      addMediaFromSource(item?.source);
-      visitPlaylist(item?.playlist);
-    }
-  };
-  const visitChannel = (channelId: unknown) => {
-    const id = String(channelId ?? "").trim();
-    if (!id || visitedChannels.has(id)) return;
-    visitedChannels.add(id);
-    channelIds.add(id);
-    const channel = maps.channelsById.get(id);
-    if (!channel) return;
-    for (const blockId of Array.isArray(channel?.blocks)
-      ? channel.blocks
-      : []) {
-      visitBlock(blockId);
-    }
-    for (const program of Array.isArray(channel?.programs)
-      ? channel.programs
-      : []) {
-      visitPlaylist(program?.playlist);
-      addMedia(program?.media);
-      addMediaFromSource(program?.source);
-    }
-  };
+  } catch {
+    return EMPTY_DRAFTS
+  }
+}
 
-  if (target.kind === "media") addMedia(target.id);
-  if (target.kind === "playlist") visitPlaylist(target.id);
-  if (target.kind === "block") visitBlock(target.id);
-  if (target.kind === "channel") visitChannel(target.id);
-
+function toC3Payload(store: DraftStore): C3ResourcePayload {
   return {
-    targetKind: target.kind,
-    targetId: target.id,
-    channelIds: Array.from(channelIds),
-    blockIds: Array.from(blockIds),
-    playlistIds: Array.from(playlistIds),
-    mediaIds: Array.from(mediaIds),
-  };
+    media: store.media.map((m) => ({
+      id: m.id.trim(),
+      title: m.title.trim() || undefined,
+      artist: m.artist.trim() || undefined,
+      sourceType: m.sourceType,
+      sourceValue: m.sourceValue.trim(),
+      cache: m.cache,
+    })),
+    playlists: store.playlists.map((p) => ({
+      id: p.id.trim(),
+      title: p.title.trim() || undefined,
+      artist: p.artist.trim() || undefined,
+      items: p.mediaIds.map((mediaId, index) => ({
+        index,
+        mediaId: mediaId.trim(),
+      })),
+    })),
+    blocks: store.blocks.map((b) => ({
+      id: b.id.trim(),
+      title: b.title.trim() || undefined,
+      mode: 'loop',
+      items: b.playlistIds.map((playlistId, index) => ({
+        index,
+        playlistId: playlistId.trim(),
+      })),
+    })),
+    channels: store.channels.map((c) => ({
+      id: c.id.trim(),
+      name: c.title.trim() || undefined,
+      blockIds: c.blockIds.map((blockId) => blockId.trim()),
+    })),
+    profiles: store.profiles.map((p) => ({
+      id: p.id.trim(),
+      title: p.title.trim() || undefined,
+      defaults: {},
+      defaultTarget:
+        p.defaultTargetKind && p.defaultTargetId.trim()
+          ? {
+              kind: p.defaultTargetKind,
+              id: p.defaultTargetId.trim(),
+            }
+          : undefined,
+      nodes: [],
+    })),
+  }
+}
+
+function fromC3Payload(payload: C3ResourcePayload): DraftStore {
+  return {
+    media: payload.media.map((m) => ({
+      id: m.id,
+      title: m.title || '',
+      artist: m.artist || '',
+      sourceType: m.sourceType,
+      sourceValue: m.sourceValue,
+      cache: m.cache,
+    })),
+    playlists: payload.playlists.map((p) => ({
+      id: p.id,
+      title: p.title || '',
+      artist: p.artist || '',
+      mediaIds: p.items
+        .map((item) => item.mediaId || '')
+        .filter((id) => id.length > 0),
+    })),
+    blocks: payload.blocks.map((b) => ({
+      id: b.id,
+      title: b.title || '',
+      playlistIds: b.items
+        .map((item) => item.playlistId || '')
+        .filter((id) => id.length > 0),
+    })),
+    channels: payload.channels.map((c) => ({
+      id: c.id,
+      title: c.name || '',
+      blockIds: c.blockIds,
+    })),
+    profiles: payload.profiles.map((p) => ({
+      id: p.id,
+      title: p.title || '',
+      defaultTargetKind:
+        p.defaultTarget?.kind === 'media' ||
+        p.defaultTarget?.kind === 'playlist' ||
+        p.defaultTarget?.kind === 'block' ||
+        p.defaultTarget?.kind === 'channel'
+          ? p.defaultTarget.kind
+          : 'channel',
+      defaultTargetId: p.defaultTarget?.id || '',
+    })),
+  }
 }
 
 export default function App() {
-  type ControlPanelKey = "apply" | "options" | "quick";
-  const [view, setView] = useState<"fleet" | "catalog">("fleet");
-  const [meta, setMeta] = useState<FleetStreamMeta | null>(null);
-  const [healthById, setHealthById] = useState<Record<string, FleetPiHealth>>(
-    {}
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [filter, setFilter] = useState<"all" | "bad" | "warn" | "ok">("all");
-  const [nodeFilter, setNodeFilter] = useState("");
-  const [checkingById, setCheckingById] = useState<Record<string, boolean>>({});
-  const [profiles, setProfiles] = useState<OpsProfile[]>([]);
-  const [guideIndex, setGuideIndex] = useState<GuideIndex | null>(null);
-  const [selectedById, setSelectedById] = useState<Record<string, boolean>>({});
-  const [applyKind, setApplyKind] = useState<OpsApplyTarget>("profile");
-  const [applyId, setApplyId] = useState<string>("");
-  const [targetPickerOpen, setTargetPickerOpen] = useState(false);
-  const [targetPickerFilter, setTargetPickerFilter] = useState("");
-  const [optMode, setOptMode] = useState<"inherit" | "guide" | "gallery">(
-    "inherit"
-  );
-  const [optTargetKind, setOptTargetKind] =
-    useState<TargetOverrideValue>("inherit");
-  const [optTargetId, setOptTargetId] = useState<string>("");
-  const [optChannel, setOptChannel] = useState<string>("");
-  const [optLock, setOptLock] = useState<ToggleValue>("inherit");
-  const [optQr, setOptQr] = useState<ToggleValue>("inherit");
-  const [optPlaylist, setOptPlaylist] = useState<ToggleValue>("inherit");
-  const [optNosplash, setOptNosplash] = useState<ToggleValue>("inherit");
-  const [optHudMode, setOptHudMode] = useState<HudModeValue>("inherit");
-  const [optHudShowSec, setOptHudShowSec] = useState<string>("");
-  const [optTheme, setOptTheme] = useState<string>("");
-  const [optDisplayRotate, setOptDisplayRotate] =
-    useState<DisplayRotateValue>("inherit");
-  const [optScale, setOptScale] = useState<string>("");
-  const [optTextScale, setOptTextScale] = useState<string>("");
-  const [optHours, setOptHours] = useState<string>("");
-  const [controlBusy, setControlBusy] = useState(false);
-  const [controlMsg, setControlMsg] = useState<string | null>(null);
-  const [controlErr, setControlErr] = useState<string | null>(null);
-  const [expandedById, setExpandedById] = useState<Record<string, boolean>>({});
-  const [catalog, setCatalog] = useState<any | null>(null);
-  const [catalogErr, setCatalogErr] = useState<string | null>(null);
-  const [catalogTab, setCatalogTab] = useState<
-    "channels" | "blocks" | "playlists" | "media"
-  >("channels");
-  const [catalogFilter, setCatalogFilter] = useState<string>("");
-  const [openControlPanels, setOpenControlPanels] = useState<
-    Record<ControlPanelKey, boolean>
-  >({
-    apply: false,
-    options: false,
-    quick: false,
-  });
-  const abortRef = useRef<AbortController | null>(null);
-  const streamRef = useRef<{ close: () => void } | null>(null);
+  const [catalog, setCatalog] = useState<OpsCatalogResponse | null>(null)
+  const [profiles, setProfiles] = useState<OpsProfile[]>([])
+  const [fleetMap, setFleetMap] = useState<Record<string, FleetPiHealth>>({})
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null)
+  const [loadingFleet, setLoadingFleet] = useState(false)
+  const [search, setSearch] = useState('')
+  const [lastTick, setLastTick] = useState<number | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [controlOpen, setControlOpen] = useState(true)
+  const [applyOpen, setApplyOpen] = useState(false)
+  const [catalogReloadToken, setCatalogReloadToken] = useState(0)
+  const [applyResult, setApplyResult] = useState<OpsApplyResponse | null>(null)
+  const [draftStore, setDraftStore] = useState<DraftStore>(() => loadDraftStore())
+  const [builderBusy, setBuilderBusy] = useState(false)
 
-  const toggleControlPanel = (key: ControlPanelKey) => {
-    setOpenControlPanels((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+  const [applyKind, setApplyKind] = useState<OpsApplyTarget>('profile')
+  const [applyId, setApplyId] = useState('')
+  const [optMode, setOptMode] = useState<OptionMode>('inherit')
+  const [optLock, setOptLock] = useState<OptionBool>('inherit')
+  const [optQr, setOptQr] = useState<OptionBool>('inherit')
+  const [optPlaylist, setOptPlaylist] = useState<OptionBool>('inherit')
+  const [optNosplash, setOptNosplash] = useState<OptionBool>('inherit')
+  const [optHud, setOptHud] = useState<OptionHud>('inherit')
+  const [optHudSec, setOptHudSec] = useState<number | ''>('')
+  const [optTheme, setOptTheme] = useState('')
+  const [optRotate, setOptRotate] = useState<OptionRotate>('inherit')
 
-  const toggleExpanded = (id: string) => {
-    setExpandedById((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
+  const [mediaDraft, setMediaDraft] = useState<DraftMedia>({
+    id: '',
+    title: '',
+    artist: '',
+    sourceType: 'path',
+    sourceValue: '',
+    cache: true,
+  })
+  const [playlistDraft, setPlaylistDraft] = useState<DraftPlaylist>({
+    id: '',
+    title: '',
+    artist: '',
+    mediaIds: [],
+  })
+  const [blockDraft, setBlockDraft] = useState<DraftBlock>({
+    id: '',
+    title: '',
+    playlistIds: [],
+  })
+  const [channelDraft, setChannelDraft] = useState<DraftChannel>({
+    id: '',
+    title: '',
+    blockIds: [],
+  })
+  const [profileDraft, setProfileDraft] = useState<DraftProfile>({
+    id: '',
+    title: '',
+    defaultTargetKind: 'channel',
+    defaultTargetId: '',
+  })
 
-  const closeStream = () => {
-    streamRef.current?.close();
-    streamRef.current = null;
-  };
+  useEffect(() => {
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftStore))
+  }, [draftStore])
 
-  const startStream = (opts?: { reset?: boolean }) => {
-    closeStream();
-    setLoading(true);
-    setError(null);
-    if (opts?.reset !== false) setHealthById({});
-    streamRef.current = openFleetStream({
-      // You can tune these without redeploying:
-      // timeoutMs: 650,
-      // parallel: 12,
-      onMeta: (m) => {
-        setMeta(m);
-        setLoading(false);
+  const refreshCatalogAndProfiles = useCallback(async () => {
+    try {
+      const [catalogRes, profilesRes] = await Promise.all([
+        fetchCatalog(),
+        fetchProfiles(),
+      ])
+      setCatalog(catalogRes)
+      setProfiles(profilesRes.profiles ?? [])
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        title: 'Catalog refresh failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [])
+
+  const refreshFleet = useCallback(() => {
+    setLoadingFleet(true)
+    const stream = openFleetStream({
+      onMeta: () => {
+        // no-op right now, metadata can be shown later
       },
       onPi: (pi) => {
-        setHealthById((prev) =>
-          prev[pi.id] === pi ? prev : { ...prev, [pi.id]: pi }
-        );
+        setFleetMap((prev) => ({ ...prev, [pi.id]: pi }))
       },
       onDone: () => {
-        // no-op; keep last results on screen
+        setLoadingFleet(false)
+        setLastTick(Date.now())
       },
       onError: (msg) => {
-        setError(msg);
-      },
-    });
-  };
-
-  // Fallback for environments where SSE is blocked.
-  const loadSnapshot = async () => {
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchFleet(ac.signal);
-      setMeta({ now: res.now, local: res.local, pis: res.pis });
-      const map: Record<string, FleetPiHealth> = {};
-      for (const pi of res.pis) map[pi.id] = pi;
-      setHealthById(map);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const refreshOne = async (id: string) => {
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    setError(null);
-    setCheckingById((prev) => ({ ...prev, [id]: true }));
-    try {
-      const health = await fetchPiHealth(id, ac.signal);
-      setHealthById((prev) => ({ ...prev, [id]: health }));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setCheckingById((prev) => ({ ...prev, [id]: false }));
-    }
-  };
-
-  const loadCatalog = async () => {
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    setCatalogErr(null);
-    try {
-      const res = await fetchCatalog(ac.signal);
-      if (!(res as any)?.ok) {
-        setCatalogErr((res as any)?.error ?? "catalog_failed");
-        return;
-      }
-      setCatalog(res);
-    } catch (e) {
-      setCatalogErr((e as Error).message);
-    }
-  };
-
-  useEffect(() => {
-    startStream({ reset: true });
-    return () => {
-      closeStream();
-      abortRef.current?.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (view !== "catalog") return;
-    if (catalog) return;
-    void loadCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view]);
-
-  // Load catalog opportunistically so the Fleet row details can resolve
-  // channel -> blocks -> playlists -> media without switching views.
-  useEffect(() => {
-    if (catalog || catalogErr) return;
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const res = await fetchCatalog(ac.signal);
-        if ((res as any)?.ok) setCatalog(res);
-      } catch {
-        // ignore
-      }
-    })();
-    return () => ac.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    // Load static-ish ops data once (profiles + channel index).
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const [p, idx] = await Promise.all([
-          fetchProfiles(ac.signal),
-          fetchGuideIndex(ac.signal),
-        ]);
-        setProfiles(p.profiles ?? []);
-        setGuideIndex(idx);
-      } catch (e) {
-        // Don't block fleet health UI if these fail.
-        // eslint-disable-next-line no-console
-        console.warn("[ops] preload failed", e);
-      }
-    })();
-    return () => ac.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const t = window.setInterval(() => {
-      startStream({ reset: false });
-    }, 8000);
-    return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRefresh]);
-
-  useEffect(() => {
-    if (!targetPickerOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setTargetPickerOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [targetPickerOpen]);
-
-  const rows = useMemo(() => {
-    const base = meta?.pis ?? [];
-    const joined = base.map((p) => healthById[p.id] ?? p);
-    const query = nodeFilter.trim().toLowerCase();
-    const filtered = joined.filter((pi) => {
-      const kind = rowKind(pi as any);
-      if (filter === "all") return true;
-      if (filter === "bad") return kind === "bad";
-      if (filter === "warn") return kind === "warn";
-      if (filter !== "ok") return false;
-      return kind === "ok";
-    }).filter((pi) => {
-      if (!query) return true;
-      const id = String((pi as any).id ?? "").toLowerCase();
-      const nodeName = String((pi as any).nodeName ?? "").toLowerCase();
-      const host = String((pi as any).host ?? "").toLowerCase();
-      const ip = String((pi as any).ip ?? "").toLowerCase();
-      return (
-        id.includes(query) ||
-        nodeName.includes(query) ||
-        host.includes(query) ||
-        ip.includes(query)
-      );
-    });
-    filtered.sort((a, b) => {
-      const ka = rowKind(a as any);
-      const kb = rowKind(b as any);
-      const rank = (k: string) =>
-        k === "bad" ? 0 : k === "warn" ? 1 : k === "muted" ? 3 : 2;
-      const r = rank(ka) - rank(kb);
-      if (r !== 0) return r;
-      return a.id.localeCompare(b.id);
-    });
-    return filtered;
-  }, [meta, healthById, filter, nodeFilter]);
-
-  const now = meta?.now ?? Date.now();
-  const selectedIds = useMemo(
-    () =>
-      Object.entries(selectedById)
-        .filter(([, v]) => v)
-        .map(([k]) => k),
-    [selectedById]
-  );
-
-  const visibleIds = useMemo(() => rows.map((r) => r.id), [rows]);
-
-  const allChannels = useMemo(() => guideIndex?.channels ?? [], [guideIndex]);
-  const channelOptions = useMemo(() => {
-    const items = allChannels
-      .map((c) => {
-        const labelBits = [
-          c.number ? String(c.number).trim() : "",
-          c.name ? String(c.name).trim() : "",
-          c.id,
-        ]
-          .filter(Boolean)
-          .join(" ");
-        return { id: c.id, label: labelBits };
-      })
-      .sort((a, b) => a.label.localeCompare(b.label));
-    return items;
-  }, [allChannels]);
-
-  const profileOptions = useMemo(
-    () =>
-      profiles
-        .map((profile) => ({ id: profile.id, label: profile.id }))
-        .sort((a, b) => a.label.localeCompare(b.label)),
-    [profiles]
-  );
-
-  const catalogChannels = useMemo(() => {
-    const channels: any[] = Array.isArray((catalog as any)?.channels)
-      ? (catalog as any).channels
-      : [];
-    return channels
-      .map((channel) => {
-        const id = String(channel?.id ?? "").trim();
-        if (!id) return null;
-        const number = String(channel?.number ?? "").trim();
-        const name = String(channel?.name ?? "").trim();
-        const label = [number, name, id].filter(Boolean).join(" ");
-        return { id, label: label || id };
-      })
-      .filter((entry): entry is { id: string; label: string } => Boolean(entry))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [catalog]);
-
-  const catalogBlocks = useMemo(() => {
-    const blocks: any[] = Array.isArray((catalog as any)?.blocks)
-      ? (catalog as any).blocks
-      : [];
-    return blocks
-      .map((block) => {
-        const id = String(block?.id ?? "").trim();
-        if (!id) return null;
-        const title = String(block?.title ?? block?.name ?? "").trim();
-        const label = [id, title].filter(Boolean).join(" ");
-        return { id, label: label || id };
-      })
-      .filter((entry): entry is { id: string; label: string } => Boolean(entry))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [catalog]);
-
-  const catalogPlaylists = useMemo(() => {
-    const playlists: any[] = Array.isArray((catalog as any)?.playlists)
-      ? (catalog as any).playlists
-      : [];
-    return playlists
-      .map((playlist) => {
-        const id = String(playlist?.id ?? "").trim();
-        if (!id) return null;
-        const title = String(playlist?.title ?? playlist?.name ?? "").trim();
-        const label = [id, title].filter(Boolean).join(" ");
-        return { id, label: label || id };
-      })
-      .filter((entry): entry is { id: string; label: string } => Boolean(entry))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [catalog]);
-
-  const catalogMedia = useMemo(() => {
-    const media: any[] = Array.isArray((catalog as any)?.media)
-      ? (catalog as any).media
-      : [];
-    return media
-      .map((item) => {
-        const id = String(item?.id ?? "").trim();
-        if (!id) return null;
-        const title = String(item?.title ?? item?.name ?? "").trim();
-        const label = [id, title].filter(Boolean).join(" ");
-        return { id, label: label || id };
-      })
-      .filter((entry): entry is { id: string; label: string } => Boolean(entry))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [catalog]);
-
-  const catalogMaps = useMemo(() => {
-    if (!catalog) return null;
-    return toCatalogMaps(catalog);
-  }, [catalog]);
-
-  const applyOptions = useMemo(() => {
-    if (applyKind === "profile") return profileOptions;
-    if (applyKind === "channel")
-      return catalogChannels.length ? catalogChannels : channelOptions;
-    if (applyKind === "block") return catalogBlocks;
-    if (applyKind === "playlist") return catalogPlaylists;
-    return catalogMedia;
-  }, [
-    applyKind,
-    catalogBlocks,
-    catalogChannels,
-    catalogMedia,
-    catalogPlaylists,
-    channelOptions,
-    profileOptions,
-  ]);
-
-  const filteredApplyOptions = useMemo(() => {
-    const query = targetPickerFilter.trim().toLowerCase();
-    if (!query) return applyOptions;
-    return applyOptions.filter((entry) => {
-      const id = entry.id.toLowerCase();
-      const label = entry.label.toLowerCase();
-      return id.includes(query) || label.includes(query);
-    });
-  }, [applyOptions, targetPickerFilter]);
-
-  useEffect(() => {
-    if (!applyOptions.length) {
-      if (applyId) setApplyId("");
-      return;
-    }
-    if (!applyOptions.some((option) => option.id === applyId)) {
-      setApplyId(applyOptions[0].id);
-    }
-  }, [applyOptions, applyId]);
-
-  const targetKindOverride = toOptionalTargetKind(optTargetKind);
-  const targetIdOverride = optTargetId.trim() || undefined;
-  const showChannelFallback =
-    applyKind === "profile" &&
-    targetKindOverride === undefined &&
-    !targetIdOverride;
-  const channelFallbackOverride = showChannelFallback
-    ? optChannel.trim() || undefined
-    : undefined;
-
-  const applyPayloadPreview = useMemo(() => {
-    const mode = optMode === "inherit" ? undefined : optMode;
-    const payload = compactRecord({
-      target: applyKind,
-      id: applyId || undefined,
-      piIds: selectedIds.length > 0 ? selectedIds : undefined,
-      mode,
-      targetKind: targetKindOverride,
-      targetId: targetIdOverride,
-      channel: channelFallbackOverride,
-      lock: toOptionalBool(optLock),
-      showQr: toOptionalBool(optQr),
-      playlist: toOptionalBool(optPlaylist),
-      nosplash: toOptionalBool(optNosplash),
-      hudMode: optHudMode === "inherit" ? undefined : optHudMode,
-      hudShowSec: toOptionalNumber(optHudShowSec),
-      theme: optTheme.trim() || undefined,
-      displayRotate: toOptionalDisplayRotate(optDisplayRotate),
-      scale: toOptionalNumber(optScale),
-      textScale: toOptionalNumber(optTextScale),
-      hours: toOptionalNumber(optHours),
-    });
-    return payload;
-  }, [
-    applyKind,
-    applyId,
-    selectedIds,
-    optMode,
-    targetKindOverride,
-    targetIdOverride,
-    channelFallbackOverride,
-    optLock,
-    optQr,
-    optPlaylist,
-    optNosplash,
-    optHudMode,
-    optHudShowSec,
-    optTheme,
-    optDisplayRotate,
-    optScale,
-    optTextScale,
-    optHours,
-  ]);
-
-  const applyTargetSummary = useMemo(() => {
-    if (applyKind === "profile") {
-      if (targetKindOverride && targetIdOverride)
-        return `${targetKindOverride}:${targetIdOverride} (profile override)`;
-      if (targetKindOverride && !targetIdOverride)
-        return `${targetKindOverride}:<required id>`;
-      if (targetIdOverride)
-        return `profile target id override: ${targetIdOverride}`;
-      if (channelFallbackOverride)
-        return `channel:${channelFallbackOverride} (profile fallback)`;
-      return "profile-defined target";
-    }
-    const kind = targetKindOverride ?? applyKind;
-    const id = targetIdOverride ?? applyId;
-    return id ? `${kind}:${id}` : `${kind}:<missing id>`;
-  }, [
-    applyKind,
-    applyId,
-    channelFallbackOverride,
-    targetIdOverride,
-    targetKindOverride,
-  ]);
-
-  const selectedApplyOptionLabel = useMemo(() => {
-    const option = applyOptions.find((entry) => entry.id === applyId);
-    return option?.label ?? applyId;
-  }, [applyId, applyOptions]);
-
-  const summarizeResults = (
-    results: Array<{ ok: boolean; id: string; error?: string | null }>
-  ) => {
-    const ok = results.filter((r) => r.ok).length;
-    const bad = results.length - ok;
-    if (!results.length) return "No targets.";
-    if (bad === 0) return `Applied to ${ok}/${results.length}.`;
-    const firstErr = results.find((r) => !r.ok)?.error ?? "unknown_error";
-    return `Applied to ${ok}/${results.length}. Failures: ${bad}. First error: ${firstErr}`;
-  };
-
-  const runApply = async (
-    fn: () => Promise<{
-      ok: boolean;
-      results: Array<{ id: string; ok: boolean; error: string | null }>;
-    }>
-  ) => {
-    if (!selectedIds.length) {
-      setControlErr("Select at least one node.");
-      return;
-    }
-    setControlBusy(true);
-    setControlErr(null);
-    setControlMsg(null);
-    try {
-      const res = await fn();
-      if (!res.ok) {
-        setControlErr("request_failed");
-        return;
-      }
-      if (!res.results.length) {
-        setControlErr(
-          `No results returned for selected nodes (${selectedIds.join(", ")})`
-        );
-        return;
-      }
-      setControlMsg(summarizeResults(res.results));
-      // Refresh health so the table reflects new kiosk urls quickly.
-      startStream({ reset: false });
-    } catch (e) {
-      setControlErr((e as Error).message);
-    } finally {
-      setControlBusy(false);
-    }
-  };
-
-  const runApplyTarget = () =>
-    runApply(async () => {
-      const mode = optMode === "inherit" ? undefined : optMode;
-      return await applyTarget({
-        target: applyKind,
-        id: applyId,
-        piIds: selectedIds,
-        mode,
-        targetKind: targetKindOverride,
-        targetId: targetIdOverride,
-        channel: channelFallbackOverride,
-        lock: toOptionalBool(optLock),
-        showQr: toOptionalBool(optQr),
-        playlist: toOptionalBool(optPlaylist),
-        nosplash: toOptionalBool(optNosplash),
-        hudMode: optHudMode === "inherit" ? undefined : optHudMode,
-        hudShowSec: toOptionalNumber(optHudShowSec),
-        theme: optTheme.trim() || undefined,
-        displayRotate: toOptionalDisplayRotate(optDisplayRotate),
-        scale: toOptionalNumber(optScale),
-        textScale: toOptionalNumber(optTextScale),
-        hours: toOptionalNumber(optHours),
-      });
-    });
-
-  const runReturnToGuide = () =>
-    runApply(
-      async () =>
-        await openGuide({
-          piIds: selectedIds,
-          lock: toOptionalBool(optLock),
-          showQr: toOptionalBool(optQr),
-          nosplash: toOptionalBool(optNosplash),
+        setLoadingFleet(false)
+        notifications.show({
+          color: 'orange',
+          title: 'Fleet stream warning',
+          message: msg,
         })
-    );
+      },
+    })
+    return () => stream.close()
+  }, [])
+
+  useEffect(() => {
+    refreshCatalogAndProfiles()
+  }, [refreshCatalogAndProfiles, catalogReloadToken])
+
+  useEffect(() => {
+    const close = refreshFleet()
+    return close
+  }, [refreshFleet])
+
+  useEffect(() => {
+    if (!autoRefresh) return
+    const id = window.setInterval(() => refreshFleet(), 8000)
+    return () => window.clearInterval(id)
+  }, [autoRefresh, refreshFleet])
+
+  const fleetRows = useMemo(() => {
+    return Object.values(fleetMap).sort((a, b) => a.id.localeCompare(b.id))
+  }, [fleetMap])
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return fleetRows
+    return fleetRows.filter((row) => {
+      const haystack = [row.id, row.nodeName, row.host, row.ip]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(q)
+    })
+  }, [fleetRows, search])
+
+  useEffect(() => {
+    setSelectedNodeIds((prev) => prev.filter((id) => fleetMap[id]))
+  }, [fleetMap])
+
+  const selectedNode = useMemo(
+    () => (activeNodeId ? fleetMap[activeNodeId] ?? null : null),
+    [activeNodeId, fleetMap]
+  )
+
+  const metrics = useMemo(() => {
+    const total = fleetRows.length
+    const online = fleetRows.filter((r) => r.ping.ok && r.http.nodeStatus.ok).length
+    const degraded = fleetRows.filter((r) => !r.http.nodeStatus.ok || !r.http.cableVersion.ok).length
+    const updating = fleetRows.filter((r) => r.needsUpdate === true).length
+    return { total, online, degraded, updating }
+  }, [fleetRows])
+
+  const profileOptions = useMemo<CatalogOption[]>(
+    () =>
+      profiles.map((p) => ({
+        value: p.id,
+        label: `${p.id} • ${p.file}`,
+      })),
+    [profiles]
+  )
+
+  const channelOptions = useMemo(
+    () => parseCatalogOptions(catalog?.channels, 'channel'),
+    [catalog]
+  )
+  const blockOptions = useMemo(
+    () => parseCatalogOptions(catalog?.blocks, 'block'),
+    [catalog]
+  )
+  const playlistOptions = useMemo(
+    () => parseCatalogOptions(catalog?.playlists, 'playlist'),
+    [catalog]
+  )
+  const mediaOptions = useMemo(
+    () => parseCatalogOptions(catalog?.media, 'media'),
+    [catalog]
+  )
+
+  const currentApplyOptions = useMemo<CatalogOption[]>(() => {
+    if (applyKind === 'profile') return profileOptions
+    if (applyKind === 'channel') return channelOptions
+    if (applyKind === 'block') return blockOptions
+    if (applyKind === 'playlist') return playlistOptions
+    return mediaOptions
+  }, [applyKind, profileOptions, channelOptions, blockOptions, playlistOptions, mediaOptions])
+
+  const toggleNodeSelection = useCallback((id: string, checked: boolean) => {
+    setSelectedNodeIds((prev) => {
+      if (checked) return Array.from(new Set([...prev, id]))
+      return prev.filter((x) => x !== id)
+    })
+  }, [])
+
+  const selectVisible = useCallback(() => {
+    setSelectedNodeIds(Array.from(new Set([...selectedNodeIds, ...filteredRows.map((r) => r.id)])))
+  }, [selectedNodeIds, filteredRows])
+
+  const clearSelection = useCallback(() => setSelectedNodeIds([]), [])
+
+  const runApply = useCallback(async () => {
+    if (!applyId.trim()) {
+      notifications.show({
+        color: 'red',
+        title: 'Target required',
+        message: 'Choose a profile/channel/block/playlist/media target first.',
+      })
+      return
+    }
+    if (selectedNodeIds.length === 0) {
+      notifications.show({
+        color: 'red',
+        title: 'No nodes selected',
+        message: 'Select at least one node.',
+      })
+      return
+    }
+
+    try {
+      const result = await applyTarget({
+        target: applyKind,
+        id: applyId.trim(),
+        piIds: selectedNodeIds,
+        mode: optMode === 'inherit' ? undefined : optMode,
+        lock: toOptionBool(optLock),
+        showQr: toOptionBool(optQr),
+        playlist: toOptionBool(optPlaylist),
+        nosplash: toOptionBool(optNosplash),
+        hudMode: optHud === 'inherit' ? undefined : optHud,
+        hudShowSec: typeof optHudSec === 'number' && Number.isFinite(optHudSec) ? optHudSec : undefined,
+        theme: optTheme.trim() || undefined,
+        displayRotate:
+          optRotate === 'inherit'
+            ? undefined
+            : (Number(optRotate) as 0 | 90 | 180 | 270),
+      })
+      setApplyResult(result)
+      notifications.show({
+        color: result.ok ? 'teal' : 'orange',
+        title: 'Apply completed',
+        message: summarizeApplyResult(result),
+      })
+      refreshFleet()
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        title: 'Apply failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [
+    applyId,
+    applyKind,
+    optHud,
+    optHudSec,
+    optLock,
+    optMode,
+    optNosplash,
+    optPlaylist,
+    optQr,
+    optRotate,
+    optTheme,
+    refreshFleet,
+    selectedNodeIds,
+  ])
+
+  const returnToGuide = useCallback(async () => {
+    if (selectedNodeIds.length === 0) {
+      notifications.show({
+        color: 'red',
+        title: 'No nodes selected',
+        message: 'Select at least one node.',
+      })
+      return
+    }
+    try {
+      const result = await openGuide({ piIds: selectedNodeIds, nosplash: true })
+      notifications.show({
+        color: result.ok ? 'teal' : 'orange',
+        title: 'Return to guide',
+        message: summarizeApplyResult(result),
+      })
+      refreshFleet()
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        title: 'Guide command failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [refreshFleet, selectedNodeIds])
+
+  const exportDrafts = useCallback(() => {
+    const blob = new Blob([JSON.stringify(draftStore, null, 2)], {
+      type: 'application/json',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `chiba-controller-drafts-${Date.now()}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [draftStore])
+
+  const pushDraftsToControlDb = useCallback(async () => {
+    try {
+      setBuilderBusy(true)
+      const payload = toC3Payload(draftStore)
+      const result = await importC3Resources(payload)
+      notifications.show({
+        color: 'teal',
+        title: 'Drafts synced to control DB',
+        message: `media:${result.counts.media} playlists:${result.counts.playlists} blocks:${result.counts.blocks} channels:${result.counts.channels} profiles:${result.counts.profiles}`,
+      })
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        title: 'Sync to control DB failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setBuilderBusy(false)
+    }
+  }, [draftStore])
+
+  const loadDraftsFromControlDb = useCallback(async () => {
+    try {
+      setBuilderBusy(true)
+      const result = await fetchC3Snapshot()
+      setDraftStore(fromC3Payload(result.snapshot))
+      notifications.show({
+        color: 'teal',
+        title: 'Drafts loaded from control DB',
+        message: 'Builder is now showing persisted MPBCP resources.',
+      })
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        title: 'Load from control DB failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setBuilderBusy(false)
+    }
+  }, [])
 
   return (
-    <div className="app-layout">
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <div className="brand">
-            <div className="brand-mark" aria-hidden />
-            <div className="brand-text">
-              <div className="brand-title">CHIBA</div>
-              <div className="brand-subtitle">CABLE OPS</div>
-            </div>
-          </div>
-        </div>
-
-        <nav className="sidebar-nav">
-          <button
-            className={`nav-btn ${
-              view === "fleet" && filter === "all" ? "active" : ""
-            }`}
-            onClick={() => {
-              setView("fleet");
-              setFilter("all");
-            }}
-          >
-            Fleet
-          </button>
-          <button
-            className={`nav-btn ${
-              view === "fleet" && filter === "bad" ? "active" : ""
-            }`}
-            onClick={() => {
-              setView("fleet");
-              setFilter("bad");
-            }}
-          >
-            Offline
-          </button>
-          <button
-            className={`nav-btn ${
-              view === "fleet" && filter === "warn" ? "active" : ""
-            }`}
-            onClick={() => {
-              setView("fleet");
-              setFilter("warn");
-            }}
-          >
-            Needs Update
-          </button>
-          <button
-            className={`nav-btn ${
-              view === "fleet" && filter === "ok" ? "active" : ""
-            }`}
-            onClick={() => {
-              setView("fleet");
-              setFilter("ok");
-            }}
-          >
-            Healthy
-          </button>
-          <button
-            className={`nav-btn ${view === "catalog" ? "active" : ""}`}
-            onClick={() => setView("catalog")}
-          >
-            Catalog
-          </button>
-        </nav>
-
-        <div className="sidebar-footer">
-          <div>registry: {meta?.local.registryPath ?? "not set"}</div>
-          <div>local git: {meta?.local.gitSha ?? "unknown"}</div>
-        </div>
-      </aside>
-
-      <main className="main-content">
-        {view === "catalog" ? (
-          <>
-            <div className="page-header">
-              <div className="page-header-row">
-                <div>
-                  <h1 className="page-title">Config Catalog</h1>
-                  <div className="page-subtitle">
-                    media, playlists, blocks, channels (from the cable server)
-                  </div>
-                </div>
-                <div className="actions">
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      setCatalog(null);
-                      void loadCatalog();
-                    }}
-                  >
-                    Refresh
-                  </button>
-                </div>
-              </div>
-              {catalogErr ? (
-                <div className="alert alert-error">Catalog: {catalogErr}</div>
-              ) : null}
-            </div>
-
-            <div className="card control-card">
-              <div className="card-header">
-                <div className="card-title">Browse</div>
-                <div className="card-meta">
-                  {catalog?.counts ? (
-                    <span className="mono">
-                      ch {catalog.counts.channels} | blk {catalog.counts.blocks}{" "}
-                      | pl {catalog.counts.playlists} | media{" "}
-                      {catalog.counts.media}
-                    </span>
-                  ) : (
-                    <span className="muted">loading…</span>
-                  )}
-                </div>
-              </div>
-              <div className="control-body">
-                <div className="control-row">
-                  <button
-                    className={`btn btn-small ${
-                      catalogTab === "channels" ? "active" : ""
-                    }`}
-                    onClick={() => setCatalogTab("channels")}
-                  >
-                    Channels
-                  </button>
-                  <button
-                    className={`btn btn-small ${
-                      catalogTab === "blocks" ? "active" : ""
-                    }`}
-                    onClick={() => setCatalogTab("blocks")}
-                  >
-                    Blocks
-                  </button>
-                  <button
-                    className={`btn btn-small ${
-                      catalogTab === "playlists" ? "active" : ""
-                    }`}
-                    onClick={() => setCatalogTab("playlists")}
-                  >
-                    Playlists
-                  </button>
-                  <button
-                    className={`btn btn-small ${
-                      catalogTab === "media" ? "active" : ""
-                    }`}
-                    onClick={() => setCatalogTab("media")}
-                  >
-                    Media
-                  </button>
-                  <input
-                    className="input"
-                    placeholder="filter by id/title…"
-                    value={catalogFilter}
-                    onChange={(e) => setCatalogFilter(e.target.value)}
-                  />
-                </div>
-
-                {(() => {
-                  const items: any[] = Array.isArray(
-                    (catalog as any)?.[catalogTab]
-                  )
-                    ? (catalog as any)[catalogTab]
-                    : [];
-                  const q = catalogFilter.trim().toLowerCase();
-                  const filtered = q
-                    ? items.filter((it) => {
-                        const id = String(it?.id ?? "").toLowerCase();
-                        const title = String(
-                          it?.title ?? it?.name ?? ""
-                        ).toLowerCase();
-                        return id.includes(q) || title.includes(q);
-                      })
-                    : items;
-
-                  return (
-                    <div className="catalog-list">
-                      {filtered.map((it) => (
-                        <details
-                          key={String(it?.id ?? Math.random())}
-                          className="catalog-item"
-                        >
-                          <summary>
-                            <span className="mono">
-                              {String(it?.id ?? "(no id)")}
-                            </span>
-                            {it?.title || it?.name ? (
-                              <span className="muted">
-                                {" "}
-                                {String(it.title ?? it.name)}
-                              </span>
-                            ) : null}
-                          </summary>
-                          <pre className="catalog-pre">
-                            {JSON.stringify(it, null, 2)}
-                          </pre>
-                        </details>
-                      ))}
-                      {!filtered.length ? (
-                        <div className="muted">No items.</div>
-                      ) : null}
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="page-header">
-              <div className="page-header-row">
-                <div>
-                  <h1 className="page-title">Fleet Health</h1>
-                  <div className="page-subtitle">
-                    Active probes: addr (static IP preferred), ping (best
-                    effort), TCP(22/8080/8787), HTTP(/status, /api/version)
-                  </div>
-                </div>
-                <div className="actions">
-                  <input
-                    className="input node-filter-input"
-                    placeholder="Filter nodes by id/host/ip…"
-                    value={nodeFilter}
-                    onChange={(e) => setNodeFilter(e.target.value)}
-                  />
-                  <label className="toggle">
-                    <input
-                      type="checkbox"
-                      checked={autoRefresh}
-                      onChange={(e) => setAutoRefresh(e.target.checked)}
-                    />
-                    <span>Auto refresh (all)</span>
-                  </label>
-                  <button
-                    className="btn"
-                    onClick={() => startStream({ reset: false })}
-                    disabled={loading}
-                  >
-                    Refresh all
-                  </button>
-                  <button
-                    className="btn"
-                    onClick={() => loadSnapshot()}
-                    disabled={loading}
-                  >
-                    Snapshot
-                  </button>
-                </div>
-              </div>
-
-              {error ? (
-                <div className="alert alert-error">Error: {error}</div>
-              ) : null}
-              {controlErr ? (
-                <div className="alert alert-error">Control: {controlErr}</div>
-              ) : null}
-              {controlMsg ? (
-                <div className="alert">Control: {controlMsg}</div>
-              ) : null}
-            </div>
-
-            <div className="card control-card">
-              <div className="card-header">
-                <div className="card-title">Control</div>
-                <div className="card-meta">
-                  Selected: <span className="mono">{selectedIds.length}</span> /
-                  visible: <span className="mono">{visibleIds.length}</span>
-                </div>
-              </div>
-              <div className="control-body">
-                <div className="control-row control-row-top">
-                  <div className="control-row-group">
-                    <button
-                      className="btn btn-small"
-                      onClick={() => {
-                        const next: Record<string, boolean> = {};
-                        for (const id of visibleIds) next[id] = true;
-                        setSelectedById(next);
-                      }}
-                      disabled={controlBusy || loading || !visibleIds.length}
-                    >
-                      Select visible
-                    </button>
-                    <button
-                      className="btn btn-small"
-                      onClick={() => setSelectedById({})}
-                      disabled={controlBusy || loading}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  <button
-                    className="btn btn-cta"
-                    onClick={runApplyTarget}
-                    disabled={controlBusy || !applyId || selectedIds.length === 0}
-                  >
-                    Apply
-                  </button>
-                </div>
-
-                <div className="control-stack">
-                  <section className="control-panel">
-                    <button
-                      type="button"
-                      className="control-panel-header"
-                      onClick={() => toggleControlPanel("apply")}
-                      aria-expanded={openControlPanels.apply}
-                    >
-                      <div>
-                        <div className="control-panel-title">Apply Target</div>
-                        <div className="control-panel-subtitle mono">
-                          {applyKind} · {selectedApplyOptionLabel || "(none)"}
-                        </div>
-                      </div>
-                      <span className="control-panel-chevron">
-                        {openControlPanels.apply ? "v" : ">"}
-                      </span>
-                    </button>
-                    {openControlPanels.apply ? (
-                      <div className="control-panel-body">
-                        <div className="control-fields">
-                          <select
-                            className="input"
-                            value={applyKind}
-                            onChange={(e) =>
-                              setApplyKind(e.target.value as OpsApplyTarget)
-                            }
-                            disabled={controlBusy}
-                          >
-                            <option value="profile">profile</option>
-                            <option value="channel">channel</option>
-                            <option value="block">block</option>
-                            <option value="playlist">playlist</option>
-                            <option value="media">media</option>
-                          </select>
-                        </div>
-                        <div className="control-fields">
-                          <button
-                            type="button"
-                            className="input picker-trigger"
-                            onClick={() => {
-                              setTargetPickerFilter("");
-                              setTargetPickerOpen(true);
-                            }}
-                            disabled={controlBusy || !applyOptions.length}
-                          >
-                            <span className="picker-trigger-label">
-                              {selectedApplyOptionLabel || "(no target selected)"}
-                            </span>
-                            <span className="picker-trigger-meta">
-                              {applyOptions.length} targets
-                            </span>
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </section>
-                </div>
-
-                <section className="control-panel control-block-options">
-                  <button
-                    type="button"
-                    className="control-panel-header"
-                    onClick={() => toggleControlPanel("options")}
-                    aria-expanded={openControlPanels.options}
-                  >
-                    <div>
-                      <div className="control-panel-title">Options</div>
-                      <div className="control-panel-subtitle mono">
-                        {applyTargetSummary}
-                      </div>
-                    </div>
-                    <span className="control-panel-chevron">
-                      {openControlPanels.options ? "v" : ">"}
-                    </span>
-                  </button>
-                  {openControlPanels.options ? (
-                    <div className="control-panel-body">
-                      <div className="options-stack">
-                        <div className="option-group">
-                          <div className="option-group-title">Launch</div>
-                          <div className="option-grid option-grid-2">
-                            <label className="field">
-                              <span className="field-label">mode</span>
-                              <select
-                                className="input"
-                                value={optMode}
-                                onChange={(e) =>
-                                  setOptMode(
-                                    e.target.value as
-                                      | "inherit"
-                                      | "guide"
-                                      | "gallery"
-                                  )
-                                }
-                                disabled={controlBusy}
-                              >
-                                <option value="inherit">inherit</option>
-                                <option value="guide">guide</option>
-                                <option value="gallery">gallery</option>
-                              </select>
-                            </label>
-                            {showChannelFallback ? (
-                              <label className="field">
-                                <span className="field-label">
-                                  channel fallback
-                                </span>
-                                <select
-                                  className="input"
-                                  value={optChannel}
-                                  onChange={(e) =>
-                                    setOptChannel(e.target.value)
-                                  }
-                                  disabled={controlBusy}
-                                >
-                                  <option value="">auto</option>
-                                  {channelOptions.map((option) => (
-                                    <option key={option.id} value={option.id}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            ) : (
-                              <div className="field field-note">
-                                <span className="field-label">
-                                  channel fallback
-                                </span>
-                                <div className="field-note-text">
-                                  Hidden while explicit target override is
-                                  active.
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="option-group">
-                          <div className="option-group-title">
-                            Target Override
-                          </div>
-                          <div className="option-grid option-grid-2">
-                            <label className="field">
-                              <span className="field-label">target kind</span>
-                              <select
-                                className="input"
-                                value={optTargetKind}
-                                onChange={(e) =>
-                                  setOptTargetKind(
-                                    e.target.value as TargetOverrideValue
-                                  )
-                                }
-                                disabled={controlBusy}
-                              >
-                                <option value="inherit">inherit</option>
-                                <option value="media">media</option>
-                                <option value="playlist">playlist</option>
-                                <option value="block">block</option>
-                                <option value="channel">channel</option>
-                              </select>
-                            </label>
-                            <label className="field">
-                              <span className="field-label">target id</span>
-                              <input
-                                className="input"
-                                value={optTargetId}
-                                onChange={(e) => setOptTargetId(e.target.value)}
-                                placeholder="optional override"
-                                disabled={controlBusy}
-                              />
-                            </label>
-                          </div>
-                        </div>
-
-                        <div className="option-group">
-                          <div className="option-group-title">Behavior</div>
-                          <div className="option-grid option-grid-2">
-                            <label className="field">
-                              <span className="field-label">lock</span>
-                              <select
-                                className="input"
-                                value={optLock}
-                                onChange={(e) =>
-                                  setOptLock(e.target.value as ToggleValue)
-                                }
-                                disabled={controlBusy}
-                              >
-                                <option value="inherit">inherit</option>
-                                <option value="on">on</option>
-                                <option value="off">off</option>
-                              </select>
-                            </label>
-                            <label className="field">
-                              <span className="field-label">qr</span>
-                              <select
-                                className="input"
-                                value={optQr}
-                                onChange={(e) =>
-                                  setOptQr(e.target.value as ToggleValue)
-                                }
-                                disabled={controlBusy}
-                              >
-                                <option value="inherit">inherit</option>
-                                <option value="on">on</option>
-                                <option value="off">off</option>
-                              </select>
-                            </label>
-                            <label className="field">
-                              <span className="field-label">playlist</span>
-                              <select
-                                className="input"
-                                value={optPlaylist}
-                                onChange={(e) =>
-                                  setOptPlaylist(e.target.value as ToggleValue)
-                                }
-                                disabled={controlBusy}
-                              >
-                                <option value="inherit">inherit</option>
-                                <option value="on">on</option>
-                                <option value="off">off</option>
-                              </select>
-                            </label>
-                            <label className="field">
-                              <span className="field-label">nosplash</span>
-                              <select
-                                className="input"
-                                value={optNosplash}
-                                onChange={(e) =>
-                                  setOptNosplash(e.target.value as ToggleValue)
-                                }
-                                disabled={controlBusy}
-                              >
-                                <option value="inherit">inherit</option>
-                                <option value="on">on</option>
-                                <option value="off">off</option>
-                              </select>
-                            </label>
-                            <label className="field">
-                              <span className="field-label">info box</span>
-                              <select
-                                className="input"
-                                value={optHudMode}
-                                onChange={(e) =>
-                                  setOptHudMode(e.target.value as HudModeValue)
-                                }
-                                disabled={controlBusy}
-                              >
-                                <option value="inherit">inherit</option>
-                                <option value="always">always</option>
-                                <option value="start">start</option>
-                                <option value="never">never</option>
-                              </select>
-                            </label>
-                            <label className="field">
-                              <span className="field-label">info box sec</span>
-                              <input
-                                className="input"
-                                value={optHudShowSec}
-                                onChange={(e) =>
-                                  setOptHudShowSec(e.target.value)
-                                }
-                                placeholder="e.g. 8"
-                                disabled={controlBusy}
-                              />
-                            </label>
-                          </div>
-                        </div>
-
-                        <div className="option-group">
-                          <div className="option-group-title">
-                            Display (Optional)
-                          </div>
-                          <div className="option-grid option-grid-3">
-                            <label className="field field-span-3">
-                              <span className="field-label">theme</span>
-                              <input
-                                className="input"
-                                value={optTheme}
-                                onChange={(e) => setOptTheme(e.target.value)}
-                                placeholder="theme id"
-                                disabled={controlBusy}
-                              />
-                            </label>
-                            <label className="field">
-                              <span className="field-label">rotate</span>
-                              <select
-                                className="input"
-                                value={optDisplayRotate}
-                                onChange={(e) =>
-                                  setOptDisplayRotate(
-                                    e.target.value as DisplayRotateValue
-                                  )
-                                }
-                                disabled={controlBusy}
-                              >
-                                <option value="inherit">inherit</option>
-                                <option value="0">0</option>
-                                <option value="90">90</option>
-                                <option value="180">180</option>
-                                <option value="270">270</option>
-                              </select>
-                            </label>
-                            <label className="field">
-                              <span className="field-label">scale</span>
-                              <input
-                                className="input"
-                                value={optScale}
-                                onChange={(e) => setOptScale(e.target.value)}
-                                placeholder="1.0"
-                                disabled={controlBusy}
-                              />
-                            </label>
-                            <label className="field">
-                              <span className="field-label">text scale</span>
-                              <input
-                                className="input"
-                                value={optTextScale}
-                                onChange={(e) =>
-                                  setOptTextScale(e.target.value)
-                                }
-                                placeholder="1.0"
-                                disabled={controlBusy}
-                              />
-                            </label>
-                            <label className="field">
-                              <span className="field-label">hours</span>
-                              <input
-                                className="input"
-                                value={optHours}
-                                onChange={(e) => setOptHours(e.target.value)}
-                                placeholder="24"
-                                disabled={controlBusy}
-                              />
-                            </label>
-                          </div>
-                        </div>
-
-                        <div className="option-group option-preview">
-                          <div className="option-group-title">
-                            Effective Apply
-                          </div>
-                          <div className="option-preview-summary mono">
-                            {applyTargetSummary}
-                          </div>
-                          <pre className="option-preview-payload mono">
-                            {JSON.stringify(applyPayloadPreview, null, 2)}
-                          </pre>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-                </section>
-
-                <section className="control-panel">
-                  <button
-                    type="button"
-                    className="control-panel-header"
-                    onClick={() => toggleControlPanel("quick")}
-                    aria-expanded={openControlPanels.quick}
-                  >
-                    <div>
-                      <div className="control-panel-title">Quick Actions</div>
-                      <div className="control-panel-subtitle">
-                        Guide and safety actions
-                      </div>
-                    </div>
-                    <span className="control-panel-chevron">
-                      {openControlPanels.quick ? "v" : ">"}
-                    </span>
-                  </button>
-                  {openControlPanels.quick ? (
-                    <div className="control-panel-body">
-                      <div className="control-fields">
-                        <button
-                          className="btn btn-small"
-                          onClick={runReturnToGuide}
-                          disabled={controlBusy || selectedIds.length === 0}
-                        >
-                          Return To Guide
-                        </button>
-                      </div>
-                      <div className="muted small">
-                        Uses current option overrides for{" "}
-                        <span className="mono">lock / qr / nosplash</span>.
-                      </div>
-                    </div>
-                  ) : null}
-                </section>
-              </div>
-            </div>
-
-            {targetPickerOpen ? (
-              <div
-                className="picker-modal-backdrop"
-                onClick={() => setTargetPickerOpen(false)}
+    <AppShell
+      padding="md"
+      header={{ height: 72 }}
+      navbar={{ width: 280, breakpoint: 'sm', collapsed: { mobile: !controlOpen } }}
+    >
+      <AppShell.Header>
+        <Group h="100%" px="md" justify="space-between">
+          <Group gap="sm">
+            <ActionIcon variant="subtle" onClick={() => setControlOpen((v) => !v)} aria-label="Toggle navigation">
+              <IconAdjustments size={18} />
+            </ActionIcon>
+            <Title order={3}>Chiba Controller</Title>
+            <Badge variant="light" color="violet">
+              cable3
+            </Badge>
+          </Group>
+          <Group gap="xs">
+            <Checkbox
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.currentTarget.checked)}
+              label="Auto refresh"
+            />
+            <Tooltip label="Refresh fleet + catalog">
+              <ActionIcon
+                size="lg"
+                variant="filled"
+                color="blue"
+                onClick={() => {
+                  refreshFleet()
+                  setCatalogReloadToken((v) => v + 1)
+                }}
               >
-                <div
-                  className="picker-modal"
-                  onClick={(event) => event.stopPropagation()}
-                  role="dialog"
-                  aria-modal="true"
-                  aria-label="Select apply target"
-                >
-                  <div className="picker-modal-header">
-                    <div>
-                      <div className="control-panel-title">Select Target</div>
-                      <div className="control-panel-subtitle mono">
-                        {applyKind} · {applyOptions.length} total
-                      </div>
-                    </div>
-                    <button
-                      className="btn btn-small"
-                      onClick={() => setTargetPickerOpen(false)}
-                    >
-                      Close
-                    </button>
-                  </div>
-                  <input
-                    className="input"
-                    placeholder="Filter by id or label..."
-                    value={targetPickerFilter}
-                    onChange={(e) => setTargetPickerFilter(e.target.value)}
-                    autoFocus
-                  />
-                  <div className="picker-modal-list">
-                    {filteredApplyOptions.length ? (
-                      filteredApplyOptions.map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          className={`picker-option ${
-                            option.id === applyId ? "selected" : ""
-                          }`}
-                          onClick={() => {
-                            setApplyId(option.id);
-                            setTargetPickerOpen(false);
-                          }}
-                        >
-                          <span className="picker-option-id mono">
-                            {option.id}
-                          </span>
-                          <span className="picker-option-label">
-                            {option.label}
-                          </span>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="muted">No targets match your filter.</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : null}
+                {loadingFleet ? <Loader size={16} color="white" /> : <IconRefresh size={16} />}
+              </ActionIcon>
+            </Tooltip>
+            <Button
+              leftSection={<IconArrowsShuffle size={16} />}
+              onClick={() => setApplyOpen(true)}
+              disabled={selectedNodeIds.length === 0}
+            >
+              Apply
+            </Button>
+          </Group>
+        </Group>
+      </AppShell.Header>
 
-            <div className="card">
-              <div className="card-header">
-                <div className="card-title">
-                  {loading ? "Checking..." : `${rows.length} nodes`}
-                </div>
-                <div className="card-meta">
-                  Last tick: {fmtAge(Date.now() - now)} ago
-                </div>
-              </div>
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th className="sel-col col-sel">
-                        <input
-                          type="checkbox"
+      <AppShell.Navbar p="sm">
+        <Stack gap="sm">
+          <Card withBorder radius="md" p="sm">
+            <Text size="xs" c="dimmed">
+              Selected nodes
+            </Text>
+            <Title order={2}>{selectedNodeIds.length}</Title>
+            <Text size="xs" c="dimmed">
+              of {filteredRows.length} visible
+            </Text>
+          </Card>
+          <SimpleGrid cols={2} spacing="xs">
+            <Card withBorder p="xs">
+              <Text size="xs" c="dimmed">
+                Online
+              </Text>
+              <Text fw={700}>{metrics.online}</Text>
+            </Card>
+            <Card withBorder p="xs">
+              <Text size="xs" c="dimmed">
+                Degraded
+              </Text>
+              <Text fw={700}>{metrics.degraded}</Text>
+            </Card>
+            <Card withBorder p="xs">
+              <Text size="xs" c="dimmed">
+                Updating
+              </Text>
+              <Text fw={700}>{metrics.updating}</Text>
+            </Card>
+            <Card withBorder p="xs">
+              <Text size="xs" c="dimmed">
+                Total
+              </Text>
+              <Text fw={700}>{metrics.total}</Text>
+            </Card>
+          </SimpleGrid>
+          <Divider />
+          <TextInput
+            leftSection={<IconSearch size={16} />}
+            placeholder="Filter nodes by id/host/ip"
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+          />
+          <Group grow>
+            <Button variant="light" onClick={selectVisible}>
+              Select visible
+            </Button>
+            <Button variant="light" color="gray" onClick={clearSelection}>
+              Clear
+            </Button>
+          </Group>
+          <Button
+            leftSection={<IconChecklist size={16} />}
+            color="orange"
+            variant="light"
+            onClick={returnToGuide}
+            disabled={selectedNodeIds.length === 0}
+          >
+            Return to guide
+          </Button>
+          <Text size="xs" c="dimmed">
+            Last tick: {lastTick ? `${Math.round((Date.now() - lastTick) / 1000)}s ago` : '—'}
+          </Text>
+        </Stack>
+      </AppShell.Navbar>
+
+      <AppShell.Main>
+        <Tabs defaultValue="fleet" keepMounted={false}>
+          <Tabs.List>
+            <Tabs.Tab value="fleet" leftSection={<IconDeviceDesktopAnalytics size={16} />}>
+              Fleet Observability
+            </Tabs.Tab>
+            <Tabs.Tab value="builder" leftSection={<IconServerCog size={16} />}>
+              MPBCP Builder
+            </Tabs.Tab>
+            <Tabs.Tab value="catalog" leftSection={<IconDatabase size={16} />}>
+              Catalog Snapshot
+            </Tabs.Tab>
+          </Tabs.List>
+
+          <Tabs.Panel value="fleet" pt="md">
+            <Paper withBorder radius="md" p="md">
+              <Group justify="space-between" mb="sm">
+                <Title order={4}>Connected Nodes</Title>
+                <Text size="sm" c="dimmed">
+                  Live status, runtime target, connectivity, and versions.
+                </Text>
+              </Group>
+              <ScrollArea>
+                <Table striped highlightOnHover withTableBorder withColumnBorders>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th w={42}>
+                        <Checkbox
                           checked={
-                            visibleIds.length > 0 &&
-                            visibleIds.every((id) => selectedById[id])
+                            filteredRows.length > 0 &&
+                            filteredRows.every((row) => selectedNodeIds.includes(row.id))
                           }
                           onChange={(e) => {
-                            if (e.target.checked) {
-                              const next: Record<string, boolean> = {
-                                ...selectedById,
-                              };
-                              for (const id of visibleIds) next[id] = true;
-                              setSelectedById(next);
+                            if (e.currentTarget.checked) {
+                              setSelectedNodeIds(
+                                Array.from(
+                                  new Set([...selectedNodeIds, ...filteredRows.map((row) => row.id)])
+                                )
+                              )
                             } else {
-                              const next: Record<string, boolean> = {
-                                ...selectedById,
-                              };
-                              for (const id of visibleIds) delete next[id];
-                              setSelectedById(next);
+                              setSelectedNodeIds((prev) =>
+                                prev.filter((id) => !filteredRows.some((row) => row.id === id))
+                              )
                             }
                           }}
-                          disabled={
-                            controlBusy || loading || !visibleIds.length
-                          }
-                          aria-label="Select visible nodes"
-                          title="Select visible rows"
                         />
-                      </th>
-                      <th>Node</th>
-                      <th>Host</th>
-                      <th>DNS</th>
-                      <th>Ping</th>
-                      <th>SSH</th>
-                      <th>Node</th>
-                      <th>Cable</th>
-                      <th>Versions</th>
-                      <th>Last</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((pi) => {
-                      const health =
-                        (pi as any).dnsOk !== undefined
-                          ? (pi as FleetPiHealth)
-                          : null;
-                      const kind = rowKind(health ?? (pi as FleetPi));
-                      const statusPill =
-                        kind === "muted" ? (
-                          <Pill kind="muted" label="EXTERNAL" />
-                        ) : kind === "bad" ? (
-                          <Pill kind="bad" label="OFFLINE" />
-                        ) : kind === "warn" ? (
-                          <Pill kind="warn" label="UPDATE" />
-                        ) : (
-                          <Pill kind="ok" label="OK" />
-                        );
+                      </Table.Th>
+                      <Table.Th>Node</Table.Th>
+                      <Table.Th>Host/IP</Table.Th>
+                      <Table.Th>Connectivity</Table.Th>
+                      <Table.Th>Runtime</Table.Th>
+                      <Table.Th>Versions</Table.Th>
+                      <Table.Th>Last</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {filteredRows.map((row) => (
+                      <Table.Tr key={row.id}>
+                        <Table.Td>
+                          <Checkbox
+                            checked={selectedNodeIds.includes(row.id)}
+                            onChange={(e) => toggleNodeSelection(row.id, e.currentTarget.checked)}
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <Stack gap={2}>
+                            <Group gap={8}>
+                              <Text fw={700}>{row.id}</Text>
+                              {statusBadge(row.ping.ok, 'OK', 'OFFLINE')}
+                            </Group>
+                            <Text size="xs" c="dimmed">
+                              {row.nodeName}
+                            </Text>
+                          </Stack>
+                        </Table.Td>
+                        <Table.Td>
+                          <Stack gap={2}>
+                            <Text ff="monospace">{row.host}</Text>
+                            <Text ff="monospace" c="dimmed">
+                              {row.ip || '—'}
+                            </Text>
+                          </Stack>
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap={6}>
+                            {statusBadge(row.dnsOk, 'DNS', 'DNS')}
+                            {statusBadge(row.tcp.ssh22.ok, 'SSH', 'SSH')}
+                            {statusBadge(row.http.nodeStatus.ok, 'Node', 'Node')}
+                            {statusBadge(row.http.cableVersion.ok, 'Cable', 'Cable')}
+                          </Group>
+                        </Table.Td>
+                        <Table.Td>
+                          <Stack gap={2}>
+                            <Text size="sm" ff="monospace">
+                              {parseTargetFromKioskUrl(row.chibaNode.kioskUrl ?? null)}
+                            </Text>
+                            <Button
+                              variant="subtle"
+                              size="compact-xs"
+                              onClick={() => setActiveNodeId(row.id)}
+                              leftSection={<IconBroadcast size={12} />}
+                            >
+                              Inspect
+                            </Button>
+                          </Stack>
+                        </Table.Td>
+                        <Table.Td>
+                          <Stack gap={2}>
+                            <Text size="xs">node: {row.chibaNode.version ?? '?'}</Text>
+                            <Text size="xs">cable: {row.cableServer?.version ?? '?'}</Text>
+                            <Text size="xs" c="dimmed">
+                              sha: {row.cableServer?.gitSha ?? '—'}
+                            </Text>
+                          </Stack>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed">
+                            {Math.max(0, Math.round((Date.now() - row.lastCheckedAt) / 1000))}s ago
+                          </Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            </Paper>
+          </Tabs.Panel>
 
-                      const expanded = Boolean(expandedById[pi.id]);
-                      const kioskUrl = health?.chibaNode?.kioskUrl ?? "";
-                      const kioskParams: Array<[string, string]> | null =
-                        (() => {
-                          if (!kioskUrl) return null;
-                          try {
-                            const u = new URL(kioskUrl);
-                            return Array.from(u.searchParams.entries()).sort(
-                              (a, b) => a[0].localeCompare(b[0])
-                            );
-                          } catch {
-                            return null;
-                          }
-                        })();
+          <Tabs.Panel value="builder" pt="md">
+            <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
+              <Paper withBorder radius="md" p="md">
+                <Group justify="space-between" mb="sm">
+                  <Title order={4}>Resource Builder</Title>
+                  <Badge color="orange" variant="light">
+                    Alpha
+                  </Badge>
+                </Group>
+                <Text size="sm" c="dimmed" mb="md">
+                  Compose Media, Playlists, Blocks, Channels, and Profiles with hierarchical structure.
+                  Drafts can be synced to the `cable3` control DB or exported as JSON for agent/CLI workflows.
+                </Text>
+                <Tabs defaultValue="media">
+                  <Tabs.List>
+                    <Tabs.Tab value="media">Media</Tabs.Tab>
+                    <Tabs.Tab value="playlist">Playlist</Tabs.Tab>
+                    <Tabs.Tab value="block">Block</Tabs.Tab>
+                    <Tabs.Tab value="channel">Channel</Tabs.Tab>
+                    <Tabs.Tab value="profile">Profile</Tabs.Tab>
+                  </Tabs.List>
 
-                      const kioskSummary = (() => {
-                        if (!kioskUrl) return null;
-                        const entries = kioskParams ?? [];
-                        const get = (k: string) =>
-                          entries.find(([kk]) => kk === k)?.[1] ?? "";
-                        const channel = get("channel");
-                        const targetKind = get("targetKind");
-                        const targetId = get("targetId");
-                        const gallery = get("gallery");
-                        const playlist = get("playlist");
-                        const nosplash = get("nosplash");
-                        const bits = [
-                          targetKind ? `t=${targetKind}` : "",
-                          targetId ? `id=${targetId}` : "",
-                          channel ? `ch=${channel}` : "",
-                          gallery ? `g=${gallery}` : "",
-                          playlist ? `pl=${playlist}` : "",
-                          nosplash ? `ns=${nosplash}` : "",
-                        ].filter(Boolean);
-                        return bits.length
-                          ? `kiosk: ${bits.join(" ")}`
-                          : "kiosk: (set)";
-                      })();
+                  <Tabs.Panel value="media" pt="sm">
+                    <Stack>
+                      <TextInput label="Media ID" value={mediaDraft.id} onChange={(e) => setMediaDraft((d) => ({ ...d, id: e.currentTarget.value }))} />
+                      <TextInput label="Title" value={mediaDraft.title} onChange={(e) => setMediaDraft((d) => ({ ...d, title: e.currentTarget.value }))} />
+                      <TextInput label="Artist" value={mediaDraft.artist} onChange={(e) => setMediaDraft((d) => ({ ...d, artist: e.currentTarget.value }))} />
+                      <SegmentedControl
+                        value={mediaDraft.sourceType}
+                        onChange={(v) => setMediaDraft((d) => ({ ...d, sourceType: v as 'path' | 'url' }))}
+                        data={[
+                          { label: 'Path', value: 'path' },
+                          { label: 'URL', value: 'url' },
+                        ]}
+                      />
+                      <TextInput
+                        label={mediaDraft.sourceType === 'path' ? 'Filesystem path' : 'Remote URL'}
+                        value={mediaDraft.sourceValue}
+                        onChange={(e) => setMediaDraft((d) => ({ ...d, sourceValue: e.currentTarget.value }))}
+                      />
+                      <Checkbox
+                        label="Cache on nodes"
+                        checked={mediaDraft.cache}
+                        onChange={(e) => setMediaDraft((d) => ({ ...d, cache: e.currentTarget.checked }))}
+                      />
+                      <Button
+                        onClick={() => {
+                          if (!mediaDraft.id.trim() || !mediaDraft.sourceValue.trim()) return
+                          setDraftStore((store) => ({
+                            ...store,
+                            media: [...store.media.filter((m) => m.id !== mediaDraft.id.trim()), { ...mediaDraft, id: mediaDraft.id.trim() }],
+                          }))
+                          notifications.show({ color: 'teal', title: 'Draft saved', message: `media:${mediaDraft.id.trim()}` })
+                        }}
+                      >
+                        Save Media Draft
+                      </Button>
+                    </Stack>
+                  </Tabs.Panel>
 
-                      const resolvedDeps = resolveTargetDeps(
-                        catalogMaps,
-                        parseKioskTarget(kioskParams)
-                      );
-
-                      return [
-                        <tr key={pi.id} className={`row-${kind}`}>
-                          <td className="sel-col col-sel">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(selectedById[pi.id])}
-                              onChange={(e) =>
-                                setSelectedById((prev) => ({
-                                  ...prev,
-                                  [pi.id]: e.target.checked,
-                                }))
-                              }
-                              disabled={controlBusy || loading}
-                              title={`Select ${pi.id}`}
-                            />
-                          </td>
-                          <td className="col-node">
-                            <div className="node-cell">
-                              <div className="node-name">
-                                <button
-                                  type="button"
-                                  className="twirl"
-                                  onClick={() => toggleExpanded(pi.id)}
-                                  title={
-                                    expanded
-                                      ? "Collapse details"
-                                      : "Expand details"
-                                  }
-                                >
-                                  {expanded ? "v" : ">"}
-                                </button>
-                                <span>{pi.nodeName || pi.id}</span>
-                              </div>
-                              <div className="node-meta">
-                                {statusPill}
-                                {pi.cable?.orientation ? (
-                                  <span className="muted">
-                                    {pi.cable.orientation}
-                                  </span>
-                                ) : null}
-                                {pi.cable?.channel ? (
-                                  <span className="muted">
-                                    ch {pi.cable.channel}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="col-host">
-                            <div className="mono">{pi.host || "-"}</div>
-                            <div className="muted mono">
-                              {pi.ip ?? health?.resolvedIp ?? ""}
-                            </div>
-                          </td>
-                          <td className="col-mini">
-                            {kind === "muted" ? (
-                              <Pill kind="muted" label="-" />
-                            ) : health ? (
-                              health.dnsOk ? (
-                                <Pill kind="ok" label="OK" />
-                              ) : (
-                                <Pill kind="bad" label="NO" />
-                              )
-                            ) : (
-                              <Pill kind="muted" label="..." />
-                            )}
-                          </td>
-                          <td className="col-mini">
-                            {health?.ping?.ok ? (
-                              <Pill
-                                kind="ok"
-                                label={`${health.ping.ms ?? 0}ms`}
-                              />
-                            ) : (
-                              <Pill kind="muted" label={health ? "-" : "..."} />
-                            )}
-                          </td>
-                          <td className="col-mini">
-                            {health?.tcp?.ssh22?.ok ? (
-                              <Pill kind="ok" label="22" />
-                            ) : (
-                              <Pill kind="muted" label={health ? "-" : "..."} />
-                            )}
-                          </td>
-                          <td className="col-mini">
-                            {health?.http?.nodeStatus?.ok ? (
-                              <Pill kind="ok" label="status" />
-                            ) : (
-                              <Pill kind="muted" label={health ? "-" : "..."} />
-                            )}
-                          </td>
-                          <td className="col-mini">
-                            {health?.http?.cableVersion?.ok ? (
-                              <Pill kind="ok" label="version" />
-                            ) : (
-                              <Pill kind="muted" label={health ? "-" : "..."} />
-                            )}
-                          </td>
-                          <td className="col-vers">
-                            <div className="muted mono">
-                              node: {health?.chibaNode?.version ?? "?"}
-                            </div>
-                            <div className="muted mono">
-                              cable: {health?.cableServer?.version ?? "?"}
-                            </div>
-                            <div className="muted mono">
-                              sha: {health?.cableServer?.gitSha ?? "-"}
-                            </div>
-                            {kioskSummary ? (
-                              <div
-                                className="muted mono truncate"
-                                title={kioskUrl}
+                  <Tabs.Panel value="playlist" pt="sm">
+                    <Stack>
+                      <TextInput label="Playlist ID" value={playlistDraft.id} onChange={(e) => setPlaylistDraft((d) => ({ ...d, id: e.currentTarget.value }))} />
+                      <TextInput label="Title" value={playlistDraft.title} onChange={(e) => setPlaylistDraft((d) => ({ ...d, title: e.currentTarget.value }))} />
+                      <TextInput label="Artist" value={playlistDraft.artist} onChange={(e) => setPlaylistDraft((d) => ({ ...d, artist: e.currentTarget.value }))} />
+                      <Select
+                        label="Add media item"
+                        searchable
+                        data={draftStore.media.map((m) => ({ value: m.id, label: `${m.id} • ${m.title || 'untitled'}` }))}
+                        onChange={(value) => {
+                          if (!value) return
+                          setPlaylistDraft((d) => ({ ...d, mediaIds: Array.from(new Set([...d.mediaIds, value])) }))
+                        }}
+                      />
+                      <Group gap={6}>
+                        {playlistDraft.mediaIds.map((id) => (
+                          <Badge
+                            key={id}
+                            variant="light"
+                            rightSection={
+                              <ActionIcon
+                                color="gray"
+                                variant="transparent"
+                                size="xs"
+                                onClick={() => setPlaylistDraft((d) => ({ ...d, mediaIds: d.mediaIds.filter((x) => x !== id) }))}
                               >
-                                {kioskSummary}
-                              </div>
-                            ) : null}
-                          </td>
-                          <td className="muted col-last">
-                            {health
-                              ? `${fmtAge(
-                                  Date.now() - health.lastCheckedAt
-                                )} ago`
-                              : "..."}
-                          </td>
-                          <td className="actions-cell col-act">
-                            {pi.ip || pi.host ? (
-                              <button
-                                className="btn btn-small"
-                                onClick={() => refreshOne(pi.id)}
-                                disabled={checkingById[pi.id] || loading}
-                                title="Probe this node only"
-                              >
-                                {checkingById[pi.id] ? "Checking…" : "Check"}
-                              </button>
-                            ) : (
-                              <span className="muted">-</span>
-                            )}
-                          </td>
-                        </tr>,
-                        expanded ? (
-                          <tr
-                            key={`${pi.id}:detail`}
-                            className={`row-detail row-${kind}`}
+                                ×
+                              </ActionIcon>
+                            }
                           >
-                            <td colSpan={11}>
-                              <div className="detail-panel">
-                                <div className="detail-title">Kiosk URL</div>
-                                <div className="detail-grid">
-                                  <div>
-                                    <div className="muted small">raw</div>
-                                    <div className="mono wrap">
-                                      {kioskUrl || "-"}
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div className="muted small">params</div>
-                                    {kioskParams && kioskParams.length ? (
-                                      <table className="kv">
-                                        <tbody>
-                                          {kioskParams.map(([k, v], idx) => (
-                                            <tr key={`${k}:${idx}`}>
-                                              <td className="mono k">{k}</td>
-                                              <td className="mono v">{v}</td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    ) : (
-                                      <div className="muted small">
-                                        {kioskUrl
-                                          ? "(none or unparseable)"
-                                          : "(no kiosk url)"}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
+                            {id}
+                          </Badge>
+                        ))}
+                      </Group>
+                      <Button
+                        onClick={() => {
+                          if (!playlistDraft.id.trim()) return
+                          setDraftStore((store) => ({
+                            ...store,
+                            playlists: [
+                              ...store.playlists.filter((p) => p.id !== playlistDraft.id.trim()),
+                              { ...playlistDraft, id: playlistDraft.id.trim() },
+                            ],
+                          }))
+                          notifications.show({ color: 'teal', title: 'Draft saved', message: `playlist:${playlistDraft.id.trim()}` })
+                        }}
+                      >
+                        Save Playlist Draft
+                      </Button>
+                    </Stack>
+                  </Tabs.Panel>
 
-                                <div style={{ marginTop: 14 }}>
-                                  <div className="detail-title">
-                                    Resolved Content (New Model)
-                                  </div>
-                                  {resolvedDeps ? (
-                                    <div className="detail-grid">
-                                      <div>
-                                        <div className="muted small">
-                                          target
-                                        </div>
-                                        <div className="mono">
-                                          {resolvedDeps.targetKind}:
-                                          {resolvedDeps.targetId}
-                                        </div>
-                                        <div className="muted small">
-                                          channels
-                                        </div>
-                                        <div className="mono wrap">
-                                          {resolvedDeps.channelIds.length
-                                            ? resolvedDeps.channelIds.join(", ")
-                                            : "(none)"}
-                                        </div>
-                                        <div className="muted small">
-                                          blocks
-                                        </div>
-                                        <div className="mono wrap">
-                                          {resolvedDeps.blockIds.length
-                                            ? resolvedDeps.blockIds.join(", ")
-                                            : "(none)"}
-                                        </div>
-                                        <div className="muted small">
-                                          playlists
-                                        </div>
-                                        <div className="mono wrap">
-                                          {resolvedDeps.playlistIds.length
-                                            ? resolvedDeps.playlistIds.join(
-                                                ", "
-                                              )
-                                            : "(none)"}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <div className="muted small">
-                                          media deps
-                                        </div>
-                                        <div className="mono">
-                                          {resolvedDeps.mediaIds.length} items
-                                        </div>
-                                        <div className="muted small">
-                                          first few
-                                        </div>
-                                        <div className="mono wrap">
-                                          {resolvedDeps.mediaIds
-                                            .slice(0, 6)
-                                            .join(", ") || "(none)"}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="muted small">
-                                      {catalog
-                                        ? "No target catalog match (or target not set)."
-                                        : "Catalog not loaded yet."}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        ) : null,
-                      ];
-                    })}
-                    {!rows.length ? (
-                      <tr>
-                        <td colSpan={11} className="empty">
-                          {loading
-                            ? "Loading..."
-                            : "No nodes (check registry config on the server)."}
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        )}
-      </main>
-    </div>
-  );
+                  <Tabs.Panel value="block" pt="sm">
+                    <Stack>
+                      <TextInput label="Block ID" value={blockDraft.id} onChange={(e) => setBlockDraft((d) => ({ ...d, id: e.currentTarget.value }))} />
+                      <TextInput label="Title" value={blockDraft.title} onChange={(e) => setBlockDraft((d) => ({ ...d, title: e.currentTarget.value }))} />
+                      <Select
+                        label="Add playlist"
+                        searchable
+                        data={draftStore.playlists.map((p) => ({ value: p.id, label: `${p.id} • ${p.title || 'untitled'}` }))}
+                        onChange={(value) => {
+                          if (!value) return
+                          setBlockDraft((d) => ({ ...d, playlistIds: Array.from(new Set([...d.playlistIds, value])) }))
+                        }}
+                      />
+                      <Group gap={6}>
+                        {blockDraft.playlistIds.map((id) => (
+                          <Badge
+                            key={id}
+                            variant="light"
+                            rightSection={
+                              <ActionIcon
+                                color="gray"
+                                variant="transparent"
+                                size="xs"
+                                onClick={() => setBlockDraft((d) => ({ ...d, playlistIds: d.playlistIds.filter((x) => x !== id) }))}
+                              >
+                                ×
+                              </ActionIcon>
+                            }
+                          >
+                            {id}
+                          </Badge>
+                        ))}
+                      </Group>
+                      <Button
+                        onClick={() => {
+                          if (!blockDraft.id.trim()) return
+                          setDraftStore((store) => ({
+                            ...store,
+                            blocks: [...store.blocks.filter((b) => b.id !== blockDraft.id.trim()), { ...blockDraft, id: blockDraft.id.trim() }],
+                          }))
+                          notifications.show({ color: 'teal', title: 'Draft saved', message: `block:${blockDraft.id.trim()}` })
+                        }}
+                      >
+                        Save Block Draft
+                      </Button>
+                    </Stack>
+                  </Tabs.Panel>
+
+                  <Tabs.Panel value="channel" pt="sm">
+                    <Stack>
+                      <TextInput label="Channel ID" value={channelDraft.id} onChange={(e) => setChannelDraft((d) => ({ ...d, id: e.currentTarget.value }))} />
+                      <TextInput label="Title" value={channelDraft.title} onChange={(e) => setChannelDraft((d) => ({ ...d, title: e.currentTarget.value }))} />
+                      <Select
+                        label="Add block"
+                        searchable
+                        data={draftStore.blocks.map((b) => ({ value: b.id, label: `${b.id} • ${b.title || 'untitled'}` }))}
+                        onChange={(value) => {
+                          if (!value) return
+                          setChannelDraft((d) => ({ ...d, blockIds: Array.from(new Set([...d.blockIds, value])) }))
+                        }}
+                      />
+                      <Group gap={6}>
+                        {channelDraft.blockIds.map((id) => (
+                          <Badge
+                            key={id}
+                            variant="light"
+                            rightSection={
+                              <ActionIcon
+                                color="gray"
+                                variant="transparent"
+                                size="xs"
+                                onClick={() => setChannelDraft((d) => ({ ...d, blockIds: d.blockIds.filter((x) => x !== id) }))}
+                              >
+                                ×
+                              </ActionIcon>
+                            }
+                          >
+                            {id}
+                          </Badge>
+                        ))}
+                      </Group>
+                      <Button
+                        onClick={() => {
+                          if (!channelDraft.id.trim()) return
+                          setDraftStore((store) => ({
+                            ...store,
+                            channels: [
+                              ...store.channels.filter((c) => c.id !== channelDraft.id.trim()),
+                              { ...channelDraft, id: channelDraft.id.trim() },
+                            ],
+                          }))
+                          notifications.show({ color: 'teal', title: 'Draft saved', message: `channel:${channelDraft.id.trim()}` })
+                        }}
+                      >
+                        Save Channel Draft
+                      </Button>
+                    </Stack>
+                  </Tabs.Panel>
+
+                  <Tabs.Panel value="profile" pt="sm">
+                    <Stack>
+                      <TextInput label="Profile ID" value={profileDraft.id} onChange={(e) => setProfileDraft((d) => ({ ...d, id: e.currentTarget.value }))} />
+                      <TextInput label="Title" value={profileDraft.title} onChange={(e) => setProfileDraft((d) => ({ ...d, title: e.currentTarget.value }))} />
+                      <Select
+                        label="Default target kind"
+                        data={[
+                          { value: 'media', label: 'media' },
+                          { value: 'playlist', label: 'playlist' },
+                          { value: 'block', label: 'block' },
+                          { value: 'channel', label: 'channel' },
+                        ]}
+                        value={profileDraft.defaultTargetKind}
+                        onChange={(value) =>
+                          setProfileDraft((d) => ({
+                            ...d,
+                            defaultTargetKind:
+                              (value as 'media' | 'playlist' | 'block' | 'channel') || d.defaultTargetKind,
+                          }))
+                        }
+                      />
+                      <TextInput
+                        label="Default target id"
+                        value={profileDraft.defaultTargetId}
+                        onChange={(e) => setProfileDraft((d) => ({ ...d, defaultTargetId: e.currentTarget.value }))}
+                      />
+                      <Button
+                        onClick={() => {
+                          if (!profileDraft.id.trim()) return
+                          setDraftStore((store) => ({
+                            ...store,
+                            profiles: [
+                              ...store.profiles.filter((p) => p.id !== profileDraft.id.trim()),
+                              { ...profileDraft, id: profileDraft.id.trim() },
+                            ],
+                          }))
+                          notifications.show({ color: 'teal', title: 'Draft saved', message: `profile:${profileDraft.id.trim()}` })
+                        }}
+                      >
+                        Save Profile Draft
+                      </Button>
+                    </Stack>
+                  </Tabs.Panel>
+                </Tabs>
+              </Paper>
+
+              <Paper withBorder radius="md" p="md">
+                <Group justify="space-between" mb="sm">
+                  <Title order={4}>Draft Hierarchy</Title>
+                  <Group gap="xs">
+                    <Button
+                      variant="light"
+                      color="blue"
+                      loading={builderBusy}
+                      onClick={loadDraftsFromControlDb}
+                    >
+                      Load from DB
+                    </Button>
+                    <Button
+                      variant="light"
+                      color="teal"
+                      loading={builderBusy}
+                      onClick={pushDraftsToControlDb}
+                    >
+                      Push to DB
+                    </Button>
+                    <Button
+                      variant="light"
+                      color="gray"
+                      disabled={builderBusy}
+                      onClick={() => setDraftStore(EMPTY_DRAFTS)}
+                    >
+                      Clear
+                    </Button>
+                    <Button
+                      leftSection={<IconDownload size={16} />}
+                      disabled={builderBusy}
+                      onClick={exportDrafts}
+                    >
+                      Export JSON
+                    </Button>
+                  </Group>
+                </Group>
+                <JsonInput
+                  value={JSON.stringify(draftStore, null, 2)}
+                  autosize
+                  minRows={24}
+                  formatOnBlur
+                  styles={{ input: { fontFamily: 'monospace', fontSize: 12 } }}
+                />
+              </Paper>
+            </SimpleGrid>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="catalog" pt="md">
+            <Paper withBorder radius="md" p="md">
+              <Group justify="space-between" mb="sm">
+                <Title order={4}>Catalog & Profile Snapshot</Title>
+                <Button
+                  variant="light"
+                  leftSection={<IconRefresh size={16} />}
+                  onClick={() => setCatalogReloadToken((v) => v + 1)}
+                >
+                  Reload
+                </Button>
+              </Group>
+              <SimpleGrid cols={{ base: 1, lg: 2 }}>
+                <Card withBorder>
+                  <Text fw={700} mb="xs">
+                    Catalog Counts
+                  </Text>
+                  <Code block>
+                    {JSON.stringify(catalog?.counts ?? {}, null, 2)}
+                  </Code>
+                </Card>
+                <Card withBorder>
+                  <Text fw={700} mb="xs">
+                    Profiles ({profiles.length})
+                  </Text>
+                  <Code block style={{ maxHeight: 260, overflow: 'auto' }}>
+                    {JSON.stringify(
+                      profiles.map((p) => ({ id: p.id, file: p.file, overrides: p.overridePis.length })),
+                      null,
+                      2
+                    )}
+                  </Code>
+                </Card>
+              </SimpleGrid>
+            </Paper>
+          </Tabs.Panel>
+        </Tabs>
+      </AppShell.Main>
+
+      <Drawer
+        opened={applyOpen}
+        onClose={() => setApplyOpen(false)}
+        position="right"
+        size={460}
+        title="Apply Target to Selected Nodes"
+      >
+        <Stack>
+          <Text size="sm" c="dimmed">
+            Selected: {selectedNodeIds.length} node(s)
+          </Text>
+          <Select
+            label="Target kind"
+            data={[
+              { value: 'profile', label: 'profile' },
+              { value: 'channel', label: 'channel' },
+              { value: 'block', label: 'block' },
+              { value: 'playlist', label: 'playlist' },
+              { value: 'media', label: 'media' },
+            ]}
+            value={applyKind}
+            onChange={(value) => {
+              const next = (value as OpsApplyTarget) || 'profile'
+              setApplyKind(next)
+              setApplyId('')
+            }}
+          />
+          <Select
+            label="Target id"
+            placeholder="Search target id"
+            searchable
+            data={currentApplyOptions}
+            value={applyId}
+            onChange={(value) => setApplyId(value || '')}
+          />
+          <Divider label="Options" labelPosition="left" />
+          <Select
+            label="mode"
+            data={[
+              { value: 'inherit', label: 'inherit' },
+              { value: 'guide', label: 'guide' },
+              { value: 'gallery', label: 'gallery' },
+            ]}
+            value={optMode}
+            onChange={(v) => setOptMode((v as OptionMode) || 'inherit')}
+          />
+          <SimpleGrid cols={2}>
+            <Select
+              label="lock"
+              data={[
+                { value: 'inherit', label: 'inherit' },
+                { value: 'on', label: 'on' },
+                { value: 'off', label: 'off' },
+              ]}
+              value={optLock}
+              onChange={(v) => setOptLock((v as OptionBool) || 'inherit')}
+            />
+            <Select
+              label="qr"
+              data={[
+                { value: 'inherit', label: 'inherit' },
+                { value: 'on', label: 'on' },
+                { value: 'off', label: 'off' },
+              ]}
+              value={optQr}
+              onChange={(v) => setOptQr((v as OptionBool) || 'inherit')}
+            />
+            <Select
+              label="playlist flag"
+              data={[
+                { value: 'inherit', label: 'inherit' },
+                { value: 'on', label: 'on' },
+                { value: 'off', label: 'off' },
+              ]}
+              value={optPlaylist}
+              onChange={(v) => setOptPlaylist((v as OptionBool) || 'inherit')}
+            />
+            <Select
+              label="nosplash"
+              data={[
+                { value: 'inherit', label: 'inherit' },
+                { value: 'on', label: 'on' },
+                { value: 'off', label: 'off' },
+              ]}
+              value={optNosplash}
+              onChange={(v) => setOptNosplash((v as OptionBool) || 'inherit')}
+            />
+          </SimpleGrid>
+          <SimpleGrid cols={2}>
+            <Select
+              label="hud"
+              data={[
+                { value: 'inherit', label: 'inherit' },
+                { value: 'always', label: 'always' },
+                { value: 'start', label: 'start' },
+                { value: 'never', label: 'never' },
+              ]}
+              value={optHud}
+              onChange={(v) => setOptHud((v as OptionHud) || 'inherit')}
+            />
+            <NumberInput
+              label="hud sec"
+              value={optHudSec}
+              onChange={(value) =>
+                setOptHudSec(
+                  typeof value === 'number' && Number.isFinite(value) ? value : ''
+                )
+              }
+              min={1}
+              max={120}
+              placeholder="inherit"
+            />
+            <Select
+              label="display rotate"
+              data={[
+                { value: 'inherit', label: 'inherit' },
+                { value: '0', label: '0' },
+                { value: '90', label: '90' },
+                { value: '180', label: '180' },
+                { value: '270', label: '270' },
+              ]}
+              value={optRotate}
+              onChange={(v) => setOptRotate((v as OptionRotate) || 'inherit')}
+            />
+            <TextInput label="theme" value={optTheme} onChange={(e) => setOptTheme(e.currentTarget.value)} />
+          </SimpleGrid>
+          <Group justify="space-between">
+            <Button variant="light" onClick={() => setApplyOpen(false)}>
+              Close
+            </Button>
+            <Button leftSection={<IconAdjustments size={16} />} onClick={runApply}>
+              Apply to selected
+            </Button>
+          </Group>
+          {applyResult ? (
+            <Paper withBorder p="sm">
+              <Text fw={600} mb={4}>
+                Last apply
+              </Text>
+              <Text size="sm" c={applyResult.ok ? 'teal' : 'orange'}>
+                {summarizeApplyResult(applyResult)}
+              </Text>
+            </Paper>
+          ) : null}
+        </Stack>
+      </Drawer>
+
+      <Modal
+        opened={Boolean(selectedNode)}
+        onClose={() => setActiveNodeId(null)}
+        title={selectedNode ? `Node Inspector • ${selectedNode.id}` : 'Node Inspector'}
+        size="xl"
+      >
+        {selectedNode ? (
+          <Stack>
+            <SimpleGrid cols={2}>
+              <Card withBorder>
+                <Text size="sm" c="dimmed">
+                  Runtime target
+                </Text>
+                <Text fw={700}>{parseTargetFromKioskUrl(selectedNode.chibaNode.kioskUrl ?? null)}</Text>
+                <Text size="xs" c="dimmed" ff="monospace">
+                  {selectedNode.chibaNode.kioskUrl || '—'}
+                </Text>
+              </Card>
+              <Card withBorder>
+                <Text size="sm" c="dimmed">
+                  Connectivity
+                </Text>
+                <Group gap={6} mt={6}>
+                  {statusBadge(selectedNode.dnsOk, 'DNS', 'DNS')}
+                  {statusBadge(selectedNode.ping.ok, 'Ping', 'Ping')}
+                  {statusBadge(selectedNode.tcp.ssh22.ok, 'SSH', 'SSH')}
+                  {statusBadge(selectedNode.http.nodeStatus.ok, 'Node API', 'Node API')}
+                </Group>
+              </Card>
+            </SimpleGrid>
+            <JsonInput
+              label="Raw node state"
+              value={JSON.stringify(selectedNode, null, 2)}
+              autosize
+              minRows={18}
+              formatOnBlur
+            />
+          </Stack>
+        ) : null}
+      </Modal>
+    </AppShell>
+  )
 }

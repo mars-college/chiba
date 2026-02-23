@@ -57,9 +57,9 @@ import {
   type BuilderMode,
 } from "../store/uiStore";
 import {
-  DRAFT_STORAGE_KEY,
   EMPTY_BLOCK_DRAFT,
   EMPTY_CHANNEL_DRAFT,
+  EMPTY_DRAFTS,
   EMPTY_PLAYLIST_DRAFT,
   EMPTY_PROFILE_DRAFT,
   TABLE_PAGE_SIZE,
@@ -70,7 +70,6 @@ import {
   inferUploadPreviewKind,
   isLikelyVideoSource,
   isVideoMedia,
-  loadDraftStore,
   mediaPreviewSource,
   nodeDraftFromRecord,
   paginateRows,
@@ -143,9 +142,7 @@ export function useOpsAppModel() {
   const [lastTick, setLastTick] = useState<number | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [applyResult, setApplyResult] = useState<OpsApplyResponse | null>(null);
-  const [draftStore, setDraftStore] = useState<DraftStore>(() =>
-    loadDraftStore()
-  );
+  const [draftStore, setDraftStore] = useState<DraftStore>(EMPTY_DRAFTS);
   const [serverSnapshot, setServerSnapshot] = useState<ResourcePayload | null>(
     null
   );
@@ -251,10 +248,6 @@ export function useOpsAppModel() {
   const [profileDraft, setProfileDraft] =
     useState<DraftProfile>(EMPTY_PROFILE_DRAFT);
 
-  useEffect(() => {
-    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftStore));
-  }, [draftStore]);
-
   const refreshCatalogAndProfiles = useCallback(async () => {
     try {
       const profilesRes = await fetchProfiles();
@@ -274,6 +267,7 @@ export function useOpsAppModel() {
       if (!silent) setLoadingSnapshot(true);
       try {
         const result = await fetchResourceSnapshot();
+        setDraftStore(fromResourcePayload(result.snapshot));
         setServerSnapshot(result.snapshot);
       } catch (error) {
         notifications.show({
@@ -2023,6 +2017,10 @@ export function useOpsAppModel() {
       selectedMediaDetail ? mediaPreviewSource(selectedMediaDetail) : null,
     [selectedMediaDetail]
   );
+  const selectedMediaDetailIsVideo = useMemo(
+    () => (selectedMediaDetail ? isVideoMedia(selectedMediaDetail) : false),
+    [selectedMediaDetail]
+  );
 
   const deleteMediaItem = useCallback(
     async (mediaId: string) => {
@@ -2788,6 +2786,7 @@ export function useOpsAppModel() {
     setMediaLibrarySection,
     selectedMediaDetail,
     selectedMediaDetailPreviewSrc,
+    selectedMediaDetailIsVideo,
     openQuickSend,
     mediaDeleteBusy,
     deleteMediaItem,
